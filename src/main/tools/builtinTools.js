@@ -3,7 +3,6 @@ import fsSync from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { dialog } from "electron";
 import { classifyBashCommand } from "../bashSafety.js";
 import { assertWritableTarget } from "@shared/memoryPaths.js";
 import { resolveCwd, resolvePathInWorkspace } from "../workspacePaths.js";
@@ -16,19 +15,6 @@ function fnSchema(name, description, parameters) {
         type: "function",
         function: { name, description, parameters },
     };
-}
-
-async function confirmToolExecution(toolName, details) {
-    const result = await dialog.showMessageBox({
-        type: "question",
-        buttons: ["拒绝", "允许"],
-        defaultId: 1,
-        cancelId: 0,
-        title: `允许执行工具 ${toolName}?`,
-        message: toolName,
-        detail: details,
-    });
-    return result.response === 1;
 }
 
 async function runBash(command, cwd) {
@@ -63,7 +49,13 @@ async function runBash(command, cwd) {
     }
 }
 
-export function createBuiltinTools({ getWorkspace, workspaceMemory, skillLoader, getAgentTools }) {
+export function createBuiltinTools({
+    getWorkspace,
+    workspaceMemory,
+    skillLoader,
+    getAgentTools,
+    confirmToolExecution,
+}) {
     const tools = [
         {
             name: "read_file",
@@ -333,4 +325,3 @@ export function createBuiltinTools({ getWorkspace, workspaceMemory, skillLoader,
     return tools;
 }
 
-export { confirmToolExecution };

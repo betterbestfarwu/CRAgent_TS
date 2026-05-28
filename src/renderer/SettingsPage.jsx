@@ -1,4 +1,59 @@
 import { useEffect, useMemo, useState } from "react";
+import { DotGridIcon } from "./DotGridAnimator.jsx";
+
+const ICON_EYE = (
+  <svg
+    viewBox="0 0 24 24"
+    width="14"
+    height="14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+const ICON_REFRESH = (
+  <svg
+    viewBox="0 0 24 24"
+    width="14"
+    height="14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+    <path d="M21 3v5h-5" />
+  </svg>
+);
+
+const ICON_EYE_OFF = (
+  <svg
+    viewBox="0 0 24 24"
+    width="14"
+    height="14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+    <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.746 10.746 0 0 1-1.444 2.49" />
+    <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
+    <path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
+    <path d="m2 2 20 20" />
+  </svg>
+);
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -250,7 +305,9 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                   setSelectedModelId("");
                 }}
               >
-                <span className="settings-provider-icon">☁</span>
+                <span className="settings-provider-icon">
+                  <DotGridIcon size="xs" />
+                </span>
                 <span>{providerKey}</span>
               </button>
             ))}
@@ -271,12 +328,13 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                       />
                       <button
                         type="button"
-                        className="settings-inline-btn"
+                        className="settings-inline-btn settings-inline-btn-black"
                         title="刷新模型列表"
+                        aria-label="刷新模型列表"
                         onClick={() => void handleSyncModels()}
                         disabled={syncLoading}
                       >
-                        ↻
+                        {ICON_REFRESH}
                       </button>
                     </div>
                   </label>
@@ -293,9 +351,10 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                         type="button"
                         className="settings-inline-btn"
                         title={showApiKey ? "隐藏 API Key" : "显示 API Key"}
+                        aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
                         onClick={() => setShowApiKey((prev) => !prev)}
                       >
-                        {showApiKey ? "🙈" : "👁"}
+                        {showApiKey ? ICON_EYE_OFF : ICON_EYE}
                       </button>
                     </div>
                   </label>
@@ -330,7 +389,8 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                   </div>
                 </div>
 
-                <div className="settings-model-list">
+                <div className="settings-model-list-shell">
+                  <div className="settings-model-list">
                   {filteredModels.map((model) => (
                     <div
                       key={model.id}
@@ -351,6 +411,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                       </span>
                     </div>
                   ))}
+                  </div>
                 </div>
 
                 {modelsError ? <p className="settings-error">{modelsError}</p> : null}
@@ -427,54 +488,56 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
               />
             </label>
 
-            <label className="settings-agent-toggle">
-              <input
-                type="checkbox"
-                checked={Boolean(defaultAgentListItem?.tools?.enable_tools)}
-                onChange={(e) =>
-                  updateDefaultAgentListItem({
-                    tools: { enable_tools: e.target.checked },
-                  })
-                }
-              />
-              <span>Enable tools</span>
-            </label>
-            <label className="settings-agent-toggle">
-              <input
-                type="checkbox"
-                checked={Boolean(defaultAgentListItem?.tools?.enable_file_tools)}
-                onChange={(e) =>
-                  updateDefaultAgentListItem({
-                    tools: { enable_file_tools: e.target.checked },
-                  })
-                }
-              />
-              <span>Enable file tools</span>
-            </label>
-            <label className="settings-agent-toggle">
-              <input
-                type="checkbox"
-                checked={Boolean(defaultAgentListItem?.tools?.enable_skills)}
-                onChange={(e) =>
-                  updateDefaultAgentListItem({
-                    tools: { enable_skills: e.target.checked },
-                  })
-                }
-              />
-              <span>Enable skills</span>
-            </label>
-            <label className="settings-agent-toggle">
-              <input
-                type="checkbox"
-                checked={Boolean(defaultAgentListItem?.tools?.allow_sub_agents)}
-                onChange={(e) =>
-                  updateDefaultAgentListItem({
-                    tools: { allow_sub_agents: e.target.checked },
-                  })
-                }
-              />
-              <span>Allow sub-agents</span>
-            </label>
+            <div className="settings-agent-toggles">
+              <label className="settings-agent-toggle">
+                <input
+                  type="checkbox"
+                  checked={Boolean(defaultAgentListItem?.tools?.enable_tools)}
+                  onChange={(e) =>
+                    updateDefaultAgentListItem({
+                      tools: { enable_tools: e.target.checked },
+                    })
+                  }
+                />
+                <span>Enable tools</span>
+              </label>
+              <label className="settings-agent-toggle">
+                <input
+                  type="checkbox"
+                  checked={Boolean(defaultAgentListItem?.tools?.enable_file_tools)}
+                  onChange={(e) =>
+                    updateDefaultAgentListItem({
+                      tools: { enable_file_tools: e.target.checked },
+                    })
+                  }
+                />
+                <span>Enable file tools</span>
+              </label>
+              <label className="settings-agent-toggle">
+                <input
+                  type="checkbox"
+                  checked={Boolean(defaultAgentListItem?.tools?.enable_skills)}
+                  onChange={(e) =>
+                    updateDefaultAgentListItem({
+                      tools: { enable_skills: e.target.checked },
+                    })
+                  }
+                />
+                <span>Enable skills</span>
+              </label>
+              <label className="settings-agent-toggle">
+                <input
+                  type="checkbox"
+                  checked={Boolean(defaultAgentListItem?.tools?.allow_sub_agents)}
+                  onChange={(e) =>
+                    updateDefaultAgentListItem({
+                      tools: { allow_sub_agents: e.target.checked },
+                    })
+                  }
+                />
+                <span>Allow sub-agents</span>
+              </label>
+            </div>
 
             <button
               type="button"

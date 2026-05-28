@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { injectChatLayout } from "./chatLayoutSync.js";
 
 function toWireMessage(message) {
   const toolCalls = message.toolCalls?.map((call) => ({
@@ -26,6 +27,10 @@ export function ChatView({ messages, busy, onDelete }) {
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
+  const syncIframeLayout = useCallback(() => {
+    injectChatLayout(iframeRef.current?.contentDocument ?? null);
+  }, []);
+
   const postToChat = useCallback((fn, arg) => {
     const win = iframeRef.current?.contentWindow;
     if (!win?.app) {
@@ -43,6 +48,14 @@ export function ChatView({ messages, busy, onDelete }) {
   }, [postToChat]);
 
   useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const onLoad = () => syncIframeLayout();
+    iframe.addEventListener("load", onLoad);
+    return () => iframe.removeEventListener("load", onLoad);
+  }, [syncIframeLayout]);
+
+  useEffect(() => {
     const onMessage = (event) => {
       if (event.source !== iframeRef.current?.contentWindow) return;
       const data = event.data;
@@ -50,6 +63,7 @@ export function ChatView({ messages, busy, onDelete }) {
 
       if (data.action === "ready") {
         readyRef.current = true;
+        syncIframeLayout();
         syncMessages();
         postToChat("setBusy", busy);
         const queue = pendingRef.current;
@@ -66,7 +80,7 @@ export function ChatView({ messages, busy, onDelete }) {
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [busy, onDelete, postToChat, syncMessages]);
+  }, [busy, onDelete, postToChat, syncIframeLayout, syncMessages]);
 
   useEffect(() => {
     if (!readyRef.current) return;
@@ -83,7 +97,7 @@ export function ChatView({ messages, busy, onDelete }) {
       ref={iframeRef}
       className="chat-frame"
       title="CRAgent chat"
-      src="./chat/chat.html"
+      src="./chat/chat.html?v=3"
     />
   );
 }

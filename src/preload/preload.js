@@ -7,6 +7,7 @@ function subscribe(channel, callback) {
 }
 const api = {
     getSnapshot: () => ipcRenderer.invoke(IPC_CHANNELS.getSnapshot),
+    listSkills: () => ipcRenderer.invoke(IPC_CHANNELS.listSkills),
     getSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getSession, sessionId),
     newSession: () => ipcRenderer.invoke(IPC_CHANNELS.newSession),
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),

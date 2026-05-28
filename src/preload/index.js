@@ -6,7 +6,10 @@ function subscribe(channel, callback) {
     return () => ipcRenderer.off(channel, listener);
 }
 const api = {
+    isDesktop: true,
+    platform: process.platform,
     getSnapshot: () => ipcRenderer.invoke(IPC_CHANNELS.getSnapshot),
+    listSkills: () => ipcRenderer.invoke(IPC_CHANNELS.listSkills),
     getSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getSession, sessionId),
     newSession: () => ipcRenderer.invoke(IPC_CHANNELS.newSession),
     deleteSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.deleteSession, sessionId),

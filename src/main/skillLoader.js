@@ -152,6 +152,13 @@ export class SkillLoader {
         return this.skills.map((s) => `- ${s.name}: ${s.description}`).join("\n");
     }
 
+    listSummaries() {
+        return this.skills.map((s) => ({
+            name: s.name,
+            description: s.description || "",
+        }));
+    }
+
     loadFullText(name) {
         const key = String(name || "").trim();
         const skill = this.byName.get(key);

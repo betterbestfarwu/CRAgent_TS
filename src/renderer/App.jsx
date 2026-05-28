@@ -1,7 +1,16 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "./ChatView.jsx";
+import {
+  buildSlashMenuNavItems,
+  ComposerSlashMenu,
+  filterSlashCommands,
+  filterSlashSkills,
+} from "./ComposerSlashMenu.jsx";
 import { Sidebar } from "./Sidebar.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
+import { ConfirmDialog } from "./ConfirmDialog.jsx";
+import { TitleBar } from "./TitleBar.jsx";
+import { displayTitle } from "./sidebarUtils.js";
 import { titleFromFirstUserMessage } from "@shared/sessionTitle";
 import { estimateTokens, formatTokens } from "./tokenEstimator";
 
@@ -22,21 +31,73 @@ function sortSessions(sessions) {
   return [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+function sessionMessagesEqual(left, right) {
+  if (!left || !right || left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i].id !== right[i].id) return false;
+  }
+  return true;
+}
+
 export function App() {
   const [sessions, setSessions] = useState([]);
   const [currentSession, setCurrentSession] = useState(null);
   const [config, setConfig] = useState(null);
+  const [skills, setSkills] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [busyBySession, setBusyBySession] = useState({});
   const [page, setPage] = useState("chat");
-  const [error, setError] = useState("");
+  const [sessionError, setSessionError] = useState(null);
+  const [compactLayout, setCompactLayout] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [confirmRequest, setConfirmRequest] = useState(null);
   const sessionIdRef = useRef(null);
+  const sessionErrorTimerRef = useRef(null);
   const textareaRef = useRef(null);
   const busyBySessionRef = useRef(new Map());
 
+  const askConfirm = useCallback((options) => {
+    return new Promise((resolve) => {
+      setConfirmRequest({ ...options, resolve });
+    });
+  }, []);
+
+  const clearSessionError = useCallback(() => {
+    if (sessionErrorTimerRef.current) {
+      clearTimeout(sessionErrorTimerRef.current);
+      sessionErrorTimerRef.current = null;
+    }
+    setSessionError(null);
+  }, []);
+
+  const showSessionError = useCallback(
+    (message, sessionId) => {
+      if (!message) return;
+      clearSessionError();
+      setSessionError({ message, sessionId });
+      sessionErrorTimerRef.current = setTimeout(() => {
+        setSessionError(null);
+        sessionErrorTimerRef.current = null;
+      }, 3000);
+    },
+    [clearSessionError],
+  );
+
+  const refreshSkills = useCallback(async () => {
+    if (!window.cragent?.listSkills) return;
+    try {
+      const next = await window.cragent.listSkills();
+      setSkills(Array.isArray(next) ? next : []);
+    } catch {
+      // Ignore skill loading failures in composer.
+    }
+  }, []);
+
   async function loadSnapshot() {
     if (!window.cragent) {
-      setError("主进程桥接未就绪，请重启应用。");
+      showSessionError("主进程桥接未就绪，请重启应用。");
       return;
     }
     try {
@@ -46,19 +107,21 @@ export function App() {
       setSessions(sorted);
       const sessionId = snapshot.currentSessionId || sorted[0]?.id;
       if (!sessionId) {
-        setError("没有可用会话。");
+        showSessionError("没有可用会话。");
         return;
       }
       const session = await window.cragent.getSession(sessionId);
       setCurrentSession(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      showSessionError(err instanceof Error ? err.message : String(err));
     }
   }
 
   useEffect(() => {
     sessionIdRef.current = currentSession?.meta.id ?? null;
   }, [currentSession?.meta.id]);
+
+  useEffect(() => () => clearSessionError(), [clearSessionError]);
 
   function resizeComposer() {
     const el = textareaRef.current;
@@ -75,8 +138,25 @@ export function App() {
   }, [input, page]);
 
   useEffect(() => {
+    const media = window.matchMedia("(max-width: 834px)");
+    const updateLayout = () => {
+      const compact = media.matches;
+      setCompactLayout(compact);
+      setSidebarOpen(!compact);
+    };
+    updateLayout();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", updateLayout);
+      return () => media.removeEventListener("change", updateLayout);
+    }
+    media.addListener(updateLayout);
+    return () => media.removeListener(updateLayout);
+  }, []);
+
+  useEffect(() => {
     if (!window.cragent) return;
     void loadSnapshot();
+    void refreshSkills();
 
     const offMessage = window.cragent.onMessageAppended(({ sessionId, message }) => {
       setCurrentSession((prev) => {
@@ -103,7 +183,17 @@ export function App() {
     });
 
     const offSession = window.cragent.onSessionChanged((session) => {
-      setCurrentSession(session);
+      clearSessionError();
+      setCurrentSession((prev) => {
+        if (
+          prev &&
+          prev.meta.id === session.meta.id &&
+          sessionMessagesEqual(prev.messages, session.messages)
+        ) {
+          return { ...session, messages: prev.messages };
+        }
+        return session;
+      });
       setPage("chat");
       setSessions((prev) => {
         const has = prev.some((s) => s.id === session.meta.id);
@@ -117,15 +207,19 @@ export function App() {
 
     const offBusy = window.cragent.onBusyChanged(({ sessionId, busy: nextBusy }) => {
       busyBySessionRef.current.set(sessionId, nextBusy);
+      setBusyBySession((prev) => ({ ...prev, [sessionId]: nextBusy }));
       if (sessionIdRef.current === sessionId) {
         setBusy(nextBusy);
       }
     });
 
     const offError = window.cragent.onError(({ message, sessionId }) => {
-      setError(message);
+      if (!sessionId || sessionIdRef.current === sessionId) {
+        showSessionError(message, sessionId);
+      }
       if (sessionId) {
         busyBySessionRef.current.set(sessionId, false);
+        setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
         if (sessionIdRef.current === sessionId) {
           setBusy(false);
         }
@@ -147,6 +241,12 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!busy) {
+      void refreshSkills();
+    }
+  }, [busy, refreshSkills]);
+
   const currentModel = useMemo(() => {
     if (!config || !currentSession) return "";
     return `${currentSession.meta.providerKey}/${currentSession.meta.modelId}`;
@@ -164,6 +264,66 @@ export function App() {
     return `Context ${pct}% · ${formatTokens(used)} / ${formatTokens(cap)}`;
   }, [currentSession, config]);
 
+  const slashQuery = useMemo(() => {
+    const match = input.match(/^\/([^\s]*)$/);
+    return match ? match[1].toLowerCase() : null;
+  }, [input]);
+
+  const slashFilterQuery = slashQuery === null ? "" : slashQuery.trim();
+
+  const filteredSkills = useMemo(() => {
+    if (slashQuery === null) return [];
+    return filterSlashSkills(skills, slashFilterQuery);
+  }, [slashQuery, slashFilterQuery, skills]);
+
+  const filteredCommands = useMemo(() => {
+    if (slashQuery === null) return [];
+    return filterSlashCommands(slashFilterQuery);
+  }, [slashQuery, slashFilterQuery]);
+
+  const [slashMenuIndex, setSlashMenuIndex] = useState(0);
+  const [skillsExpanded, setSkillsExpanded] = useState(false);
+
+  const slashNavItems = useMemo(() => {
+    if (slashQuery === null) return [];
+    return buildSlashMenuNavItems(filteredSkills, filteredCommands, skillsExpanded);
+  }, [slashQuery, filteredSkills, filteredCommands, skillsExpanded]);
+
+  useEffect(() => {
+    setSlashMenuIndex(0);
+    setSkillsExpanded(false);
+  }, [slashQuery]);
+
+  useEffect(() => {
+    if (!slashNavItems.length) {
+      setSlashMenuIndex(0);
+      return;
+    }
+    if (slashMenuIndex >= slashNavItems.length) {
+      setSlashMenuIndex(0);
+    }
+  }, [slashNavItems, slashMenuIndex]);
+
+  const showSlashMenu = page === "chat" && !busy && slashQuery !== null;
+
+  function applySlashPick(name) {
+    const next = `/${name} `;
+    setInput(next);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      resizeComposer();
+    });
+  }
+
+  function activateSlashMenuItem(item) {
+    if (!item) return;
+    if (item.kind === "expand") {
+      setSkillsExpanded(true);
+      return;
+    }
+    applySlashPick(item.name);
+  }
+
   async function handleSend(text = input) {
     if (!currentSession || page !== "chat") return;
     const trimmed = text.trim();
@@ -176,21 +336,33 @@ export function App() {
   }
 
   async function handleNewChat() {
+    clearSessionError();
     const next = await window.cragent.newSession();
     setCurrentSession(next);
     setSessions((prev) => sortSessions([next.meta, ...prev]));
     setPage("chat");
+    if (compactLayout) setSidebarOpen(false);
   }
 
   async function handleSwitchSession(sessionId) {
+    clearSessionError();
     const session = await window.cragent.getSession(sessionId);
     setCurrentSession(session);
     setBusy(busyBySessionRef.current.get(sessionId) ?? false);
     setPage("chat");
+    if (compactLayout) setSidebarOpen(false);
   }
 
   async function handleDeleteSession(meta) {
-    if (!window.confirm(`删除「${meta.title || "新对话"}」？此操作无法撤销。`)) {
+    const title = meta.title || "新对话";
+    const confirmed = await askConfirm({
+      message: `删除「${title}」？`,
+      detail: "此操作无法撤销。",
+      confirmLabel: "删除",
+      cancelLabel: "取消",
+      destructive: true,
+    });
+    if (!confirmed) {
       return;
     }
     const session = await window.cragent.deleteSession(meta.id);
@@ -205,6 +377,7 @@ export function App() {
       setCurrentSession(session);
       setPage("chat");
     }
+    if (compactLayout) setSidebarOpen(false);
   }
 
   async function handleModelChange(nextModel) {
@@ -221,6 +394,7 @@ export function App() {
     const updated = await window.cragent.updateConfig(next);
     setConfig(updated);
     setPage("chat");
+    if (compactLayout) setSidebarOpen(false);
   }
 
   function handleDeleteMessage(messageId) {
@@ -236,17 +410,81 @@ export function App() {
   const active = Boolean(currentSession && currentSession.messages.length > 0);
   const onSettingsPage = page === "settings";
 
+  const titleBarLabel = useMemo(() => {
+    if (onSettingsPage) return "设置";
+    if (currentSession?.meta) return displayTitle(currentSession.meta);
+    return "CRAgent";
+  }, [onSettingsPage, currentSession?.meta]);
+
+  function handleTitlebarToggleSidebar() {
+    if (compactLayout) {
+      setSidebarOpen((open) => !open);
+      return;
+    }
+    setSidebarHidden((hidden) => !hidden);
+  }
+
+  function handleTitlebarFocusSearch() {
+    if (compactLayout) {
+      setSidebarOpen(true);
+    } else if (sidebarHidden) {
+      setSidebarHidden(false);
+    }
+    requestAnimationFrame(() => {
+      document.getElementById("sidebar-search-input")?.focus();
+    });
+  }
+
+  const visibleSessionError = useMemo(() => {
+    if (!sessionError?.message) return "";
+    if (
+      sessionError.sessionId &&
+      sessionError.sessionId !== currentSession?.meta.id
+    ) {
+      return "";
+    }
+    return sessionError.message;
+  }, [sessionError, currentSession?.meta.id]);
+
   return (
-    <div className="app">
+    <div className="app-shell">
+      <TitleBar
+        title={titleBarLabel}
+        settingsActive={onSettingsPage}
+        onToggleSidebar={handleTitlebarToggleSidebar}
+        onFocusSearch={handleTitlebarFocusSearch}
+        onNewChat={() => void handleNewChat()}
+        onOpenSettings={() => {
+          setPage("settings");
+          if (compactLayout) setSidebarOpen(false);
+        }}
+      />
+      <div
+        className={`app${compactLayout ? " app-compact" : ""}${sidebarHidden ? " app-sidebar-hidden" : ""}`}
+      >
       <Sidebar
+        open={sidebarOpen}
         sessions={sessions}
         currentSessionId={currentSession?.meta.id}
+        busyBySession={busyBySession}
         settingsActive={onSettingsPage}
         onSelect={(sessionId) => void handleSwitchSession(sessionId)}
         onDelete={(meta) => void handleDeleteSession(meta)}
         onNewChat={() => void handleNewChat()}
-        onOpenSettings={() => setPage("settings")}
+        onOpenSettings={() => {
+          setPage("settings");
+          if (compactLayout) setSidebarOpen(false);
+        }}
       />
+      {compactLayout && sidebarOpen ? (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          title="关闭侧栏"
+          aria-label="关闭侧栏"
+          onClick={() => setSidebarOpen(false)}
+        />
+      ) : null}
 
       <main className={`main${onSettingsPage ? " main-settings" : ""}`}>
         {onSettingsPage && config ? (
@@ -268,6 +506,7 @@ export function App() {
           />
         ) : (
           <div className="chat-layout">
+            <div className="chat-content-column">
             <div className="chat-history">
               {!active ? (
                 <div className="empty-state">
@@ -287,10 +526,31 @@ export function App() {
                   onDelete={handleDeleteMessage}
                 />
               )}
+              {visibleSessionError ? (
+                <div
+                  className="chat-error-toast"
+                  role="alert"
+                  onClick={clearSessionError}
+                >
+                  {visibleSessionError}
+                </div>
+              ) : null}
             </div>
 
             <div className="composer">
-              <div className="composer-box">
+              <div className="composer-shell">
+                {showSlashMenu ? (
+                  <ComposerSlashMenu
+                    skills={skills}
+                    query={slashFilterQuery}
+                    selectedIndex={slashMenuIndex}
+                    skillsExpanded={skillsExpanded}
+                    onSkillsExpandedChange={setSkillsExpanded}
+                    onPick={applySlashPick}
+                    onHoverIndex={setSlashMenuIndex}
+                  />
+                ) : null}
+                <div className="composer-box">
                 <textarea
                   ref={textareaRef}
                   className="composer-input"
@@ -300,6 +560,28 @@ export function App() {
                   onInput={resizeComposer}
                   placeholder="发消息..."
                   onKeyDown={(e) => {
+                    if (showSlashMenu && slashNavItems.length) {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setSlashMenuIndex((prev) => Math.min(prev + 1, slashNavItems.length - 1));
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setSlashMenuIndex((prev) => Math.max(prev - 1, 0));
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setInput("");
+                        return;
+                      }
+                      if (e.key === "Tab" || (e.key === "Enter" && !e.altKey)) {
+                        e.preventDefault();
+                        activateSlashMenuItem(slashNavItems[slashMenuIndex]);
+                        return;
+                      }
+                    }
                     if (e.key === "Enter" && !e.altKey) {
                       e.preventDefault();
                       void handleSend();
@@ -336,21 +618,33 @@ export function App() {
                     className="composer-send"
                     onClick={() => void handleSend()}
                     disabled={busy}
-                    aria-label="发送"
+                    title={busy ? "正在发送" : "发送"}
+                    aria-label={busy ? "正在发送" : "发送"}
                   >
                     {busy ? "…" : "↑"}
                   </button>
                 </div>
+                </div>
               </div>
+            </div>
             </div>
           </div>
         )}
       </main>
-
-      {error ? (
-        <div className="error-toast" onClick={() => setError("")}>
-          {error}
-        </div>
+      </div>
+      {confirmRequest ? (
+        <ConfirmDialog
+          title={confirmRequest.title}
+          message={confirmRequest.message}
+          detail={confirmRequest.detail}
+          confirmLabel={confirmRequest.confirmLabel}
+          cancelLabel={confirmRequest.cancelLabel}
+          destructive={confirmRequest.destructive}
+          onClose={(confirmed) => {
+            confirmRequest.resolve(confirmed);
+            setConfirmRequest(null);
+          }}
+        />
       ) : null}
     </div>
   );

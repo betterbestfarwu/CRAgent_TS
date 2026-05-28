@@ -1,6 +1,6 @@
-import { app, BrowserWindow, Menu, ipcMain, nativeImage } from "electron";
-import fs from "node:fs";
+import { app, BrowserWindow, Menu, ipcMain } from "electron";
 import path from "node:path";
+import { applyAppIcon } from "./appIcon.js";
 import { IPC_CHANNELS } from "@shared/ipc";
 import { getAppPaths } from "./appPaths";
 import { ConfigStore } from "./configStore";
@@ -23,27 +23,24 @@ let sessionStore;
 let runtime;
 let skillLoader;
 
-function resolveAppIconPath() {
-    const candidates = [
-        path.join(__dirname, "../../build/icon.png"),
-        path.join(__dirname, "../../build/icon.icns"),
-    ];
-    return candidates.find((candidate) => fs.existsSync(candidate));
-}
-
-function applyAppIcon() {
-    const iconPath = resolveAppIconPath();
-    if (!iconPath) {
-        return;
+function windowChromeOptions() {
+    if (process.platform === "darwin") {
+        return {
+            titleBarStyle: "hiddenInset",
+            trafficLightPosition: { x: 14, y: 12 },
+        };
     }
-    const image = nativeImage.createFromPath(iconPath);
-    if (image.isEmpty()) {
-        return;
+    if (process.platform === "win32") {
+        return {
+            titleBarStyle: "hidden",
+            titleBarOverlay: {
+                color: "#f3f3f3",
+                symbolColor: "#141414",
+                height: 40,
+            },
+        };
     }
-    if (process.platform === "darwin" && app.dock) {
-        app.dock.setIcon(image);
-    }
-    return image;
+    return {};
 }
 
 function createWindow() {
@@ -54,6 +51,8 @@ function createWindow() {
         minWidth: 900,
         minHeight: 640,
         title: "CRAgent",
+        backgroundColor: "#f3f3f3",
+        ...windowChromeOptions(),
         ...(icon ? { icon } : {}),
         webPreferences: {
             preload: path.join(__dirname, "../preload/index.js"),
@@ -133,6 +132,7 @@ function registerIpc() {
             config: configStore.get(),
         };
     });
+    ipcMain.handle(IPC_CHANNELS.listSkills, () => skillLoader.listSummaries());
     ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId) => sessionStore.get(sessionId));
     ipcMain.handle(IPC_CHANNELS.newSession, () => sessionStore.newSession());
     ipcMain.handle(IPC_CHANNELS.deleteSession, (_event, sessionId) => {
@@ -217,6 +217,7 @@ function bootstrap() {
 }
 
 app.whenReady().then(() => {
+    applyAppIcon();
     bootstrap();
     createWindow();
     buildMenu();

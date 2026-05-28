@@ -1,8 +1,7 @@
-import { confirmToolExecution } from "./tools/builtinTools.js";
-
 export class ToolRegistry {
-    constructor(toolFactory) {
+    constructor(toolFactory, confirmToolExecution) {
         this.toolFactory = toolFactory;
+        this.confirmToolExecution = confirmToolExecution;
     }
 
     activeTools() {
@@ -29,7 +28,10 @@ export class ToolRegistry {
         }
 
         if (tool.requiresConfirmation) {
-            const approved = await confirmToolExecution(tool.name, JSON.stringify(args, null, 2));
+            const approved = await this.confirmToolExecution(
+                tool.name,
+                JSON.stringify(args, null, 2),
+            );
             if (!approved) {
                 return `Error: user declined ${tool.name}`;
             }

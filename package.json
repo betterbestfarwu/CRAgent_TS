@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
     "build": "env -u ELECTRON_RUN_AS_NODE electron-vite build",
+    "build:web": "vite build --config vite.web.config.mjs",
     "start": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
+    "cap:add:ios": "npx cap add ios",
+    "cap:sync:ios": "npm run build:web && npx cap sync ios",
+    "cap:open:ios": "npx cap open ios",
+    "pack:ios": "npm run cap:sync:ios && npm run cap:open:ios",
     "pack": "bash scripts/build-dmg.sh",
     "pack:win": "bash scripts/build-win.sh",
     "test": "node --test test/*.test.js"
@@ -15,12 +20,15 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@capacitor/core": "^8.3.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "uuid": "^14.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.3.4",
+    "@capacitor/ios": "^8.3.4",
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
@@ -50,7 +58,9 @@
     "mac": {
       "icon": "icon.icns",
       "category": "public.app-category.developer-tools",
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "minimumSystemVersion": "10.14.0",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
@@ -62,13 +72,24 @@
         "height": 380
       },
       "contents": [
-        { "x": 140, "y": 200, "type": "file" },
-        { "x": 400, "y": 200, "type": "link", "path": "/Applications" }
+        {
+          "x": 140,
+          "y": 200,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 200,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "win": {
       "icon": "icon.png",
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "artifactName": "${productName}-${version}-win-${arch}.${ext}",
       "signAndEditExecutable": false
     },
@@ -79,7 +100,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "CRAgent",
-      "installerLanguages": ["zh_CN", "en_US"]
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ]
     }
   }
 }

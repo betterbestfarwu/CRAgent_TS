@@ -1,0 +1,332 @@
+import { titleFromFirstUserMessage } from "@shared/sessionTitle";
+
+const CONFIG_KEY = "cragent:web:config";
+const SESSIONS_KEY = "cragent:web:sessions";
+const CURRENT_KEY = "cragent:web:currentSessionId";
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function randomId() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function makeDefaultConfig() {
+  const models = ["gpt-4o-mini", "gpt-5", "claude-opus-4-5", "gemini-2.5-pro"].map((id) => ({
+    id,
+    name: id,
+    description: "",
+    reasoning: false,
+    input: ["text"],
+    cost: {},
+    contextWindow: 128000,
+    maxTokens: 8192,
+    state: true,
+    stream: false,
+  }));
+  return {
+    content_limit: 5000,
+    models: {
+      openai: {
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "",
+        api: "chat/completions",
+        state: true,
+        models,
+      },
+    },
+    agents: {
+      default: {
+        model: { primary: "openai/gpt-4o-mini", fallbacks: [] },
+        workspace: "~/.CRAgent",
+      },
+      list: [
+        {
+          id: "main",
+          name: "main",
+          is_default: true,
+          max_tool_rounds: 12,
+          tools: {
+            enable_tools: true,
+            enable_file_tools: true,
+            enable_skills: true,
+            allow_sub_agents: false,
+          },
+        },
+      ],
+    },
+  };
+}
+
+function parseJson(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function loadConfig() {
+  const parsed = parseJson(localStorage.getItem(CONFIG_KEY) || "");
+  if (parsed && typeof parsed === "object") return parsed;
+  const fallback = makeDefaultConfig();
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(fallback));
+  return fallback;
+}
+
+function saveConfig(config) {
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+}
+
+function loadSessions() {
+  const parsed = parseJson(localStorage.getItem(SESSIONS_KEY) || "");
+  if (Array.isArray(parsed)) return parsed;
+  return [];
+}
+
+function saveSessions(sessions) {
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+}
+
+function defaultModelRef(config) {
+  const primary = config?.agents?.default?.model?.primary || "openai/gpt-4o-mini";
+  const [providerKey = "openai", modelId = "gpt-4o-mini"] = primary.split("/");
+  return { providerKey, modelId };
+}
+
+function makeSession(config) {
+  const timestamp = nowIso();
+  const { providerKey, modelId } = defaultModelRef(config);
+  return {
+    meta: {
+      id: randomId(),
+      title: "新对话",
+      providerKey,
+      modelId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+    messages: [],
+  };
+}
+
+function sortMetasByUpdatedAt(metas) {
+  return [...metas].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function ensureState() {
+  const config = loadConfig();
+  let sessions = loadSessions();
+  if (sessions.length === 0) {
+    sessions = [makeSession(config)];
+    saveSessions(sessions);
+  }
+  let currentSessionId = localStorage.getItem(CURRENT_KEY);
+  if (!currentSessionId || !sessions.some((session) => session.meta.id === currentSessionId)) {
+    currentSessionId = sessions[0].meta.id;
+    localStorage.setItem(CURRENT_KEY, currentSessionId);
+  }
+  return { config, sessions, currentSessionId };
+}
+
+function updateState(mutator) {
+  const state = ensureState();
+  const next = mutator({
+    config: clone(state.config),
+    sessions: clone(state.sessions),
+    currentSessionId: state.currentSessionId,
+  });
+  if (next.config) saveConfig(next.config);
+  if (next.sessions) saveSessions(next.sessions);
+  if (next.currentSessionId) localStorage.setItem(CURRENT_KEY, next.currentSessionId);
+  return {
+    config: next.config || state.config,
+    sessions: next.sessions || state.sessions,
+    currentSessionId: next.currentSessionId || state.currentSessionId,
+  };
+}
+
+export function installWebBridge() {
+  if (window.cragent) return window.cragent;
+
+  const listeners = {
+    messageAppended: new Set(),
+    sessionChanged: new Set(),
+    busyChanged: new Set(),
+    error: new Set(),
+    openSettings: new Set(),
+  };
+
+  const subscribe = (set, callback) => {
+    set.add(callback);
+    return () => set.delete(callback);
+  };
+
+  const emit = (set, payload) => {
+    set.forEach((callback) => {
+      try {
+        callback(payload);
+      } catch {
+        // Swallow callback errors to avoid breaking other listeners.
+      }
+    });
+  };
+
+  const api = {
+    async getSnapshot() {
+      const { config, sessions, currentSessionId } = ensureState();
+      return {
+        config,
+        sessions: sortMetasByUpdatedAt(sessions.map((session) => session.meta)),
+        currentSessionId,
+      };
+    },
+
+    async getSession(sessionId) {
+      const { sessions } = ensureState();
+      const session = sessions.find((item) => item.meta.id === sessionId);
+      if (!session) throw new Error(`Session not found: ${sessionId}`);
+      return session;
+    },
+
+    async listSkills() {
+      return [];
+    },
+
+    async newSession() {
+      const next = updateState((state) => {
+        const created = makeSession(state.config);
+        return {
+          ...state,
+          sessions: [created, ...state.sessions],
+          currentSessionId: created.meta.id,
+        };
+      });
+      const session = next.sessions.find((item) => item.meta.id === next.currentSessionId);
+      emit(listeners.sessionChanged, session);
+      return session;
+    },
+
+    async deleteSession(sessionId) {
+      const next = updateState((state) => {
+        let sessions = state.sessions.filter((item) => item.meta.id !== sessionId);
+        if (sessions.length === 0) {
+          sessions = [makeSession(state.config)];
+        }
+        const currentSessionId = sessions.some((item) => item.meta.id === state.currentSessionId)
+          ? state.currentSessionId
+          : sessions[0].meta.id;
+        return { ...state, sessions, currentSessionId };
+      });
+      const session = next.sessions.find((item) => item.meta.id === next.currentSessionId);
+      emit(listeners.sessionChanged, session);
+      return session;
+    },
+
+    async sendChat({ sessionId, userInput }) {
+      const userMessage = {
+        id: randomId(),
+        role: "user",
+        content: userInput,
+        createdAt: nowIso(),
+      };
+
+      updateState((state) => {
+        const sessions = state.sessions.map((item) => {
+          if (item.meta.id !== sessionId) return item;
+          const title =
+            item.meta.title === "新对话"
+              ? titleFromFirstUserMessage(userInput) || item.meta.title
+              : item.meta.title;
+          return {
+            ...item,
+            meta: { ...item.meta, title, updatedAt: userMessage.createdAt },
+            messages: [...item.messages, userMessage],
+          };
+        });
+        return { ...state, sessions, currentSessionId: sessionId };
+      });
+
+      emit(listeners.messageAppended, { sessionId, message: userMessage });
+      emit(listeners.busyChanged, { sessionId, busy: true });
+
+      setTimeout(() => {
+        const assistantMessage = {
+          id: randomId(),
+          role: "assistant",
+          content:
+            "这是 iPad 容器内的本地演示回复。\n\n你刚刚发送的是：\n\n" + userInput,
+          createdAt: nowIso(),
+        };
+
+        updateState((state) => {
+          const sessions = state.sessions.map((item) => {
+            if (item.meta.id !== sessionId) return item;
+            return {
+              ...item,
+              meta: { ...item.meta, updatedAt: assistantMessage.createdAt },
+              messages: [...item.messages, assistantMessage],
+            };
+          });
+          return { ...state, sessions };
+        });
+
+        emit(listeners.messageAppended, { sessionId, message: assistantMessage });
+        emit(listeners.busyChanged, { sessionId, busy: false });
+      }, 450);
+    },
+
+    async updateModel({ sessionId, providerKey, modelId }) {
+      const next = updateState((state) => {
+        const sessions = state.sessions.map((item) =>
+          item.meta.id === sessionId
+            ? { ...item, meta: { ...item.meta, providerKey, modelId, updatedAt: nowIso() } }
+            : item,
+        );
+        return { ...state, sessions };
+      });
+      const session = next.sessions.find((item) => item.meta.id === sessionId);
+      emit(listeners.sessionChanged, session);
+    },
+
+    async updateConfig(nextConfig) {
+      updateState((state) => ({ ...state, config: nextConfig }));
+      return nextConfig;
+    },
+
+    async syncProviderModels({ providerKey }) {
+      const { config } = ensureState();
+      if (!providerKey || !config.models?.[providerKey]) {
+        return { ok: false, error: "未找到 provider" };
+      }
+      return { ok: true, providerKey, count: config.models[providerKey].models.length, config };
+    },
+
+    onMessageAppended(callback) {
+      return subscribe(listeners.messageAppended, callback);
+    },
+    onSessionChanged(callback) {
+      return subscribe(listeners.sessionChanged, callback);
+    },
+    onBusyChanged(callback) {
+      return subscribe(listeners.busyChanged, callback);
+    },
+    onError(callback) {
+      return subscribe(listeners.error, callback);
+    },
+    onOpenSettings(callback) {
+      return subscribe(listeners.openSettings, callback);
+    },
+  };
+
+  window.cragent = api;
+  return api;
+}

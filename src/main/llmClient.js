@@ -35,6 +35,44 @@ export class LlmClient {
         this.resolveProvider = resolveProvider;
     }
 
+    async complete({ messages, model }) {
+        const provider = this.resolveProvider(model.providerKey);
+        if (!provider || !provider.apiKey || provider.apiKey.includes("REPLACE_ME")) {
+            return {
+                message: this.assistantMessage("请先在设置中配置有效 API Key，再继续对话。"),
+            };
+        }
+
+        const body = {
+            model: model.modelId,
+            messages: messages.map(messageToApiPayload),
+        };
+
+        const response = await fetch(`${provider.baseUrl}/${provider.api}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${provider.apiKey}`,
+            },
+            body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+            const text = await response.text();
+            return {
+                message: this.assistantMessage(
+                    `模型请求失败: ${response.status} ${text.slice(0, 200)}`,
+                ),
+            };
+        }
+
+        const data = await response.json();
+        const choice = data.choices?.[0]?.message;
+        return {
+            message: this.assistantMessage(choice?.content || ""),
+        };
+    }
+
     async chat({ messages, model, tools = [] }) {
         const provider = this.resolveProvider(model.providerKey);
         if (!provider || !provider.apiKey || provider.apiKey.includes("REPLACE_ME")) {

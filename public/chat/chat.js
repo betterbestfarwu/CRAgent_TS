@@ -227,17 +227,17 @@
     var copyAction = contentMsg
       ? '<button class="icon-btn" data-action="copy" data-id="' +
         escapeAttr(contentMsg.id) +
-        '" title="Copy" aria-label="Copy">' +
+        '" title="复制" aria-label="复制">' +
         ICON_COPY +
         '</button>' +
         '<button class="icon-btn" data-action="delete" data-id="' +
         escapeAttr(contentMsg.id) +
-        '" title="Delete" aria-label="Delete">' +
+        '" title="删除" aria-label="删除">' +
         ICON_TRASH +
         '</button>'
       : '<button class="icon-btn" data-action="copy-thinking" data-thinking-ids="' +
         escapeAttr(thinkingIds.join(',')) +
-        '" title="Copy" aria-label="Copy">' +
+        '" title="复制" aria-label="复制">' +
         ICON_COPY +
         '</button>';
     meta.innerHTML =
@@ -255,6 +255,29 @@
     if (role === 'tool') return 'Tool · ' + (msg.name || '');
     if (role === 'system') return 'System';
     return role;
+  }
+
+  function isContextDivider(msg) {
+    return msg && msg.role === 'context_divider';
+  }
+
+  function buildContextDivider(msg) {
+    var wrap = document.createElement('div');
+    wrap.className = 'msg context_divider';
+    wrap.dataset.id = msg.id;
+    wrap.setAttribute('role', 'separator');
+    wrap.setAttribute('aria-label', msg.content || 'Context divider');
+
+    var row = document.createElement('div');
+    row.className = 'context-divider';
+    row.innerHTML =
+      '<span class="context-divider-line" aria-hidden="true"></span>' +
+      '<span class="context-divider-label">' +
+      escapeText(msg.content || '') +
+      '</span>' +
+      '<span class="context-divider-line" aria-hidden="true"></span>';
+    wrap.appendChild(row);
+    return wrap;
   }
 
   function buildBubble(msg) {
@@ -288,15 +311,45 @@
     try { time = new Date(msg.created_at).toLocaleTimeString(); } catch (_) {}
     meta.innerHTML = '<span>' + roleLabel(msg.role, msg) + (time ? ' · ' + time : '') + '</span>' +
                      '<span class="actions">' +
-                       '<button class="icon-btn" data-action="copy" data-id="' + escapeAttr(msg.id) + '" title="Copy" aria-label="Copy">' + ICON_COPY + '</button>' +
-                       '<button class="icon-btn" data-action="delete" data-id="' + escapeAttr(msg.id) + '" title="Delete" aria-label="Delete">' + ICON_TRASH + '</button>' +
+                       '<button class="icon-btn" data-action="copy" data-id="' + escapeAttr(msg.id) + '" title="复制" aria-label="复制">' + ICON_COPY + '</button>' +
+                       '<button class="icon-btn" data-action="delete" data-id="' + escapeAttr(msg.id) + '" title="删除" aria-label="删除">' + ICON_TRASH + '</button>' +
                      '</span>';
     wrap.appendChild(meta);
     return wrap;
   }
 
-  function scrollToBottom() {
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  var SCROLL_NEAR_BOTTOM_PX = 80;
+
+  function isNearBottom() {
+    var doc = document.documentElement;
+    return window.innerHeight + window.scrollY >= doc.scrollHeight - SCROLL_NEAR_BOTTOM_PX;
+  }
+
+  function restoreScrollAfterRender(wasNearBottom, prevScrollTop, prevScrollHeight) {
+    var doc = document.documentElement;
+    if (wasNearBottom) {
+      window.scrollTo({ top: doc.scrollHeight, behavior: 'auto' });
+      return;
+    }
+    var delta = doc.scrollHeight - prevScrollHeight;
+    window.scrollTo({ top: Math.max(0, prevScrollTop + delta), behavior: 'auto' });
+  }
+
+  function afterRenderScroll(wasNearBottom, prevScrollTop, prevScrollHeight) {
+    restoreScrollAfterRender(wasNearBottom, prevScrollTop, prevScrollHeight);
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        restoreScrollAfterRender(wasNearBottom, prevScrollTop, prevScrollHeight);
+      });
+    });
+  }
+
+  function captureScrollAnchor() {
+    return {
+      wasNearBottom: isNearBottom(),
+      prevScrollTop: window.scrollY,
+      prevScrollHeight: document.documentElement.scrollHeight,
+    };
   }
 
   function renderMessageList(list) {
@@ -305,6 +358,11 @@
     var index = 0;
     while (index < messages.length) {
       var msg = messages[index];
+      if (isContextDivider(msg)) {
+        container.appendChild(buildContextDivider(msg));
+        index += 1;
+        continue;
+      }
       if (isProcessMessage(msg)) {
         var items = [];
         var ids = [];
@@ -369,12 +427,14 @@
 
   var app = {
     renderAll: function (list) {
+      var anchor = captureScrollAnchor();
       renderMessageList(list);
-      requestAnimationFrame(scrollToBottom);
+      afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
     },
     appendMessage: function (m) {
-      container.appendChild(buildBubble(m));
-      requestAnimationFrame(scrollToBottom);
+      var anchor = captureScrollAnchor();
+      container.appendChild(isContextDivider(m) ? buildContextDivider(m) : buildBubble(m));
+      afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
     },
     removeMessage: function (id) {
       var el = container.querySelector('.msg[data-id="' + id + '"]');

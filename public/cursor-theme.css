@@ -1,0 +1,102 @@
+/**
+ * Cursor IDE design tokens (theme-cursor: cursor-dark / cursor-light).
+ * Typography matches VS Code workbench defaults (13px UI, 12px code).
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --cursor-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --cursor-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  --titlebar-height: 40px;
+  --titlebar-bg: var(--cursor-bg-sidebar);
+  --titlebar-pill-bg: var(--cursor-bg-editor);
+
+  --cursor-font-size: 13px;
+  --cursor-font-size-sm: 11px;
+  --cursor-font-size-xs: 10px;
+  --cursor-font-size-code: 12px;
+  --cursor-line-height: 1.55;
+  --cursor-line-height-tight: 1.33;
+
+  /* cursor-light */
+  --cursor-bg-sidebar: #f3f3f3;
+  --cursor-bg-editor: #fcfcfc;
+  --cursor-bg-panel: #f3f3f3;
+  --cursor-bg-widget: #f3f3f3;
+  --cursor-bg-input: #fcfcfc;
+  --cursor-bg-line-highlight: #ededed;
+  --cursor-bg-selection: rgba(20, 20, 20, 0.12);
+
+  --cursor-fg: #141414;
+  --cursor-fg-muted: rgba(20, 20, 20, 0.68);
+  --cursor-fg-subtle: rgba(20, 20, 20, 0.48);
+
+  --cursor-border: rgba(20, 20, 20, 0.08);
+  --cursor-border-strong: rgba(20, 20, 20, 0.15);
+  --cursor-hover: rgba(20, 20, 20, 0.07);
+  --cursor-active: rgba(20, 20, 20, 0.12);
+
+  --cursor-accent: #3c7cab;
+  --cursor-accent-hover: #055180;
+  --cursor-focus-ring: rgba(20, 20, 20, 0.15);
+
+  --cursor-scrollbar-thumb: rgba(20, 20, 20, 0.12);
+  --cursor-scrollbar-thumb-hover: rgba(20, 20, 20, 0.19);
+
+  --cursor-bubble-bg: #f3f3f3;
+  --cursor-code-bg: #ededed;
+  --cursor-code-fg: #141414;
+
+  --cursor-error-fg: #cf2d56;
+  --cursor-success-fg: #1f8a65;
+  --cursor-on-accent: #fcfcfc;
+
+  --composer-elevated-shadow:
+    0 1px 2px rgba(20, 20, 20, 0.05),
+    0 8px 24px rgba(20, 20, 20, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* cursor-dark */
+    --cursor-bg-sidebar: #141414;
+    --cursor-bg-editor: #181818;
+    --cursor-bg-panel: #141414;
+    --cursor-bg-widget: #141414;
+    --cursor-bg-input: rgba(228, 228, 228, 0.04);
+    --cursor-bg-line-highlight: #262626;
+    --cursor-bg-selection: rgba(228, 228, 228, 0.12);
+
+    --cursor-fg: #e4e4e4;
+    --cursor-fg-muted: rgba(228, 228, 228, 0.55);
+    --cursor-fg-subtle: rgba(228, 228, 228, 0.37);
+
+    --cursor-border: rgba(228, 228, 228, 0.08);
+    --cursor-border-strong: rgba(228, 228, 228, 0.15);
+    --cursor-hover: rgba(228, 228, 228, 0.07);
+    --cursor-active: rgba(228, 228, 228, 0.12);
+
+    --cursor-accent: #81a1c1;
+    --cursor-accent-hover: #87a6c4;
+    --cursor-focus-ring: rgba(228, 228, 228, 0.15);
+
+    --cursor-scrollbar-thumb: rgba(228, 228, 228, 0.07);
+    --cursor-scrollbar-thumb-hover: rgba(228, 228, 228, 0.12);
+
+    --cursor-bubble-bg: #262626;
+    --cursor-code-bg: #262626;
+    --cursor-code-fg: #e4e4e4;
+
+    --cursor-error-fg: #e34671;
+    --cursor-success-fg: #3fa266;
+    --cursor-on-accent: #191c22;
+
+    --composer-elevated-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.28),
+      0 12px 28px rgba(0, 0, 0, 0.36);
+  }
+}

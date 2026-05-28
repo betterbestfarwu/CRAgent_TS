@@ -1,5 +1,85 @@
 import { randomUUID } from "node:crypto";
+import {
+    CONTEXT_COMPACT_DIVIDER_LABEL,
+    CONTEXT_DIVIDER_LABEL,
+    CONTEXT_DIVIDER_ROLE,
+    isContextDividerMessage,
+} from "@shared/chatMessages";
 import { IPC_CHANNELS } from "@shared/ipc";
+
+const COMPACT_KEEP_USER_TURNS = 2;
+const COMPACT_MIN_CONTEXT_MESSAGES = 6;
+
+const COMPACT_SUMMARIZE_SYSTEM = `You compress conversation history for context-window management.
+Summarize the transcript concisely in the same language as the conversation.
+Preserve: goals, decisions, file paths, code identifiers, errors, constraints, and unfinished tasks.
+Do not invent facts. Output only the summary, no preamble.`;
+
+function formatMessagesForSummary(messages) {
+    return messages
+        .map((message) => {
+            if (message.role === "user") {
+                return `User: ${message.content}`;
+            }
+            if (message.role === "assistant") {
+                let line = `Assistant: ${message.content || ""}`.trimEnd();
+                if (message.toolCalls?.length) {
+                    const names = message.toolCalls
+                        .map((call) => call.function?.name)
+                        .filter(Boolean)
+                        .join(", ");
+                    if (names) {
+                        line += `\n[tool_calls: ${names}]`;
+                    }
+                }
+                return line;
+            }
+            if (message.role === "tool") {
+                const body = String(message.content || "").slice(0, 800);
+                return `Tool (${message.name || "tool"}): ${body}`;
+            }
+            return "";
+        })
+        .filter(Boolean)
+        .join("\n\n");
+}
+
+function splitMessagesForCompact(messages) {
+    if (messages.length < COMPACT_MIN_CONTEXT_MESSAGES) {
+        return { toSummarize: [], keep: messages };
+    }
+    const keep = [];
+    let userTurns = 0;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        keep.unshift(messages[index]);
+        if (messages[index].role === "user") {
+            userTurns += 1;
+            if (userTurns >= COMPACT_KEEP_USER_TURNS) {
+                break;
+            }
+        }
+    }
+    const keepCount = keep.length;
+    if (keepCount >= messages.length) {
+        return { toSummarize: [], keep: messages };
+    }
+    return {
+        toSummarize: messages.slice(0, messages.length - keepCount),
+        keep,
+    };
+}
+
+function getActiveContextEntries(session) {
+    const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+    const entries = [];
+    for (let index = fromIndex; index < session.messages.length; index += 1) {
+        const message = session.messages[index];
+        if (!isContextDividerMessage(message)) {
+            entries.push({ message, index });
+        }
+    }
+    return entries;
+}
 
 export class AgentRuntime {
     constructor(sessionStore, configStore, llmClient, toolRegistry, workspaceMemory, skillLoader, mainWindowGetter) {
@@ -48,7 +128,20 @@ export class AgentRuntime {
                 createdAt: new Date().toISOString(),
             });
         }
-        messages.push(...session.messages);
+        const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+        if (session.meta.contextSummary) {
+            messages.push({
+                id: randomUUID(),
+                role: "user",
+                content: `<conversation_summary>\n${session.meta.contextSummary}\n</conversation_summary>`,
+                createdAt: new Date().toISOString(),
+            });
+        }
+        messages.push(
+            ...session.messages
+                .slice(fromIndex)
+                .filter((message) => !isContextDividerMessage(message)),
+        );
         return messages;
     }
 
@@ -58,6 +151,15 @@ export class AgentRuntime {
             return;
         }
         if (this.busyBySession.get(sessionId)) {
+            return;
+        }
+
+        if (input === "/clear") {
+            this.clearLlmContext(sessionId);
+            return;
+        }
+        if (input === "/compact") {
+            await this.compactLlmContext(sessionId);
             return;
         }
 
@@ -80,6 +182,8 @@ export class AgentRuntime {
                 role: "assistant",
                 content: [
                     "支持指令: /new /clear /help /compact",
+                    "/clear — 保留聊天记录，插入上下文分界并仅重置模型上下文",
+                    "/compact — 将较早对话压缩为摘要，保留最近几轮完整消息",
                     "",
                     "Workspace memory (`~/.CRAgent`):",
                     "- SOUL.md — identity & tone",
@@ -97,14 +201,106 @@ export class AgentRuntime {
             this.emit(IPC_CHANNELS.onSessionChanged, session);
             return;
         }
-        if (input === "/clear") {
-            session.messages = [];
-            this.sessionStore.save(session);
-            this.emit(IPC_CHANNELS.onSessionChanged, session);
-            return;
-        }
-
         await this.runLoop(session);
+    }
+
+    clearLlmContext(sessionId) {
+        const dividerMessage = {
+            id: randomUUID(),
+            role: CONTEXT_DIVIDER_ROLE,
+            content: CONTEXT_DIVIDER_LABEL,
+            createdAt: new Date().toISOString(),
+        };
+        let session = this.sessionStore.appendMessage(sessionId, dividerMessage);
+        session.meta.llmContextFromIndex = session.messages.length;
+        delete session.meta.contextSummary;
+        this.sessionStore.save(session);
+        this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: dividerMessage });
+        this.emit(IPC_CHANNELS.onSessionChanged, session);
+    }
+
+    async compactLlmContext(sessionId) {
+        this.setBusy(sessionId, true);
+        try {
+            let session = this.sessionStore.get(sessionId);
+            const entries = getActiveContextEntries(session);
+            const activeMessages = entries.map((entry) => entry.message);
+            const { toSummarize, keep } = splitMessagesForCompact(activeMessages);
+
+            if (!toSummarize.length) {
+                const notice = {
+                    id: randomUUID(),
+                    role: "assistant",
+                    content: "当前上下文过短，暂无需压缩。",
+                    createdAt: new Date().toISOString(),
+                };
+                session = this.sessionStore.appendMessage(sessionId, notice);
+                this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: notice });
+                this.emit(IPC_CHANNELS.onSessionChanged, session);
+                return;
+            }
+
+            const transcriptParts = [];
+            if (session.meta.contextSummary) {
+                transcriptParts.push(
+                    `Previous summary:\n${session.meta.contextSummary}`,
+                );
+            }
+            transcriptParts.push(formatMessagesForSummary(toSummarize));
+            const transcript = transcriptParts.join("\n\n---\n\n");
+
+            const choice = await this.llmClient.complete({
+                model: {
+                    providerKey: session.meta.providerKey,
+                    modelId: session.meta.modelId,
+                },
+                messages: [
+                    { role: "system", content: COMPACT_SUMMARIZE_SYSTEM },
+                    { role: "user", content: transcript },
+                ],
+            });
+            const summary = String(choice.message.content || "").trim();
+            if (!summary) {
+                this.emit(IPC_CHANNELS.onError, {
+                    sessionId,
+                    message: "压缩失败：模型未返回有效摘要。",
+                });
+                return;
+            }
+
+            const keepStartIndex = entries[entries.length - keep.length].index;
+            const dividerMessage = {
+                id: randomUUID(),
+                role: CONTEXT_DIVIDER_ROLE,
+                content: CONTEXT_COMPACT_DIVIDER_LABEL,
+                createdAt: new Date().toISOString(),
+            };
+            session = this.sessionStore.get(sessionId);
+            session.messages.splice(keepStartIndex, 0, dividerMessage);
+            session.meta.llmContextFromIndex = keepStartIndex + 1;
+            session.meta.contextSummary = summary;
+            session.meta.updatedAt = new Date().toISOString();
+            this.sessionStore.save(session);
+            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: dividerMessage });
+            this.emit(IPC_CHANNELS.onSessionChanged, session);
+
+            const feedback = {
+                id: randomUUID(),
+                role: "assistant",
+                content: `已压缩 ${toSummarize.length} 条较早消息为摘要，保留最近 ${keep.length} 条消息完整上下文。`,
+                createdAt: new Date().toISOString(),
+            };
+            session = this.sessionStore.appendMessage(sessionId, feedback);
+            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: feedback });
+            this.emit(IPC_CHANNELS.onSessionChanged, session);
+        } catch (error) {
+            this.emit(IPC_CHANNELS.onError, {
+                sessionId,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            this.setBusy(sessionId, false);
+        }
     }
 
     async runLoop(session) {

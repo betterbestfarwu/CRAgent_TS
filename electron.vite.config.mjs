@@ -22,7 +22,14 @@ export default defineConfig({
     },
   },
   renderer: {
+    // file:// 下必须用相对路径，否则 /icon.png 等根路径资源会 404
+    base: "./",
     publicDir: path.resolve(__dirname, "public"),
+    build: {
+      rollupOptions: {
+        input: path.resolve(__dirname, "src/renderer/index.html"),
+      },
+    },
     resolve: {
       alias: {
         "@shared": path.resolve(__dirname, "src/shared"),

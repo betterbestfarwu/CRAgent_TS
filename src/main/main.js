@@ -17,6 +17,26 @@ let configStore;
 let sessionStore;
 let runtime;
 
+function windowChromeOptions() {
+    if (process.platform === "darwin") {
+        return {
+            titleBarStyle: "hiddenInset",
+            trafficLightPosition: { x: 14, y: 12 },
+        };
+    }
+    if (process.platform === "win32") {
+        return {
+            titleBarStyle: "hidden",
+            titleBarOverlay: {
+                color: "#f3f3f3",
+                symbolColor: "#141414",
+                height: 40,
+            },
+        };
+    }
+    return {};
+}
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1240,
@@ -24,6 +44,8 @@ function createWindow() {
         minWidth: 900,
         minHeight: 640,
         title: "CRAgent",
+        backgroundColor: "#f3f3f3",
+        ...windowChromeOptions(),
         webPreferences: {
             preload: path.join(__dirname, "../preload/index.js"),
             contextIsolation: true,
