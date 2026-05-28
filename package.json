@@ -1,0 +1,85 @@
+{
+  "name": "cragent_ts",
+  "version": "0.1.0",
+  "description": "CRAgent Electron port (macOS 10.14+, Windows 10+)",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
+    "build": "env -u ELECTRON_RUN_AS_NODE electron-vite build",
+    "start": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
+    "pack": "bash scripts/build-dmg.sh",
+    "pack:win": "bash scripts/build-win.sh",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "uuid": "^14.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^26.6.10",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^4.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14",
+    "vite-plugin-electron": "^0.29.1",
+    "vite-plugin-electron-renderer": "^0.14.7",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.cragent.electron",
+    "productName": "CRAgent",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "icon.icns",
+      "category": "public.app-category.developer-tools",
+      "target": ["dmg"],
+      "minimumSystemVersion": "10.14.0",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "${productName} ${version}",
+      "icon": "icon.icns",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        { "x": 140, "y": 200, "type": "file" },
+        { "x": 400, "y": 200, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "win": {
+      "icon": "icon.png",
+      "target": ["nsis"],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CRAgent",
+      "installerLanguages": ["zh_CN", "en_US"]
+    }
+  }
+}

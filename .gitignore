@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+dist/
+dist-electron/
+release/
+.cache/
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# Env & local config (API keys live in ~/.CRAgent at runtime)
+.env
+.env.*
+config.json
