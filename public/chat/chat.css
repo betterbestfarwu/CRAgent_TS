@@ -1,5 +1,6 @@
 :root {
   color-scheme: light dark;
+  --bubble-collapse-max: 320px;
   --bg: #e8e9ed;
   --fg: #333333;
   --muted: #6e6e73;
@@ -61,6 +62,7 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   font-size: 14px;
   line-height: 1.5;
+  overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: rgba(110, 110, 115, 0.42) transparent;
 }
@@ -89,16 +91,21 @@ html, body {
 }
 
 #messages {
-  padding: 16px;
+  padding: 16px 16px 28px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .msg {
   display: flex;
   flex-direction: column;
-  max-width: 82%;
+  max-width: min(82%, 100%);
+  min-width: 0;
   position: relative;
 }
 
@@ -115,6 +122,9 @@ html, body {
 }
 
 .msg .bubble {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   padding: 12px 14px;
   border-radius: 10px;
   background: var(--bubble-bg);
@@ -122,8 +132,75 @@ html, body {
   border: 1px solid var(--border);
   box-shadow: var(--bubble-shadow);
   word-wrap: break-word;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   white-space: normal;
+}
+
+.bubble > * {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.bubble-collapse {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.bubble-collapse-body,
+.assistant-turn-content {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.bubble-collapse:first-child {
+  margin-top: 0;
+}
+
+.bubble-collapse.is-collapsed .bubble-collapse-body {
+  max-height: var(--bubble-collapse-max);
+  overflow-x: auto;
+  overflow-y: hidden;
+  position: relative;
+}
+
+.bubble-collapse.is-collapsed .bubble-collapse-body::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 48px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--bubble-bg));
+}
+
+.bubble-collapse-toggle {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: #0a66db;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.bubble-collapse-toggle:hover {
+  text-decoration: underline;
+}
+
+@media (prefers-color-scheme: dark) {
+  .bubble-collapse-toggle {
+    color: #409cff;
+  }
 }
 
 .msg.user .bubble,
@@ -190,9 +267,16 @@ html, body {
 .actions button.icon-btn:hover { background: var(--code-bg); color: var(--fg); }
 .actions button.icon-btn svg { display: block; }
 
+.bubble img {
+  max-width: 100%;
+  height: auto;
+}
+
 .code-block {
   position: relative;
   margin: 0.5em 0;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .code-block pre {
@@ -272,6 +356,7 @@ html, body {
   border-radius: 4px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 12.5px;
+  word-break: break-all;
 }
 
 .bubble pre code { background: transparent; padding: 0; }
@@ -289,8 +374,13 @@ html, body {
 
 .bubble .katex-display {
   margin: 0.5em 0;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.bubble .katex-display > .katex {
+  max-width: 100%;
 }
 
 .bubble ul, .bubble ol { margin: 0.4em 0 0.4em 1.2em; padding: 0; }

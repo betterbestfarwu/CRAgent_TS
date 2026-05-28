@@ -11,10 +11,12 @@
   --app-bg: #ffffff;
   --app-fg: #1a1a1a;
   --main-bg: #ffffff;
+  --chat-bg: #e8e9ed;
   --surface-border: rgba(0, 0, 0, 0.12);
   --splitter-bg: #ececef;
   --splitter-hover: #dbe8ff;
   --input-surface-bg: #ffffff;
+  --composer-border: rgba(10, 102, 219, 0.35);
   --settings-bg: #e8e8ea;
   --settings-surface: #f2f2f4;
   --settings-panel: #f5f5f7;
@@ -49,10 +51,12 @@
     --app-bg: #1c1c1e;
     --app-fg: #f5f5f7;
     --main-bg: #1c1c1e;
+    --chat-bg: #2a2a2e;
     --surface-border: rgba(255, 255, 255, 0.12);
     --splitter-bg: #3a3a3e;
     --splitter-hover: #4a5a7a;
     --input-surface-bg: #2c2c2e;
+    --composer-border: rgba(64, 156, 255, 0.4);
     --settings-bg: #1c1c1e;
     --settings-surface: #2c2c2e;
     --settings-panel: #323236;
@@ -318,50 +322,19 @@ body,
 }
 
 .chat-layout {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) 5px var(--input-panel-height, 160px);
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
+  background: var(--chat-bg);
 }
 
 .chat-history {
+  flex: 1;
   min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-}
-
-.chat-splitter {
-  position: relative;
-  cursor: row-resize;
-  touch-action: none;
-  background: var(--splitter-bg);
-  border-top: 1px solid var(--sidebar-border);
-  border-bottom: 1px solid var(--sidebar-border);
-  z-index: 2;
-}
-
-.chat-splitter::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -3px;
-  bottom: -3px;
-}
-
-.chat-splitter:hover,
-.chat-splitter:active {
-  background: var(--splitter-hover);
-}
-
-body.chat-resizing {
-  cursor: row-resize;
-  user-select: none;
-}
-
-body.chat-resizing iframe {
-  pointer-events: none;
 }
 
 .chat-frame {
@@ -369,7 +342,7 @@ body.chat-resizing iframe {
   height: 100%;
   border: 0;
   min-height: 0;
-  background: #ffffff;
+  background: var(--chat-bg);
 }
 
 .empty-state {
@@ -385,35 +358,94 @@ body.chat-resizing iframe {
   gap: 8px;
 }
 
-.input-card {
-  display: grid;
-  grid-template-rows: 1fr auto;
+.composer {
+  flex-shrink: 0;
+  padding: 16px 16px 20px;
+  background: var(--chat-bg);
+}
+
+.composer-box {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  padding: 12px;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--input-surface-bg);
+  padding: 12px 14px 10px;
+  border: 1px solid var(--composer-border);
+  border-radius: 16px;
+  background: var(--chat-bg);
 }
 
-.input-card textarea {
+.composer-input {
   width: 100%;
-  min-height: 0;
-  height: 100%;
-  padding: 10px;
+  min-height: 24px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: none;
   resize: none;
-  border-radius: 12px;
-  border: 1px solid var(--surface-border);
-  background: var(--input-surface-bg);
+  overflow-y: hidden;
+  line-height: 24px;
+  box-sizing: border-box;
+  font: inherit;
   color: var(--app-fg);
+  background: transparent;
 }
 
-.input-bar {
+.composer-input::placeholder {
+  color: var(--sidebar-muted);
+}
+
+.composer-toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
-.input-bar button,
+.composer-model {
+  flex-shrink: 0;
+  max-width: 42%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--app-fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.composer-context {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--sidebar-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-send {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sidebar-hover);
+  color: var(--app-fg);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.composer-send:hover:not(:disabled) {
+  background: var(--sidebar-active);
+}
+
+.composer-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .suggestions button,
 .actions button {
   padding: 8px 10px;
@@ -422,20 +454,6 @@ body.chat-resizing iframe {
   background: var(--input-surface-bg);
   color: var(--app-fg);
   cursor: pointer;
-}
-
-.input-bar select {
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--surface-border);
-  background: var(--input-surface-bg);
-  color: var(--app-fg);
-}
-
-.input-bar span {
-  flex: 1;
-  font-size: 12px;
-  opacity: 0.8;
 }
 
 .error-toast {

@@ -71,6 +71,40 @@
     }, 1500);
   }
 
+  var COLLAPSED_MAX_HEIGHT = 320;
+
+  function setupCollapsibleContent(contentEl) {
+    if (!contentEl) return;
+
+    function attach() {
+      if (contentEl.closest('.bubble-collapse')) return;
+      if (contentEl.scrollHeight <= COLLAPSED_MAX_HEIGHT) return;
+
+      var wrap = document.createElement('div');
+      wrap.className = 'bubble-collapse is-collapsed';
+      var parent = contentEl.parentNode;
+      parent.insertBefore(wrap, contentEl);
+      wrap.appendChild(contentEl);
+      contentEl.classList.add('bubble-collapse-body');
+
+      var toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'bubble-collapse-toggle';
+      toggle.textContent = '展开全文';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.addEventListener('click', function () {
+        var collapsed = wrap.classList.toggle('is-collapsed');
+        toggle.textContent = collapsed ? '展开全文' : '收起';
+        toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      });
+      wrap.appendChild(toggle);
+    }
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(attach);
+    });
+  }
+
   function isProcessMessage(msg) {
     if (!msg) return false;
     if (msg.role === 'tool') return true;
@@ -170,17 +204,15 @@
 
     var bubble = document.createElement('div');
     bubble.className = 'bubble';
-    var html = renderThinkingBlockHtml(thinkingItems);
+    bubble.innerHTML = renderThinkingBlockHtml(thinkingItems);
     if (contentMsg) {
-      html +=
-        '<div class="assistant-turn-content">' +
-        window.MD.render(contentMsg.content || '') +
-        '</div>';
-    }
-    bubble.innerHTML = html;
-    if (contentMsg) {
+      var contentWrap = document.createElement('div');
+      contentWrap.className = 'assistant-turn-content';
+      contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
+      bubble.appendChild(contentWrap);
       typesetMath(bubble);
       enhanceCodeCopyButtons(bubble);
+      setupCollapsibleContent(contentWrap);
     }
     wrap.appendChild(bubble);
 
@@ -234,9 +266,19 @@
     bubble.className = 'bubble';
 
     if (msg.role !== 'tool') {
-      bubble.innerHTML = window.MD.render(msg.content || '');
-      typesetMath(bubble);
-      enhanceCodeCopyButtons(bubble);
+      if (msg.role === 'assistant') {
+        var body = document.createElement('div');
+        body.className = 'bubble-collapse-body';
+        body.innerHTML = window.MD.render(msg.content || '');
+        bubble.appendChild(body);
+        typesetMath(body);
+        enhanceCodeCopyButtons(body);
+        setupCollapsibleContent(body);
+      } else {
+        bubble.innerHTML = window.MD.render(msg.content || '');
+        typesetMath(bubble);
+        enhanceCodeCopyButtons(bubble);
+      }
     }
     wrap.appendChild(bubble);
 

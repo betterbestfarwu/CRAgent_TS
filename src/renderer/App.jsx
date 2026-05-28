@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "./ChatView.jsx";
 import { Sidebar } from "./Sidebar.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
@@ -12,6 +12,12 @@ const SUGGESTIONS = [
   "重构最近改动",
 ];
 
+const COMPOSER_LINE_HEIGHT = 24;
+const COMPOSER_MIN_HEIGHT = COMPOSER_LINE_HEIGHT;
+/** ~3 行可视高度，达到 2 倍后出现滚动条 */
+const COMPOSER_BASE_HEIGHT = COMPOSER_LINE_HEIGHT * 3;
+const COMPOSER_MAX_HEIGHT = COMPOSER_BASE_HEIGHT * 2;
+
 function sortSessions(sessions) {
   return [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
@@ -24,9 +30,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState("chat");
   const [error, setError] = useState("");
-  const [inputPanelHeight, setInputPanelHeight] = useState(160);
   const sessionIdRef = useRef(null);
-  const chatLayoutRef = useRef(null);
+  const textareaRef = useRef(null);
   const busyBySessionRef = useRef(new Map());
 
   async function loadSnapshot() {
@@ -54,6 +59,20 @@ export function App() {
   useEffect(() => {
     sessionIdRef.current = currentSession?.meta.id ?? null;
   }, [currentSession?.meta.id]);
+
+  function resizeComposer() {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const scrollHeight = el.scrollHeight;
+    const next = Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, scrollHeight));
+    el.style.height = `${next}px`;
+    el.style.overflowY = scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+  }
+
+  useLayoutEffect(() => {
+    resizeComposer();
+  }, [input, page]);
 
   useEffect(() => {
     if (!window.cragent) return;
@@ -214,49 +233,6 @@ export function App() {
     });
   }
 
-  function startResizeDivider(event) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-
-    const splitter = event.currentTarget;
-    const pointerId = event.pointerId;
-    const startY = event.clientY;
-    const startHeight = inputPanelHeight;
-    const minInput = 120;
-    const minChat = 120;
-
-    splitter.setPointerCapture(pointerId);
-    document.body.classList.add("chat-resizing");
-
-    function applyHeight(clientY) {
-      const layoutHeight =
-        chatLayoutRef.current?.getBoundingClientRect().height ?? 600;
-      const maxInput = Math.max(minInput, layoutHeight - minChat - 5);
-      const delta = startY - clientY;
-      const next = Math.min(maxInput, Math.max(minInput, startHeight + delta));
-      setInputPanelHeight(next);
-    }
-
-    function endResize(endEvent) {
-      if (endEvent.pointerId !== pointerId) return;
-      splitter.releasePointerCapture(pointerId);
-      document.body.classList.remove("chat-resizing");
-      splitter.removeEventListener("pointermove", onPointerMove);
-      splitter.removeEventListener("pointerup", endResize);
-      splitter.removeEventListener("pointercancel", endResize);
-    }
-
-    function onPointerMove(moveEvent) {
-      if (moveEvent.pointerId !== pointerId) return;
-      moveEvent.preventDefault();
-      applyHeight(moveEvent.clientY);
-    }
-
-    splitter.addEventListener("pointermove", onPointerMove);
-    splitter.addEventListener("pointerup", endResize);
-    splitter.addEventListener("pointercancel", endResize);
-  }
-
   const active = Boolean(currentSession && currentSession.messages.length > 0);
   const onSettingsPage = page === "settings";
 
@@ -291,11 +267,7 @@ export function App() {
             }}
           />
         ) : (
-          <div
-            className="chat-layout"
-            ref={chatLayoutRef}
-            style={{ "--input-panel-height": `${inputPanelHeight}px` }}
-          >
+          <div className="chat-layout">
             <div className="chat-history">
               {!active ? (
                 <div className="empty-state">
@@ -317,54 +289,58 @@ export function App() {
               )}
             </div>
 
-            <div
-              className="chat-splitter"
-              role="separator"
-              aria-orientation="horizontal"
-              aria-valuenow={inputPanelHeight}
-              aria-label="调整输入区高度"
-              onPointerDown={startResizeDivider}
-            />
-
-            <div className="input-card">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="给 CRAgent 发送消息..."
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.altKey) {
-                    e.preventDefault();
-                    void handleSend();
-                  }
-                }}
-                disabled={busy}
-              />
-              <div className="input-bar">
-                <select
-                  value={currentModel}
-                  onChange={(e) => void handleModelChange(e.target.value)}
-                >
-                  {Object.entries(config?.models || {}).flatMap(([providerKey, provider]) =>
-                    provider.models
-                      .filter(
-                        (model) =>
-                          model.state ||
-                          currentModel === `${providerKey}/${model.id}`,
-                      )
-                      .map((model) => (
-                        <option
-                          key={`${providerKey}/${model.id}`}
-                          value={`${providerKey}/${model.id}`}
-                        >
-                          {providerKey}/{model.id}
-                        </option>
-                      )),
-                  )}
-                </select>
-                <span>{contextText}</span>
-                <button type="button" onClick={() => void handleSend()} disabled={busy}>
-                  {busy ? "..." : "Send"}
-                </button>
+            <div className="composer">
+              <div className="composer-box">
+                <textarea
+                  ref={textareaRef}
+                  className="composer-input"
+                  value={input}
+                  rows={1}
+                  onChange={(e) => setInput(e.target.value)}
+                  onInput={resizeComposer}
+                  placeholder="发消息..."
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.altKey) {
+                      e.preventDefault();
+                      void handleSend();
+                    }
+                  }}
+                  disabled={busy}
+                />
+                <div className="composer-toolbar">
+                  <select
+                    className="composer-model"
+                    value={currentModel}
+                    onChange={(e) => void handleModelChange(e.target.value)}
+                  >
+                    {Object.entries(config?.models || {}).flatMap(([providerKey, provider]) =>
+                      provider.models
+                        .filter(
+                          (model) =>
+                            model.state ||
+                            currentModel === `${providerKey}/${model.id}`,
+                        )
+                        .map((model) => (
+                          <option
+                            key={`${providerKey}/${model.id}`}
+                            value={`${providerKey}/${model.id}`}
+                          >
+                            {providerKey}/{model.id}
+                          </option>
+                        )),
+                    )}
+                  </select>
+                  <span className="composer-context">{contextText}</span>
+                  <button
+                    type="button"
+                    className="composer-send"
+                    onClick={() => void handleSend()}
+                    disabled={busy}
+                    aria-label="发送"
+                  >
+                    {busy ? "…" : "↑"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
