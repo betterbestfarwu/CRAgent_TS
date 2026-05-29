@@ -308,7 +308,19 @@
         imageEl.className = 'msg-image';
         imageEl.src = image.data_url || image.dataUrl || '';
         imageEl.alt = 'Attached image';
+        imageEl.title = '双击查看大图';
         imageEl.loading = 'lazy';
+        imageEl.addEventListener('dblclick', function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          var dataUrl = imageEl.src;
+          if (!dataUrl) return;
+          notifyHost({
+            action: 'openImage',
+            dataUrl: dataUrl,
+            mimeType: image.mime_type || image.mimeType || '',
+          });
+        });
         gallery.appendChild(imageEl);
       });
       bubble.appendChild(gallery);

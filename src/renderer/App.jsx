@@ -10,6 +10,7 @@ import {
 import { Sidebar } from "./Sidebar.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
+import { ImageViewer } from "./ImageViewer.jsx";
 import { TitleBar } from "./TitleBar.jsx";
 import { displayTitle } from "./sidebarUtils.js";
 import { isDefaultSessionTitle, titleFromFirstUserMessage } from "@shared/sessionTitle";
@@ -58,6 +59,7 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [confirmRequest, setConfirmRequest] = useState(null);
+  const [viewerImage, setViewerImage] = useState(null);
   const sessionIdRef = useRef(null);
   const sessionErrorTimerRef = useRef(null);
   const textareaRef = useRef(null);
@@ -621,6 +623,7 @@ export function App() {
                   messages={currentSession.messages}
                   busy={busy}
                   onDelete={handleDeleteMessage}
+                  onOpenImage={(image) => setViewerImage(image)}
                 />
               )}
               {visibleSessionError ? (
@@ -819,6 +822,12 @@ export function App() {
             confirmRequest.resolve(confirmed);
             setConfirmRequest(null);
           }}
+        />
+      ) : null}
+      {viewerImage ? (
+        <ImageViewer
+          src={viewerImage.dataUrl}
+          onClose={() => setViewerImage(null)}
         />
       ) : null}
     </div>

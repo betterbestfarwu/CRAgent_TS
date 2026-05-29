@@ -143,6 +143,7 @@ html, body {
   border-radius: 8px;
   object-fit: cover;
   border: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.08));
+  cursor: zoom-in;
 }
 
 .msg.user .msg-images:last-child,

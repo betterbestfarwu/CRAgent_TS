@@ -29,7 +29,7 @@ function toWireMessage(message) {
   };
 }
 
-export function ChatView({ messages, busy, onDelete }) {
+export function ChatView({ messages, busy, onDelete, onOpenImage }) {
   const iframeRef = useRef(null);
   const readyRef = useRef(false);
   const pendingRef = useRef([]);
@@ -84,11 +84,18 @@ export function ChatView({ messages, busy, onDelete }) {
       if (data.action === "delete" && data.id) {
         void onDelete?.(data.id);
       }
+
+      if (data.action === "openImage" && data.dataUrl) {
+        onOpenImage?.({
+          dataUrl: data.dataUrl,
+          mimeType: data.mimeType || "",
+        });
+      }
     };
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [busy, onDelete, postToChat, syncIframeLayout, syncMessages]);
+  }, [busy, onDelete, onOpenImage, postToChat, syncIframeLayout, syncMessages]);
 
   useEffect(() => {
     if (!readyRef.current) return;
@@ -105,7 +112,7 @@ export function ChatView({ messages, busy, onDelete }) {
       ref={iframeRef}
       className="chat-frame"
       title="CRAgent chat"
-      src="./chat/chat.html?v=5"
+      src="./chat/chat.html?v=6"
     />
   );
 }

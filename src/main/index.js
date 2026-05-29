@@ -44,6 +44,23 @@ function windowChromeOptions() {
     return {};
 }
 
+function attachEditableContextMenu(webContents) {
+    webContents.on("context-menu", (_event, params) => {
+        if (!params.isEditable) return;
+
+        const template = [
+            { role: "cut", label: "剪切", enabled: params.editFlags.canCut },
+            { role: "copy", label: "复制", enabled: params.editFlags.canCopy },
+            { role: "paste", label: "粘贴", enabled: params.editFlags.canPaste },
+            { type: "separator" },
+            { role: "selectAll", label: "全选", enabled: params.editFlags.canSelectAll },
+        ];
+        Menu.buildFromTemplate(template).popup({
+            window: BrowserWindow.fromWebContents(webContents) ?? undefined,
+        });
+    });
+}
+
 function createWindow() {
     const icon = applyAppIcon();
     mainWindow = new BrowserWindow({
@@ -62,6 +79,7 @@ function createWindow() {
             sandbox: true,
         },
     });
+    attachEditableContextMenu(mainWindow.webContents);
     mainWindow.webContents.on("did-fail-load", (_event, code, desc, url) => {
         console.error("[CRAgent] did-fail-load", code, desc, url);
     });
