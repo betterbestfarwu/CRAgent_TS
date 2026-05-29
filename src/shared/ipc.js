@@ -13,4 +13,5 @@ export const IPC_CHANNELS = {
     onSessionChanged: "events:sessionChanged",
     onBusyChanged: "events:busyChanged",
     onError: "events:error",
+    onTodosChanged: "events:todosChanged",
 };

@@ -22,6 +22,7 @@ const api = {
     onSessionChanged: (callback) => subscribe(IPC_CHANNELS.onSessionChanged, callback),
     onBusyChanged: (callback) => subscribe(IPC_CHANNELS.onBusyChanged, callback),
     onError: (callback) => subscribe(IPC_CHANNELS.onError, callback),
+    onTodosChanged: (callback) => subscribe(IPC_CHANNELS.onTodosChanged, callback),
     onOpenSettings: (callback) => subscribe("ui:openSettings", callback),
 };
 contextBridge.exposeInMainWorld("cragent", api);

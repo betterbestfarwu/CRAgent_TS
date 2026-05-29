@@ -10,6 +10,9 @@ import {
     appendAssistantMessage,
     createChatCommandHandlers,
 } from "./tools/chatCommandHandlers.js";
+import { formatTodosForPrompt, mergeTodos } from "./todoState.js";
+import { filterToolsForSubAgent, subAgentSystemPrompt } from "./subAgentTypes.js";
+import { parseModelRef } from "./modelFallback.js";
 
 const COMPACT_KEEP_USER_TURNS = 2;
 const COMPACT_MIN_CONTEXT_MESSAGES = 6;
@@ -130,8 +133,16 @@ export class AgentRuntime {
         );
     }
 
-    messagesForLLM(session) {
+    messagesForLLM(session, options = {}) {
+        const {
+            subAgentPrompt = null,
+            subagentType = "generalPurpose",
+            includeSessionHistory = true,
+        } = options;
         const parts = [];
+        if (subAgentPrompt) {
+            parts.push(subAgentSystemPrompt(subagentType));
+        }
         const workspace = this.workspaceMemory.bootstrapSystemContent();
         if (workspace) {
             parts.push(workspace);
@@ -139,6 +150,10 @@ export class AgentRuntime {
         const agent = this.defaultAgent();
         if (agent?.tools?.enable_skills !== false) {
             parts.push(this.skillLoader.systemPromptSection());
+        }
+        const todoPrompt = formatTodosForPrompt(session.meta.todos);
+        if (todoPrompt) {
+            parts.push(todoPrompt);
         }
         const messages = [];
         if (parts.length) {
@@ -149,6 +164,15 @@ export class AgentRuntime {
                 createdAt: new Date().toISOString(),
             });
         }
+        if (subAgentPrompt) {
+            messages.push({
+                id: randomUUID(),
+                role: "user",
+                content: subAgentPrompt,
+                createdAt: new Date().toISOString(),
+            });
+            return messages;
+        }
         const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
         if (session.meta.contextSummary) {
             messages.push({
@@ -158,12 +182,124 @@ export class AgentRuntime {
                 createdAt: new Date().toISOString(),
             });
         }
-        messages.push(
-            ...session.messages
-                .slice(fromIndex)
-                .filter((message) => !isContextDividerMessage(message)),
-        );
+        if (includeSessionHistory) {
+            messages.push(
+                ...session.messages
+                    .slice(fromIndex)
+                    .filter((message) => !isContextDividerMessage(message)),
+            );
+        }
         return messages;
+    }
+
+    modelChainForSession(session) {
+        return this.configStore.resolveModelChain(
+            session.meta.providerKey,
+            session.meta.modelId,
+        );
+    }
+
+    updateTodos(sessionId, incoming, merge) {
+        const session = this.sessionStore.get(sessionId);
+        const next = mergeTodos(session.meta.todos || [], incoming, merge);
+        const updated = this.sessionStore.updateTodos(sessionId, next);
+        this.emit(IPC_CHANNELS.onTodosChanged, { sessionId, todos: next });
+        this.emit(IPC_CHANNELS.onSessionChanged, updated);
+        return next;
+    }
+
+    async runSubAgent({
+        sessionId,
+        parentRunId,
+        description,
+        prompt,
+        subagentType = "generalPurpose",
+        modelOverride = null,
+    }) {
+        const session = this.sessionStore.get(sessionId);
+        const override = modelOverride ? parseModelRef(modelOverride) : null;
+        const model = override || {
+            providerKey: session.meta.providerKey,
+            modelId: session.meta.modelId,
+        };
+        const modelChain = override
+            ? [model]
+            : this.modelChainForSession(session);
+        const agent = this.defaultAgent();
+        const toolsEnabled = agent?.tools?.enable_tools !== false;
+        const allTools = this.toolRegistry.allTools();
+        const subTools = filterToolsForSubAgent(allTools, subagentType).filter((tool) =>
+            tool.enabled(),
+        );
+        const schemas = subTools
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((tool) => tool.schema);
+        const subRunId = randomUUID();
+        const messages = this.messagesForLLM(session, {
+            subAgentPrompt: prompt,
+            subagentType,
+            includeSessionHistory: false,
+        });
+        const maxRounds = Math.max(1, agent?.max_tool_rounds ?? 8);
+        let round = 0;
+
+        while (round < maxRounds) {
+            const choice = await this.llmClient.chat({
+                messages,
+                model,
+                modelChain,
+                tools: toolsEnabled ? schemas : [],
+            });
+            const assistant = choice.message;
+            const calls = assistant.toolCalls || [];
+            if (!calls.length) {
+                const body = String(assistant.content || "").trim() || "(no output)";
+                const fallbackNote = choice.usedFallback
+                    ? `\n\n[sub-agent used fallback model ${choice.usedModel.providerKey}/${choice.usedModel.modelId}]`
+                    : "";
+                return `Sub-agent "${description}" completed:\n\n${body}${fallbackNote}`;
+            }
+
+            messages.push(assistant);
+            for (const call of calls) {
+                if (call.function.name === "Task") {
+                    messages.push({
+                        id: randomUUID(),
+                        role: "tool",
+                        name: call.function.name,
+                        toolCallId: call.id,
+                        content: "Error: sub-agents cannot spawn additional sub-agents",
+                        createdAt: new Date().toISOString(),
+                        runId: subRunId,
+                    });
+                    continue;
+                }
+                const result = await this.toolRegistry.execute(call, {
+                    sessionId,
+                    runId: subRunId,
+                    parentRunId,
+                    isSubAgent: true,
+                });
+                if (
+                    call.function.name === "download_skill" ||
+                    call.function.name === "delete_skill"
+                ) {
+                    this.skillLoader.reload();
+                }
+                messages.push({
+                    id: randomUUID(),
+                    role: "tool",
+                    name: call.function.name,
+                    toolCallId: call.id,
+                    content: result,
+                    createdAt: new Date().toISOString(),
+                    runId: subRunId,
+                });
+            }
+            round += 1;
+        }
+
+        return `Sub-agent "${description}" reached tool round limit before finishing.`;
     }
 
     async sendUserMessage(sessionId, rawInput, images = []) {
@@ -269,6 +405,7 @@ export class AgentRuntime {
                     providerKey: session.meta.providerKey,
                     modelId: session.meta.modelId,
                 },
+                modelChain: this.modelChainForSession(session),
                 messages: [
                     { role: "system", content: COMPACT_SUMMARIZE_SYSTEM },
                     { role: "user", content: transcript },
@@ -329,15 +466,21 @@ export class AgentRuntime {
 
             while (round < maxRounds) {
                 session = this.sessionStore.get(sessionId);
+                const model = {
+                    providerKey: session.meta.providerKey,
+                    modelId: session.meta.modelId,
+                };
                 const choice = await this.llmClient.chat({
                     messages: this.messagesForLLM(session),
-                    model: {
-                        providerKey: session.meta.providerKey,
-                        modelId: session.meta.modelId,
-                    },
+                    model,
+                    modelChain: this.modelChainForSession(session),
                     tools: toolsEnabled ? this.toolRegistry.schemas() : [],
                 });
                 const assistant = { ...choice.message, runId };
+                if (choice.usedFallback && choice.usedModel) {
+                    const note = `(已自动切换至备用模型 ${choice.usedModel.providerKey}/${choice.usedModel.modelId})\n\n`;
+                    assistant.content = `${note}${assistant.content || ""}`;
+                }
                 session = this.sessionStore.appendMessage(session.meta.id, assistant);
                 this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: assistant });
                 this.emit(IPC_CHANNELS.onSessionChanged, session);
@@ -348,7 +491,10 @@ export class AgentRuntime {
                 }
 
                 for (const call of calls) {
-                    const result = await this.toolRegistry.execute(call);
+                    const result = await this.toolRegistry.execute(call, {
+                        sessionId,
+                        runId,
+                    });
                     if (
                         call.function.name === "download_skill" ||
                         call.function.name === "delete_skill"

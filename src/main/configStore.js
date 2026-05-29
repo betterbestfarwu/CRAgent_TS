@@ -27,6 +27,25 @@ export class ConfigStore {
         const [providerKey, modelId] = this.data.agents.default.model.primary.split("/");
         return { providerKey, modelId };
     }
+    resolveModelChain(providerKey, modelId) {
+        const primary = { providerKey, modelId };
+        const fallbacks = this.data.agents?.default?.model?.fallbacks || [];
+        const chain = [primary];
+        const seen = new Set([`${providerKey}/${modelId}`]);
+        for (const ref of fallbacks) {
+            const [nextProvider, nextModel] = String(ref || "").split("/");
+            if (!nextProvider || !nextModel) {
+                continue;
+            }
+            const key = `${nextProvider}/${nextModel}`;
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            chain.push({ providerKey: nextProvider, modelId: nextModel });
+        }
+        return chain;
+    }
     model(providerKey, modelId) {
         return this.data.models[providerKey]?.models.find((m) => m.id === modelId);
     }

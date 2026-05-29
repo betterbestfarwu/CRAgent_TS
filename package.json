@@ -14,7 +14,7 @@
     "pack:ios": "npm run cap:sync:ios && npm run cap:open:ios",
     "pack": "bash scripts/build-dmg.sh",
     "pack:win": "bash scripts/build-win.sh",
-    "test": "node --test test/*.test.js"
+    "test": "node --import ./test/register-test.mjs --test test/*.test.js"
   },
   "keywords": [],
   "author": "",

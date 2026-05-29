@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isRetryableLlmError } from "./modelFallback.js";
 
 function messageToApiPayload(message) {
     const payload = { role: message.role };
@@ -60,14 +61,16 @@ export class LlmClient {
         this.resolveProvider = resolveProvider;
     }
 
-    async complete({ messages, model }) {
+    resolveProviderOrThrow(model) {
         const provider = this.resolveProvider(model.providerKey);
         if (!provider || !provider.apiKey || provider.apiKey.includes("REPLACE_ME")) {
-            return {
-                message: this.assistantMessage("请先在设置中配置有效 API Key，再继续对话。"),
-            };
+            throw new Error("请先在设置中配置有效 API Key，再继续对话。");
         }
+        return provider;
+    }
 
+    async completeOnce({ messages, model }) {
+        const provider = this.resolveProviderOrThrow(model);
         const body = {
             model: model.modelId,
             messages: messages.map(messageToApiPayload),
@@ -86,11 +89,7 @@ export class LlmClient {
 
         if (!response.ok) {
             const text = await response.text();
-            return {
-                message: this.assistantMessage(
-                    `模型请求失败: ${response.status} ${text.slice(0, 200)}`,
-                ),
-            };
+            throw new Error(`模型请求失败: ${response.status} ${text.slice(0, 200)}`);
         }
 
         const data = await response.json();
@@ -100,13 +99,36 @@ export class LlmClient {
         };
     }
 
-    async chat({ messages, model, tools = [] }) {
-        const provider = this.resolveProvider(model.providerKey);
-        if (!provider || !provider.apiKey || provider.apiKey.includes("REPLACE_ME")) {
-            return {
-                message: this.assistantMessage("请先在设置中配置有效 API Key，再继续对话。"),
-            };
+    async complete({ messages, model, modelChain = [] }) {
+        const chain = modelChain.length ? modelChain : [model];
+        let lastError = null;
+        for (const currentModel of chain) {
+            try {
+                const result = await this.completeOnce({ messages, model: currentModel });
+                return {
+                    ...result,
+                    usedModel: currentModel,
+                    usedFallback: chain.indexOf(currentModel) > 0,
+                };
+            } catch (error) {
+                lastError = error;
+                if (!isRetryableLlmError(error)) {
+                    return { message: this.assistantMessage(error.message) };
+                }
+                console.warn(
+                    `[CRAgent][LLM] complete failed for ${currentModel.providerKey}/${currentModel.modelId}: ${error.message}`,
+                );
+            }
         }
+        return {
+            message: this.assistantMessage(
+                `所有模型均请求失败。最后错误: ${lastError?.message || "unknown"}`,
+            ),
+        };
+    }
+
+    async chatOnce({ messages, model, tools = [] }) {
+        const provider = this.resolveProviderOrThrow(model);
 
         const last = messages[messages.length - 1];
         if (last?.role === "user" && last.content.startsWith("/")) {
@@ -137,11 +159,7 @@ export class LlmClient {
 
         if (!response.ok) {
             const text = await response.text();
-            return {
-                message: this.assistantMessage(
-                    `模型请求失败: ${response.status} ${text.slice(0, 200)}`,
-                ),
-            };
+            throw new Error(`模型请求失败: ${response.status} ${text.slice(0, 200)}`);
         }
 
         const data = await response.json();
@@ -157,6 +175,34 @@ export class LlmClient {
 
         return {
             message: this.assistantMessage(choice?.content || "", toolCalls),
+        };
+    }
+
+    async chat({ messages, model, modelChain = [], tools = [] }) {
+        const chain = modelChain.length ? modelChain : [model];
+        let lastError = null;
+        for (const currentModel of chain) {
+            try {
+                const result = await this.chatOnce({ messages, model: currentModel, tools });
+                return {
+                    ...result,
+                    usedModel: currentModel,
+                    usedFallback: chain.indexOf(currentModel) > 0,
+                };
+            } catch (error) {
+                lastError = error;
+                if (!isRetryableLlmError(error)) {
+                    return { message: this.assistantMessage(error.message) };
+                }
+                console.warn(
+                    `[CRAgent][LLM] chat failed for ${currentModel.providerKey}/${currentModel.modelId}: ${error.message}`,
+                );
+            }
+        }
+        return {
+            message: this.assistantMessage(
+                `所有模型均请求失败。最后错误: ${lastError?.message || "unknown"}`,
+            ),
         };
     }
 

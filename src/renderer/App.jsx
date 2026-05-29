@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "./ChatView.jsx";
+import { TodoPanel } from "./TodoPanel.jsx";
 import {
   buildSlashMenuNavItems,
   ComposerSlashMenu,
@@ -218,6 +219,13 @@ export function App() {
       }
     });
 
+    const offTodos = window.cragent.onTodosChanged?.(({ sessionId, todos }) => {
+      setCurrentSession((prev) => {
+        if (!prev || prev.meta.id !== sessionId) return prev;
+        return { ...prev, meta: { ...prev.meta, todos } };
+      });
+    });
+
     const offError = window.cragent.onError(({ message, sessionId }) => {
       if (!sessionId || sessionIdRef.current === sessionId) {
         showSessionError(message, sessionId);
@@ -241,6 +249,7 @@ export function App() {
       offMessage();
       offSession();
       offBusy();
+      offTodos?.();
       offError();
       offSettings();
     };
@@ -356,14 +365,28 @@ export function App() {
     if (!currentSession || page !== "chat") return;
     const trimmed = text.trim();
     if ((!trimmed && !pendingImages.length) || busy) return;
+
+    const sessionId = currentSession.meta.id;
     const images = toStoredImages(pendingImages);
     setInput("");
     setPendingImages([]);
-    await window.cragent.sendChat({
-      sessionId: currentSession.meta.id,
-      userInput: trimmed,
-      images,
-    });
+    setComposerDragOver(false);
+
+    try {
+      await window.cragent.sendChat({
+        sessionId,
+        userInput: trimmed,
+        images,
+      });
+    } catch (err) {
+      showSessionError(err instanceof Error ? err.message : String(err), sessionId);
+    } finally {
+      busyBySessionRef.current.set(sessionId, false);
+      setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
+      if (sessionIdRef.current === sessionId) {
+        setBusy(false);
+      }
+    }
   }
 
   async function handleNewChat() {
@@ -499,8 +522,6 @@ export function App() {
     return sessionError.message;
   }, [sessionError, currentSession?.meta.id]);
 
-  const canSend = Boolean(input.trim() || pendingImages.length);
-
   return (
     <div className="app-shell">
       <TitleBar
@@ -587,6 +608,8 @@ export function App() {
                 </div>
               ) : null}
             </div>
+
+            <TodoPanel todos={currentSession?.meta?.todos} />
 
             <div className="composer">
               <div className="composer-shell">
@@ -741,7 +764,7 @@ export function App() {
                     type="button"
                     className="composer-send"
                     onClick={() => void handleSend()}
-                    disabled={busy || !canSend}
+                    disabled={busy}
                     title={busy ? "正在发送" : "发送"}
                     aria-label={busy ? "正在发送" : "发送"}
                   >

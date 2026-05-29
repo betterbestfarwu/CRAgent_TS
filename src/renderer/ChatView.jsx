@@ -105,7 +105,7 @@ export function ChatView({ messages, busy, onDelete }) {
       ref={iframeRef}
       className="chat-frame"
       title="CRAgent chat"
-      src="./chat/chat.html?v=4"
+      src="./chat/chat.html?v=5"
     />
   );
 }

@@ -57,6 +57,7 @@ export class SessionStore {
                 modelId: this.defaultModel.modelId,
                 createdAt: timestamp,
                 updatedAt: timestamp,
+                todos: [],
             },
             messages: [],
         };
@@ -97,6 +98,12 @@ export class SessionStore {
         const session = this.get(sessionId);
         session.meta.providerKey = providerKey;
         session.meta.modelId = modelId;
+        this.save(session);
+        return session;
+    }
+    updateTodos(sessionId, todos) {
+        const session = this.get(sessionId);
+        session.meta.todos = todos;
         this.save(session);
         return session;
     }

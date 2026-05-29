@@ -12,6 +12,7 @@ import { WorkspaceMemory } from "./workspaceMemory.js";
 import { SkillLoader } from "./skillLoader.js";
 import { resolveWorkspace } from "./workspacePaths.js";
 import { createBuiltinTools } from "./tools/builtinTools.js";
+import { createMetaTools } from "./tools/metaTools.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
@@ -197,14 +198,20 @@ function bootstrap() {
         return agent?.tools || { enable_tools: true, enable_file_tools: true, enable_skills: true };
     };
 
-    const toolRegistry = new ToolRegistry(() =>
-        createBuiltinTools({
+    const toolRegistry = new ToolRegistry(() => {
+        const builtin = createBuiltinTools({
             getWorkspace,
             workspaceMemory,
             skillLoader,
             getAgentTools,
-        }),
-    );
+        });
+        const meta = createMetaTools({
+            getAgentTools,
+            updateTodos: (sessionId, todos, merge) => runtime.updateTodos(sessionId, todos, merge),
+            runSubAgent: (args) => runtime.runSubAgent(args),
+        });
+        return [...builtin, ...meta];
+    });
 
     const primary = configStore.resolvePrimaryRef();
     sessionStore = new SessionStore(appPaths.sessionsDir, primary);

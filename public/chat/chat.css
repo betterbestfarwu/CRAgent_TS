@@ -58,7 +58,7 @@ html, body {
 }
 
 #messages {
-  padding: 16px var(--chat-gutter-x) 36px;
+  padding: 16px var(--chat-gutter-x) 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -535,30 +535,11 @@ html, body {
   text-align: center;
 }
 
-body::after {
-  content: "";
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 36px;
-  pointer-events: none;
-  z-index: 10;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  mask-image: linear-gradient(to bottom, transparent, #000 75%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 75%);
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in srgb, var(--bg) 32%, transparent)
-  );
-}
-
 #busy {
   position: fixed;
-  bottom: 12px;
+  bottom: 32px;
   left: 50%;
+  z-index: 11;
   transform: translateX(-50%);
   background: var(--bubble-bg);
   color: var(--bubble-fg);

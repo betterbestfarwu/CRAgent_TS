@@ -19,6 +19,7 @@
   --chat-gutter-x: 16px;
   --chat-inner-x: 12px;
   --composer-input-toolbar-gap: 10px;
+  --composer-fade-gap: 2px;
   --composer-shell-height: 100px;
   --surface-border: var(--cursor-border);
   --splitter-bg: var(--cursor-bg-panel);
@@ -545,22 +546,6 @@ body,
   box-sizing: border-box;
 }
 
-.chat-history:has(.chat-frame)::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 12px;
-  pointer-events: none;
-  z-index: 2;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in srgb, var(--chat-bg) 55%, transparent)
-  );
-}
-
 .chat-error-toast {
   --chat-error-h: 26px;
   position: absolute;
@@ -611,20 +596,104 @@ body,
   gap: 8px;
 }
 
+.todo-panel {
+  flex-shrink: 0;
+  margin: 0 var(--chat-gutter-x) 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--chat-bg) 92%, var(--cursor-bg-panel));
+}
+
+.todo-panel-header {
+  font-size: var(--cursor-font-size-sm);
+  font-weight: 600;
+  color: var(--cursor-fg-muted);
+  margin-bottom: 8px;
+}
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.todo-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--cursor-font-size-sm);
+}
+
+.todo-item-completed .todo-content {
+  text-decoration: line-through;
+  color: var(--cursor-fg-muted);
+}
+
+.todo-item-in_progress .todo-content {
+  font-weight: 600;
+}
+
+.todo-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--cursor-fg-muted);
+}
+
+.todo-item-in_progress .todo-status {
+  color: var(--accent);
+}
+
+.todo-item-completed .todo-status {
+  color: #2f9e44;
+}
+
+.todo-status-label {
+  color: var(--cursor-fg-muted);
+  font-size: 11px;
+}
+
 .composer {
   position: relative;
   z-index: 3;
   flex-shrink: 0;
-  padding: 4px var(--chat-gutter-x) 20px;
+  margin-top: calc(-1 * var(--composer-fade-gap));
+  padding: var(--composer-fade-gap) var(--chat-gutter-x) 20px;
   background: var(--chat-bg);
   box-sizing: border-box;
 }
 
+.composer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--composer-fade-gap);
+  pointer-events: none;
+  z-index: 1;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  mask-image: linear-gradient(to bottom, #000, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000, transparent);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--chat-bg) 32%, transparent),
+    transparent
+  );
+}
+
 .composer-shell {
   position: relative;
+  z-index: 2;
   max-width: 100%;
   min-height: var(--composer-shell-height);
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .composer-box {
@@ -691,6 +760,7 @@ body,
 .composer-input {
   width: 100%;
   min-height: 24px;
+  flex: 0 0 auto;
   padding: 0 0 0 8px;
   margin: 0;
   border: 0;
@@ -797,6 +867,9 @@ body,
   gap: 0;
   min-width: 0;
   margin-top: 0;
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
 }
 
 .composer-model-wrap {
@@ -975,6 +1048,7 @@ body,
 .settings-providers {
   flex-shrink: 0;
   width: 190px;
+  min-height: 0;
   border-right: 1px solid var(--settings-border);
   background: var(--settings-panel);
   padding: 8px;
@@ -983,7 +1057,48 @@ body,
   gap: 6px;
 }
 
+.settings-providers-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.settings-providers-footer {
+  flex-shrink: 0;
+  margin-top: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.settings-provider-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--settings-fg-muted, var(--cursor-fg-muted));
+  cursor: pointer;
+}
+
+.settings-provider-action-btn:hover:not(:disabled) {
+  color: var(--settings-fg);
+  background: var(--sidebar-hover);
+}
+
+.settings-provider-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .settings-provider-item {
+  flex: 0 0 auto;
   border: 0;
   border-radius: 8px;
   padding: 10px 12px;
@@ -1209,10 +1324,37 @@ body,
   white-space: nowrap;
 }
 
+.settings-model-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .settings-model-checkbox {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
+}
+
+.settings-model-delete {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--settings-fg-muted, var(--cursor-fg-muted));
+  cursor: pointer;
+}
+
+.settings-model-delete:hover {
+  color: var(--settings-fg);
+  background: var(--settings-row-hover);
 }
 
 .settings-models-footer {
@@ -1565,7 +1707,7 @@ body,
   }
 
   .composer {
-    padding: 4px var(--chat-gutter-x) calc(16px + env(safe-area-inset-bottom, 0px));
+    padding: var(--composer-fade-gap) var(--chat-gutter-x) calc(16px + env(safe-area-inset-bottom, 0px));
   }
 
   .composer-box {
@@ -1604,7 +1746,7 @@ body,
     max-height: 180px;
     border-right: 0;
     border-bottom: 1px solid var(--settings-border);
-    overflow: auto;
+    overflow: hidden;
   }
 
   .app.app-compact .settings-panel {

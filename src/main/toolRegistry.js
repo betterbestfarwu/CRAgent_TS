@@ -8,13 +8,17 @@ export class ToolRegistry {
         return this.toolFactory().filter((tool) => tool.enabled());
     }
 
+    allTools() {
+        return this.toolFactory();
+    }
+
     schemas() {
         return this.activeTools()
             .sort((a, b) => a.name.localeCompare(b.name))
             .map((tool) => tool.schema);
     }
 
-    async execute(call) {
+    async execute(call, context = {}) {
         const tool = this.activeTools().find((entry) => entry.name === call.function.name);
         if (!tool) {
             return `Error: unknown tool '${call.function.name}'`;
@@ -38,6 +42,9 @@ export class ToolRegistry {
         }
 
         try {
+            if (tool.execute.length >= 2) {
+                return await tool.execute(args, context);
+            }
             return await tool.execute(args);
         } catch (error) {
             return `Error: ${error.message}`;

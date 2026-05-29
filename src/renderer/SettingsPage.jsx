@@ -35,6 +35,23 @@ const ICON_REFRESH = (
   </svg>
 );
 
+const ICON_TRASH = (
+  <svg
+    viewBox="0 0 24 24"
+    width="14"
+    height="14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </svg>
+);
+
 const ICON_EYE_OFF = (
   <svg
     viewBox="0 0 24 24"
@@ -55,6 +72,118 @@ const ICON_EYE_OFF = (
   </svg>
 );
 
+const ICON_PLUS = (
+  <svg
+    viewBox="0 0 24 24"
+    width="14"
+    height="14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
+const ICON_EDIT = (
+  <svg
+    viewBox="0 0 24 24"
+    width="14"
+    height="14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+);
+
+function createEmptyProvider() {
+  return {
+    baseUrl: "",
+    apiKey: "",
+    api: "chat/completions",
+    state: true,
+    models: [],
+  };
+}
+
+function replaceProviderRef(ref, oldKey, newKey) {
+  const prefix = `${oldKey}/`;
+  if (typeof ref === "string" && ref.startsWith(prefix)) {
+    return `${newKey}/${ref.slice(prefix.length)}`;
+  }
+  return ref;
+}
+
+function ProviderNameDialog({ title, initialName = "", onClose, onConfirm }) {
+  const [name, setName] = useState(initialName);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onConfirm(trimmed);
+  }
+
+  return (
+    <div className="confirm-overlay" role="presentation" onClick={onClose}>
+      <form
+        className="confirm-dialog provider-name-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="provider-name-dialog-title"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
+        <div id="provider-name-dialog-title" className="confirm-dialog-title">
+          {title}
+        </div>
+        <input
+          ref={inputRef}
+          className="provider-name-input"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Provider 名称"
+          aria-label="Provider 名称"
+        />
+        <div className="confirm-dialog-actions">
+          <button type="button" className="confirm-dialog-btn" onClick={onClose}>
+            取消
+          </button>
+          <button type="submit" className="confirm-dialog-btn confirm-dialog-btn-primary">
+            保存
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -68,6 +197,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
   const [showApiKey, setShowApiKey] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [modelsError, setModelsError] = useState("");
+  const [providerDialog, setProviderDialog] = useState(null);
   const modelListRef = useRef(null);
   const providerKeys = useMemo(
     () => Object.keys(draftConfig.models || {}),
@@ -140,6 +270,64 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
     }));
   }
 
+  function addProvider(providerKey) {
+    if (draftConfig.models?.[providerKey]) {
+      setModelsError(`Provider「${providerKey}」已存在。`);
+      return;
+    }
+    setModelsError("");
+    setDraftConfig((prev) => ({
+      ...prev,
+      models: {
+        ...prev.models,
+        [providerKey]: createEmptyProvider(),
+      },
+    }));
+    setSelectedProviderKey(providerKey);
+    setSelectedModelId("");
+    setProviderDialog(null);
+  }
+
+  function renameProvider(nextProviderKey) {
+    if (!selectedProviderKey) return;
+    if (nextProviderKey === selectedProviderKey) {
+      setProviderDialog(null);
+      return;
+    }
+    if (draftConfig.models?.[nextProviderKey]) {
+      setModelsError(`Provider「${nextProviderKey}」已存在。`);
+      return;
+    }
+    setModelsError("");
+    setDraftConfig((prev) => {
+      const provider = prev.models[selectedProviderKey];
+      const { [selectedProviderKey]: _removed, ...restModels } = prev.models;
+      const defaultModel = prev.agents?.default?.model || {};
+      return {
+        ...prev,
+        models: {
+          ...restModels,
+          [nextProviderKey]: provider,
+        },
+        agents: {
+          ...prev.agents,
+          default: {
+            ...prev.agents.default,
+            model: {
+              ...defaultModel,
+              primary: replaceProviderRef(defaultModel.primary, selectedProviderKey, nextProviderKey),
+              fallbacks: (defaultModel.fallbacks || []).map((ref) =>
+                replaceProviderRef(ref, selectedProviderKey, nextProviderKey),
+              ),
+            },
+          },
+        },
+      };
+    });
+    setSelectedProviderKey(nextProviderKey);
+    setProviderDialog(null);
+  }
+
   function updateModelState(modelId, checked) {
     if (!selectedProviderKey) return;
     setDraftConfig((prev) => {
@@ -157,6 +345,40 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
         },
       };
     });
+  }
+
+  function deleteModel(modelId) {
+    if (!selectedProviderKey || !modelId) return;
+    const models = selectedProvider?.models || [];
+    const deleteIndex = models.findIndex((model) => model.id === modelId);
+    if (deleteIndex < 0) return;
+
+    let nextSelectedId = selectedModelId;
+    if (selectedModelId === modelId) {
+      if (models.length > 1) {
+        nextSelectedId =
+          deleteIndex < models.length - 1
+            ? models[deleteIndex + 1].id
+            : models[deleteIndex - 1].id;
+      } else {
+        nextSelectedId = "";
+      }
+    }
+
+    setDraftConfig((prev) => {
+      const provider = prev.models[selectedProviderKey];
+      return {
+        ...prev,
+        models: {
+          ...prev.models,
+          [selectedProviderKey]: {
+            ...provider,
+            models: provider.models.filter((model) => model.id !== modelId),
+          },
+        },
+      };
+    });
+    setSelectedModelId(nextSelectedId);
   }
 
   function handleSave() {
@@ -178,46 +400,6 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
     } finally {
       setSyncLoading(false);
     }
-  }
-
-  function handleSetDefaultModel() {
-    const enabled = (selectedProvider?.models || []).find((model) => model.state);
-    if (!enabled || !selectedProviderKey) {
-      setModelsError("请先开启至少一个模型，再设置默认模型。");
-      return;
-    }
-    setModelsError("");
-    updateDefaultAgentModel({ primary: `${selectedProviderKey}/${enabled.id}` });
-  }
-
-  function deleteSelectedModel() {
-    if (!selectedProviderKey || !selectedModelId) return;
-    const models = selectedProvider?.models || [];
-    const deleteIndex = models.findIndex((model) => model.id === selectedModelId);
-    if (deleteIndex < 0) return;
-
-    let nextSelectedId = "";
-    if (models.length > 1) {
-      nextSelectedId =
-        deleteIndex < models.length - 1
-          ? models[deleteIndex + 1].id
-          : models[deleteIndex - 1].id;
-    }
-
-    setDraftConfig((prev) => {
-      const provider = prev.models[selectedProviderKey];
-      return {
-        ...prev,
-        models: {
-          ...prev.models,
-          [selectedProviderKey]: {
-            ...provider,
-            models: provider.models.filter((model) => model.id !== selectedModelId),
-          },
-        },
-      };
-    });
-    setSelectedModelId(nextSelectedId);
   }
 
   function updateDefaultAgentModel(patch) {
@@ -297,24 +479,49 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
       {activeTab === "models" ? (
         <div className="settings-card">
           <aside className="settings-providers">
-            {providerKeys.map((providerKey) => (
+            <div className="settings-providers-list">
+              {providerKeys.map((providerKey) => (
+                <button
+                  key={providerKey}
+                  type="button"
+                  className={`settings-provider-item${
+                    selectedProviderKey === providerKey ? " active" : ""
+                  }`}
+                  onClick={() => {
+                    setSelectedProviderKey(providerKey);
+                    setSelectedModelId("");
+                  }}
+                >
+                  <span className="settings-provider-icon">
+                    <SingleDotIcon size="xs" />
+                  </span>
+                  <span>{providerKey}</span>
+                </button>
+              ))}
+            </div>
+            <div className="settings-providers-footer">
               <button
-                key={providerKey}
                 type="button"
-                className={`settings-provider-item${
-                  selectedProviderKey === providerKey ? " active" : ""
-                }`}
-                onClick={() => {
-                  setSelectedProviderKey(providerKey);
-                  setSelectedModelId("");
-                }}
+                className="settings-provider-action-btn"
+                title="新增 Provider"
+                aria-label="新增 Provider"
+                onClick={() => setProviderDialog({ mode: "add" })}
               >
-                <span className="settings-provider-icon">
-                  <SingleDotIcon size="xs" />
-                </span>
-                <span>{providerKey}</span>
+                {ICON_PLUS}
               </button>
-            ))}
+              <button
+                type="button"
+                className="settings-provider-action-btn"
+                title="修改 Provider 名称"
+                aria-label="修改 Provider 名称"
+                disabled={!selectedProviderKey}
+                onClick={() =>
+                  setProviderDialog({ mode: "rename", initialName: selectedProviderKey })
+                }
+              >
+                {ICON_EDIT}
+              </button>
+            </div>
           </aside>
 
           <section className="settings-panel">
@@ -404,39 +611,35 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                       onClick={() => setSelectedModelId(model.id)}
                     >
                       <span className="settings-model-name">{model.id}</span>
-                      <span className="settings-model-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(model.state)}
-                          onChange={(e) => updateModelState(model.id, e.target.checked)}
-                          onClick={(e) => e.stopPropagation()}
-                          aria-label={`切换 ${model.id} 状态`}
-                        />
-                      </span>
+                      <div className="settings-model-actions">
+                        <span className="settings-model-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(model.state)}
+                            onChange={(e) => updateModelState(model.id, e.target.checked)}
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label={`切换 ${model.id} 状态`}
+                          />
+                        </span>
+                        <button
+                          type="button"
+                          className="settings-model-delete"
+                          title="删除模型"
+                          aria-label={`删除 ${model.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteModel(model.id);
+                          }}
+                        >
+                          {ICON_TRASH}
+                        </button>
+                      </div>
                     </div>
                   ))}
                   </div>
                 </div>
 
                 {modelsError ? <p className="settings-error">{modelsError}</p> : null}
-
-                <div className="settings-models-footer">
-                  <button
-                    type="button"
-                    className="settings-btn secondary"
-                    onClick={handleSetDefaultModel}
-                  >
-                    Set Default
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-btn secondary"
-                    onClick={deleteSelectedModel}
-                    disabled={!selectedModelId}
-                  >
-                    Delete Row
-                  </button>
-                </div>
               </>
             )}
           </section>
@@ -563,6 +766,22 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
             保存
           </button>
         </footer>
+      ) : null}
+
+      {providerDialog?.mode === "add" ? (
+        <ProviderNameDialog
+          title="新增 Provider"
+          onClose={() => setProviderDialog(null)}
+          onConfirm={addProvider}
+        />
+      ) : null}
+      {providerDialog?.mode === "rename" ? (
+        <ProviderNameDialog
+          title="修改 Provider 名称"
+          initialName={providerDialog.initialName || ""}
+          onClose={() => setProviderDialog(null)}
+          onConfirm={renameProvider}
+        />
       ) : null}
     </div>
   );
