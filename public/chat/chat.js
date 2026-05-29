@@ -58,17 +58,36 @@
     });
   }
 
-  function flashCopied(btn) {
+  function flashCopied(btn, durationMs) {
     if (!btn || btn.classList.contains('copied')) return;
-    var orig = btn.innerHTML;
+    var origHtml = btn.innerHTML;
+    var origTitle = btn.title;
+    var origAria = btn.getAttribute('aria-label');
     btn.innerHTML = ICON_CHECK;
     btn.classList.add('copied');
     btn.title = '已复制';
+    btn.setAttribute('aria-label', '已复制');
     setTimeout(function () {
-      btn.innerHTML = orig;
+      btn.innerHTML = origHtml;
       btn.classList.remove('copied');
-      btn.title = '复制';
-    }, 1500);
+      btn.title = origTitle || '复制';
+      btn.setAttribute('aria-label', origAria || '复制');
+    }, durationMs == null ? 1500 : durationMs);
+  }
+
+  function getCopyableTextFromBubble(bubbleEl) {
+    if (!bubbleEl) return '';
+    var turnContent = bubbleEl.querySelector('.assistant-turn-content');
+    if (turnContent) return turnContent.innerText.trim();
+    var body = bubbleEl.querySelector('.bubble-collapse-body');
+    if (body) return body.innerText.trim();
+    var msgText = bubbleEl.querySelector('.msg-text');
+    if (msgText) return msgText.innerText.trim();
+    var clone = bubbleEl.cloneNode(true);
+    clone.querySelectorAll('.thinking-block, .thinking, .bubble-collapse-toggle').forEach(function (node) {
+      node.remove();
+    });
+    return clone.innerText.trim();
   }
 
   var COLLAPSED_MAX_HEIGHT = 320;
@@ -509,14 +528,18 @@
     if (action === 'copy-thinking') {
       var group = btn.closest('.assistant-turn, .thinking-group-msg');
       var bubbleEl = group && group.querySelector('.bubble');
-      if (bubbleEl) copyToClipboard(bubbleEl.innerText);
+      if (bubbleEl) {
+        copyToClipboard(getCopyableTextFromBubble(bubbleEl));
+        flashCopied(btn, 3000);
+      }
       return;
     }
 
     var id = btn.dataset.id;
     var msgEl = container.querySelector('.msg[data-id="' + id + '"] .bubble');
     if (action === 'copy' && msgEl) {
-      copyToClipboard(msgEl.innerText);
+      copyToClipboard(getCopyableTextFromBubble(msgEl));
+      flashCopied(btn, 3000);
     }
     if (id) notifyHost({ action: action, id: id });
   });

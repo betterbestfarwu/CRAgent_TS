@@ -14,4 +14,5 @@ export const IPC_CHANNELS = {
     onBusyChanged: "events:busyChanged",
     onError: "events:error",
     onTodosChanged: "events:todosChanged",
+    onContextWarningChanged: "events:contextWarningChanged",
 };

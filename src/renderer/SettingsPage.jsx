@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfig";
+import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { SingleDotIcon } from "./DotGridAnimator.jsx";
 
 const ICON_EYE = (
@@ -84,8 +86,8 @@ const ICON_PLUS = (
     strokeLinejoin="round"
     aria-hidden="true"
   >
-    <line x1="12" y1="5" x2="12" y2="19" />
-    <line x1="5" y1="12" x2="19" y2="12" />
+    <line x1="12" y1="3" x2="12" y2="21" />
+    <line x1="3" y1="12" x2="21" y2="12" />
   </svg>
 );
 
@@ -122,6 +124,23 @@ function replaceProviderRef(ref, oldKey, newKey) {
     return `${newKey}/${ref.slice(prefix.length)}`;
   }
   return ref;
+}
+
+function modelRefUsesProvider(ref, providerKey) {
+  return typeof ref === "string" && ref.startsWith(`${providerKey}/`);
+}
+
+function firstModelRef(models) {
+  for (const [providerKey, provider] of Object.entries(models || {})) {
+    for (const model of provider.models || []) {
+      if (model.state) return `${providerKey}/${model.id}`;
+    }
+  }
+  for (const [providerKey, provider] of Object.entries(models || {})) {
+    const first = provider.models?.[0];
+    if (first) return `${providerKey}/${first.id}`;
+  }
+  return "";
 }
 
 function ProviderNameDialog({ title, initialName = "", onClose, onConfirm }) {
@@ -188,17 +207,137 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function SettingsGroup({ label, children, footer, cardClassName = "", className = "" }) {
+  return (
+    <section className={`settings-group${className ? ` ${className}` : ""}`}>
+      {label ? <h3 className="settings-group-label">{label}</h3> : null}
+      <div className={`settings-group-card${cardClassName ? ` ${cardClassName}` : ""}`}>
+        {children}
+      </div>
+      {footer ? <p className="settings-group-footer">{footer}</p> : null}
+    </section>
+  );
+}
+
+function SettingsToggleRow({ title, description, checked, onChange }) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <div className="settings-row-title">{title}</div>
+        {description ? <div className="settings-row-description">{description}</div> : null}
+      </div>
+      <label className="settings-switch" aria-label={title}>
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <span className="settings-switch-slider" aria-hidden="true" />
+      </label>
+    </div>
+  );
+}
+
+function SettingsNumberRow({ title, description, value, min, max, step = 1, onChange }) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <div className="settings-row-title">{title}</div>
+        {description ? <div className="settings-row-description">{description}</div> : null}
+      </div>
+      <input
+        className="settings-row-number"
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={title}
+      />
+    </div>
+  );
+}
+
+function SettingsSelectRow({ title, description, value, onChange, children }) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <div className="settings-row-title">{title}</div>
+        {description ? <div className="settings-row-description">{description}</div> : null}
+      </div>
+      <select
+        className="settings-row-select"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={title}
+      >
+        {children}
+      </select>
+    </div>
+  );
+}
+
+function SettingsTextRow({
+  title,
+  description,
+  value,
+  onChange,
+  type = "text",
+  action = null,
+}) {
+  return (
+    <div className="settings-row settings-row-field">
+      <div className="settings-row-copy">
+        <div className="settings-row-title">{title}</div>
+        {description ? <div className="settings-row-description">{description}</div> : null}
+      </div>
+      <div className={`settings-row-input-wrap${action ? " has-action" : ""}`}>
+        <input
+          className="settings-row-text"
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={title}
+        />
+        {action}
+      </div>
+    </div>
+  );
+}
+
+function SettingsModelRow({ title, checked, onToggle, onDelete }) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <div className="settings-row-title settings-row-title-mono">{title}</div>
+      </div>
+      <div className="settings-row-actions">
+        <label className="settings-switch" aria-label={`Enable ${title}`}>
+          <input type="checkbox" checked={checked} onChange={(e) => onToggle(e.target.checked)} />
+          <span className="settings-switch-slider" aria-hidden="true" />
+        </label>
+        <button
+          type="button"
+          className="settings-row-icon-btn"
+          title={`删除 ${title}`}
+          aria-label={`删除 ${title}`}
+          onClick={onDelete}
+        >
+          {ICON_TRASH}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
   const [activeTab, setActiveTab] = useState("models");
   const [draftConfig, setDraftConfig] = useState(() => clone(config));
   const [modelSearch, setModelSearch] = useState("");
   const [modelStateFilter, setModelStateFilter] = useState("all");
-  const [selectedModelId, setSelectedModelId] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [modelsError, setModelsError] = useState("");
   const [providerDialog, setProviderDialog] = useState(null);
-  const modelListRef = useRef(null);
+  const [deleteProviderConfirmOpen, setDeleteProviderConfirmOpen] = useState(false);
+  const modelsPanelRef = useRef(null);
   const providerKeys = useMemo(
     () => Object.keys(draftConfig.models || {}),
     [draftConfig.models],
@@ -219,13 +358,6 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
   const selectedProvider = selectedProviderKey
     ? draftConfig.models?.[selectedProviderKey]
     : null;
-  useEffect(() => {
-    if (!selectedModelId) return;
-    const exists = (selectedProvider?.models || []).some(
-      (model) => model.id === selectedModelId,
-    );
-    if (!exists) setSelectedModelId("");
-  }, [selectedProvider, selectedModelId]);
 
   const filteredModels = useMemo(() => {
     const models = selectedProvider?.models || [];
@@ -239,7 +371,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
     });
   }, [selectedProvider, modelSearch, modelStateFilter]);
   useEffect(() => {
-    modelListRef.current?.scrollTo({ top: 0 });
+    modelsPanelRef.current?.scrollTo({ top: 0 });
   }, [selectedProviderKey, modelSearch, modelStateFilter]);
   const enabledModelRefs = useMemo(
     () =>
@@ -255,6 +387,22 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
     draftConfig.agents?.list?.find((item) => item.is_default) ||
     draftConfig.agents?.list?.[0] ||
     null;
+  const contextDraft = useMemo(
+    () => mergeContextConfig(draftConfig.context),
+    [draftConfig.context],
+  );
+
+  function updateContext(patch) {
+    setDraftConfig((prev) => ({
+      ...prev,
+      context: mergeContextConfig({ ...prev.context, ...patch }),
+    }));
+  }
+
+  function updateContextNumber(key, rawValue, { min = 0, fallback = 0 } = {}) {
+    const parsed = Number.parseInt(String(rawValue), 10);
+    updateContext({ [key]: Number.isFinite(parsed) ? Math.max(min, parsed) : fallback });
+  }
 
   function updateProvider(patch) {
     if (!selectedProviderKey) return;
@@ -284,7 +432,6 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
       },
     }));
     setSelectedProviderKey(providerKey);
-    setSelectedModelId("");
     setProviderDialog(null);
   }
 
@@ -328,6 +475,40 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
     setProviderDialog(null);
   }
 
+  function deleteProvider() {
+    if (!selectedProviderKey) return;
+    const keyToDelete = selectedProviderKey;
+    const remainingKeys = providerKeys.filter((key) => key !== keyToDelete);
+    setModelsError("");
+    setDraftConfig((prev) => {
+      const { [keyToDelete]: _removed, ...restModels } = prev.models;
+      const defaultModel = prev.agents?.default?.model || {};
+      let nextPrimary = defaultModel.primary || "";
+      if (modelRefUsesProvider(nextPrimary, keyToDelete)) {
+        nextPrimary = firstModelRef(restModels);
+      }
+      const nextFallbacks = (defaultModel.fallbacks || []).filter(
+        (ref) => !modelRefUsesProvider(ref, keyToDelete),
+      );
+      return {
+        ...prev,
+        models: restModels,
+        agents: {
+          ...prev.agents,
+          default: {
+            ...prev.agents.default,
+            model: {
+              ...defaultModel,
+              primary: nextPrimary,
+              fallbacks: nextFallbacks,
+            },
+          },
+        },
+      };
+    });
+    setSelectedProviderKey(remainingKeys[0] || "");
+  }
+
   function updateModelState(modelId, checked) {
     if (!selectedProviderKey) return;
     setDraftConfig((prev) => {
@@ -349,22 +530,6 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
 
   function deleteModel(modelId) {
     if (!selectedProviderKey || !modelId) return;
-    const models = selectedProvider?.models || [];
-    const deleteIndex = models.findIndex((model) => model.id === modelId);
-    if (deleteIndex < 0) return;
-
-    let nextSelectedId = selectedModelId;
-    if (selectedModelId === modelId) {
-      if (models.length > 1) {
-        nextSelectedId =
-          deleteIndex < models.length - 1
-            ? models[deleteIndex + 1].id
-            : models[deleteIndex - 1].id;
-      } else {
-        nextSelectedId = "";
-      }
-    }
-
     setDraftConfig((prev) => {
       const provider = prev.models[selectedProviderKey];
       return {
@@ -378,7 +543,6 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
         },
       };
     });
-    setSelectedModelId(nextSelectedId);
   }
 
   function handleSave() {
@@ -445,7 +609,18 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
     });
   }
 
+  function setPrimaryModel(modelRef) {
+    const current = defaultAgentConfig.model?.fallbacks || [];
+    const nextFallbacks = current.filter((ref) => ref !== modelRef);
+    updateDefaultAgentModel({
+      primary: modelRef,
+      fallbacks: nextFallbacks,
+    });
+  }
+
   function toggleFallback(modelRef, checked) {
+    const primary = defaultAgentConfig.model?.primary || "";
+    if (checked && modelRef === primary) return;
     const current = defaultAgentConfig.model?.fallbacks || [];
     if (checked) {
       if (current.includes(modelRef)) return;
@@ -473,6 +648,13 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
           >
             Agent
           </button>
+          <button
+            type="button"
+            className={`settings-top-tab${activeTab === "context" ? " active" : ""}`}
+            onClick={() => setActiveTab("context")}
+          >
+            Context
+          </button>
         </div>
       </header>
 
@@ -489,7 +671,6 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                   }`}
                   onClick={() => {
                     setSelectedProviderKey(providerKey);
-                    setSelectedModelId("");
                   }}
                 >
                   <span className="settings-provider-icon">
@@ -521,25 +702,42 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
               >
                 {ICON_EDIT}
               </button>
+              <span className="settings-provider-action-divider" aria-hidden="true">
+                ｜
+              </span>
+              <button
+                type="button"
+                className="settings-provider-action-btn"
+                title="删除 Provider"
+                aria-label="删除 Provider"
+                disabled={!selectedProviderKey}
+                onClick={() => setDeleteProviderConfirmOpen(true)}
+              >
+                {ICON_TRASH}
+              </button>
             </div>
           </aside>
 
-          <section className="settings-panel">
+          <section className="settings-panel settings-panel-general" ref={modelsPanelRef}>
             {!selectedProvider ? (
               <p className="settings-empty">暂无可配置的模型提供商。</p>
             ) : (
               <>
-                <div className="settings-form">
-                  <label className="settings-field settings-field-with-action">
-                    <span>Base URL</span>
-                    <div className="settings-input-wrap">
-                      <input
-                        value={selectedProvider.baseUrl || ""}
-                        onChange={(e) => updateProvider({ baseUrl: e.target.value })}
-                      />
+                <h2 className="settings-general-title">{selectedProviderKey}</h2>
+                <p className="settings-general-lead">
+                  配置 API 连接并启用该 Provider 下的模型，供 Agent 页选择。
+                </p>
+
+                <SettingsGroup label="Connection">
+                  <SettingsTextRow
+                    title="Base URL"
+                    description="OpenAI 兼容 API 的根地址。"
+                    value={selectedProvider.baseUrl || ""}
+                    onChange={(value) => updateProvider({ baseUrl: value })}
+                    action={
                       <button
                         type="button"
-                        className="settings-inline-btn settings-inline-btn-black"
+                        className="settings-row-inline-btn"
                         title="刷新模型列表"
                         aria-label="刷新模型列表"
                         onClick={() => void handleSyncModels()}
@@ -547,45 +745,44 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                       >
                         {ICON_REFRESH}
                       </button>
-                    </div>
-                  </label>
-
-                  <label className="settings-field settings-field-with-action">
-                    <span>API Key</span>
-                    <div className="settings-input-wrap">
-                      <input
-                        type={showApiKey ? "text" : "password"}
-                        value={selectedProvider.apiKey || ""}
-                        onChange={(e) => updateProvider({ apiKey: e.target.value })}
-                      />
+                    }
+                  />
+                  <SettingsTextRow
+                    title="API Key"
+                    description="写入本地 config.json，不会上传到其他地方。"
+                    type={showApiKey ? "text" : "password"}
+                    value={selectedProvider.apiKey || ""}
+                    onChange={(value) => updateProvider({ apiKey: value })}
+                    action={
                       <button
                         type="button"
-                        className="settings-inline-btn"
+                        className="settings-row-inline-btn"
                         title={showApiKey ? "隐藏 API Key" : "显示 API Key"}
                         aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
                         onClick={() => setShowApiKey((prev) => !prev)}
                       >
                         {showApiKey ? ICON_EYE_OFF : ICON_EYE}
                       </button>
-                    </div>
-                  </label>
+                    }
+                  />
+                  <SettingsTextRow
+                    title="API Path"
+                    description="相对 Base URL 的路径，通常为 chat/completions。"
+                    value={selectedProvider.api || ""}
+                    onChange={(value) => updateProvider({ api: value })}
+                  />
+                </SettingsGroup>
 
-                  <label className="settings-field">
-                    <span>API Path</span>
-                    <input
-                      value={selectedProvider.api || ""}
-                      onChange={(e) => updateProvider({ api: e.target.value })}
-                    />
-                  </label>
-                </div>
-
-                <div className="settings-models-header">
-                  <h2>Models ({selectedProvider.models?.length || 0})</h2>
+                <div className="settings-models-toolbar">
+                  <h3 className="settings-group-label">
+                    Models ({selectedProvider.models?.length || 0})
+                  </h3>
                   <div className="settings-models-tools">
                     <select
                       className="settings-model-filter"
                       value={modelStateFilter}
                       onChange={(e) => setModelStateFilter(e.target.value)}
+                      aria-label="筛选模型"
                     >
                       <option value="all">全部</option>
                       <option value="selected">已选</option>
@@ -596,168 +793,360 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                       value={modelSearch}
                       onChange={(e) => setModelSearch(e.target.value)}
                       placeholder="Search models"
+                      aria-label="搜索模型"
                     />
                   </div>
                 </div>
 
-                <div className="settings-model-list-shell">
-                  <div className="settings-model-list" ref={modelListRef}>
-                  {filteredModels.map((model) => (
-                    <div
-                      key={model.id}
-                      className={`settings-model-row${
-                        selectedModelId === model.id ? " selected" : ""
-                      }`}
-                      onClick={() => setSelectedModelId(model.id)}
-                    >
-                      <span className="settings-model-name">{model.id}</span>
-                      <div className="settings-model-actions">
-                        <span className="settings-model-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(model.state)}
-                            onChange={(e) => updateModelState(model.id, e.target.checked)}
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label={`切换 ${model.id} 状态`}
-                          />
-                        </span>
-                        <button
-                          type="button"
-                          className="settings-model-delete"
-                          title="删除模型"
-                          aria-label={`删除 ${model.id}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteModel(model.id);
-                          }}
-                        >
-                          {ICON_TRASH}
-                        </button>
-                      </div>
+                <SettingsGroup cardClassName="settings-group-card-scroll" className="settings-models-group">
+                  {filteredModels.length ? (
+                    filteredModels.map((model) => (
+                      <SettingsModelRow
+                        key={model.id}
+                        title={model.id}
+                        checked={Boolean(model.state)}
+                        onToggle={(checked) => updateModelState(model.id, checked)}
+                        onDelete={() => deleteModel(model.id)}
+                      />
+                    ))
+                  ) : (
+                    <div className="settings-row settings-row-empty">
+                      {modelSearch.trim() || modelStateFilter !== "all"
+                        ? "没有匹配的模型"
+                        : "暂无模型，点击 Base URL 旁的刷新按钮同步"}
                     </div>
-                  ))}
-                  </div>
-                </div>
+                  )}
+                </SettingsGroup>
 
                 {modelsError ? <p className="settings-error">{modelsError}</p> : null}
               </>
             )}
           </section>
         </div>
-      ) : (
-        <div className="settings-card settings-agent-card">
-          <section className="settings-agent-panel">
-            <label className="settings-field settings-agent-field">
-              <span>Primary model</span>
-              <select
-                value={defaultAgentConfig.model?.primary || ""}
-                onChange={(e) =>
-                  updateDefaultAgentModel({ primary: e.target.value })
+      ) : activeTab === "context" ? (
+        <div className="settings-card settings-general-card">
+          <div className="settings-general-scroll">
+            <h2 className="settings-general-title">Context</h2>
+            <p className="settings-general-lead">
+              控制 MicroCompact、Session Memory 与 Full Compact。接近窗口上限时会自动压缩，也可手动使用
+              /compact。
+            </p>
+
+            <SettingsGroup label="General">
+              <SettingsToggleRow
+                title="Auto-compact"
+                description="接近上下文窗口上限时自动压缩较早对话。"
+                checked={Boolean(contextDraft.auto_compact_enabled)}
+                onChange={(checked) => updateContext({ auto_compact_enabled: checked })}
+              />
+              <SettingsToggleRow
+                title="Session Memory"
+                description="后台增量维护会话摘要，压缩时可跳过完整 LLM 摘要调用。"
+                checked={Boolean(contextDraft.session_memory_enabled)}
+                onChange={(checked) => updateContext({ session_memory_enabled: checked })}
+              />
+            </SettingsGroup>
+
+            <SettingsGroup
+              label="MicroCompact"
+              footer="每轮对话前清空较早 tool 结果，保留最近几条完整输出。"
+            >
+              <SettingsNumberRow
+                title="Keep recent tool results"
+                description="活跃会话中保留的最近 tool 结果数量。"
+                min={1}
+                value={contextDraft.microcompact_keep_recent}
+                onChange={(raw) =>
+                  updateContextNumber("microcompact_keep_recent", raw, {
+                    min: 1,
+                    fallback: DEFAULT_CONTEXT_CONFIG.microcompact_keep_recent,
+                  })
                 }
+              />
+              <SettingsNumberRow
+                title="Idle threshold"
+                description="距上次 assistant 回复超过该分钟数后，启用更激进的清理。"
+                min={1}
+                value={contextDraft.microcompact_idle_minutes}
+                onChange={(raw) =>
+                  updateContextNumber("microcompact_idle_minutes", raw, {
+                    min: 1,
+                    fallback: DEFAULT_CONTEXT_CONFIG.microcompact_idle_minutes,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Idle keep count"
+                description="空闲模式下仍保留的 tool 结果数量。"
+                min={1}
+                value={contextDraft.microcompact_idle_keep_recent}
+                onChange={(raw) =>
+                  updateContextNumber("microcompact_idle_keep_recent", raw, {
+                    min: 1,
+                    fallback: DEFAULT_CONTEXT_CONFIG.microcompact_idle_keep_recent,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Pre-compact keep count"
+                description="执行 Full Compact 之前额外清理 tool 结果时保留的数量。"
+                min={1}
+                value={contextDraft.precompact_keep_recent}
+                onChange={(raw) =>
+                  updateContextNumber("precompact_keep_recent", raw, {
+                    min: 1,
+                    fallback: DEFAULT_CONTEXT_CONFIG.precompact_keep_recent,
+                  })
+                }
+              />
+            </SettingsGroup>
+
+            <SettingsGroup
+              label="Full Compact"
+              footer="自动压缩触发点 ≈ 有效窗口 − 缓冲 tokens（200K 模型约 83%）。"
+            >
+              <SettingsNumberRow
+                title="Compact buffer"
+                description="为压缩过程预留的 tokens，越大则越早触发。"
+                min={1000}
+                step={1000}
+                value={contextDraft.compact_buffer_tokens}
+                onChange={(raw) =>
+                  updateContextNumber("compact_buffer_tokens", raw, {
+                    min: 1000,
+                    fallback: DEFAULT_CONTEXT_CONFIG.compact_buffer_tokens,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Summary input limit"
+                description="生成摘要时允许的最大输入 tokens。"
+                min={10_000}
+                step={1000}
+                value={contextDraft.compact_max_input_tokens}
+                onChange={(raw) =>
+                  updateContextNumber("compact_max_input_tokens", raw, {
+                    min: 10_000,
+                    fallback: DEFAULT_CONTEXT_CONFIG.compact_max_input_tokens,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Input too long retries"
+                description="摘要输入过长时，从头部丢弃旧轮次的重试次数。"
+                min={0}
+                max={10}
+                value={contextDraft.compact_ptl_max_retries}
+                onChange={(raw) =>
+                  updateContextNumber("compact_ptl_max_retries", raw, {
+                    min: 0,
+                    fallback: DEFAULT_CONTEXT_CONFIG.compact_ptl_max_retries,
+                  })
+                }
+              />
+            </SettingsGroup>
+
+            <SettingsGroup label="Retention">
+              <SettingsNumberRow
+                title="Minimum keep tokens"
+                description="Full Compact 后至少保留的最近消息 tokens。"
+                min={1000}
+                step={1000}
+                value={contextDraft.keep_min_tokens}
+                onChange={(raw) =>
+                  updateContextNumber("keep_min_tokens", raw, {
+                    min: 1000,
+                    fallback: DEFAULT_CONTEXT_CONFIG.keep_min_tokens,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Minimum text messages"
+                description="Full Compact 后至少保留的含文本消息条数。"
+                min={1}
+                value={contextDraft.keep_min_text_messages}
+                onChange={(raw) =>
+                  updateContextNumber("keep_min_text_messages", raw, {
+                    min: 1,
+                    fallback: DEFAULT_CONTEXT_CONFIG.keep_min_text_messages,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Maximum keep tokens"
+                description="Full Compact 后保留区的 token 上限。"
+                min={1000}
+                step={1000}
+                value={contextDraft.keep_max_tokens}
+                onChange={(raw) =>
+                  updateContextNumber("keep_max_tokens", raw, {
+                    min: 1000,
+                    fallback: DEFAULT_CONTEXT_CONFIG.keep_max_tokens,
+                  })
+                }
+              />
+            </SettingsGroup>
+
+            <SettingsGroup label="Post-compact restore">
+              <SettingsNumberRow
+                title="Max restored files"
+                description="压缩后重新注入的最近读取文件数量。"
+                min={0}
+                value={contextDraft.post_compact_max_files}
+                onChange={(raw) =>
+                  updateContextNumber("post_compact_max_files", raw, {
+                    min: 0,
+                    fallback: DEFAULT_CONTEXT_CONFIG.post_compact_max_files,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="File token budget"
+                description="恢复文件摘要的总 token 预算。"
+                min={1000}
+                step={1000}
+                value={contextDraft.post_compact_token_budget}
+                onChange={(raw) =>
+                  updateContextNumber("post_compact_token_budget", raw, {
+                    min: 1000,
+                    fallback: DEFAULT_CONTEXT_CONFIG.post_compact_token_budget,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Max restored skills"
+                description="压缩后重新注入的最近 load_skill 数量。"
+                min={0}
+                value={contextDraft.post_compact_max_skills}
+                onChange={(raw) =>
+                  updateContextNumber("post_compact_max_skills", raw, {
+                    min: 0,
+                    fallback: DEFAULT_CONTEXT_CONFIG.post_compact_max_skills,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Skill token budget"
+                description="恢复技能摘要的总 token 预算。"
+                min={1000}
+                step={1000}
+                value={contextDraft.post_compact_skills_token_budget}
+                onChange={(raw) =>
+                  updateContextNumber("post_compact_skills_token_budget", raw, {
+                    min: 1000,
+                    fallback: DEFAULT_CONTEXT_CONFIG.post_compact_skills_token_budget,
+                  })
+                }
+              />
+            </SettingsGroup>
+          </div>
+        </div>
+      ) : (
+        <div className="settings-card settings-general-card">
+          <div className="settings-general-scroll">
+            <h2 className="settings-general-title">Agent</h2>
+            <p className="settings-general-lead">
+              配置默认模型、备用链路与工具能力。需在 Models 页启用模型后，方可在此选择。
+            </p>
+
+            <SettingsGroup label="Model">
+              <SettingsSelectRow
+                title="Primary model"
+                description="主对话与压缩摘要使用的默认模型。"
+                value={defaultAgentConfig.model?.primary || ""}
+                onChange={setPrimaryModel}
               >
                 {enabledModelRefs.map((modelRef) => (
                   <option key={modelRef} value={modelRef}>
                     {modelRef}
                   </option>
                 ))}
-              </select>
-            </label>
+              </SettingsSelectRow>
+            </SettingsGroup>
 
-            <div className="settings-field settings-agent-field settings-agent-fallbacks">
-              <span>Fallbacks</span>
-              <div className="settings-agent-fallback-list">
-                {enabledModelRefs.map((modelRef) => (
-                  <label key={modelRef} className="settings-agent-fallback-row">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(
-                        defaultAgentConfig.model?.fallbacks?.includes(modelRef),
-                      )}
-                      onChange={(e) => toggleFallback(modelRef, e.target.checked)}
-                    />
-                    <span>{modelRef}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
+            <SettingsGroup
+              label="Fallback models"
+              footer={
+                enabledModelRefs.length
+                  ? "主模型请求失败时，按勾选顺序依次尝试备用模型。"
+                  : "请先在 Models 页启用至少一个模型。"
+              }
+            >
+              {enabledModelRefs.length ? (
+                enabledModelRefs.map((modelRef) => (
+                  <SettingsToggleRow
+                    key={modelRef}
+                    title={modelRef}
+                    description={
+                      modelRef === defaultAgentConfig.model?.primary
+                        ? "当前主模型，通常不必同时作为备用。"
+                        : undefined
+                    }
+                    checked={
+                      modelRef !== defaultAgentConfig.model?.primary &&
+                      Boolean(defaultAgentConfig.model?.fallbacks?.includes(modelRef))
+                    }
+                    onChange={(checked) => toggleFallback(modelRef, checked)}
+                  />
+                ))
+              ) : (
+                <div className="settings-row settings-row-empty">暂无已启用模型</div>
+              )}
+            </SettingsGroup>
 
-            <label className="settings-field settings-agent-field">
-              <span>Max tool rounds</span>
-              <input
-                type="number"
+            <SettingsGroup label="Execution">
+              <SettingsNumberRow
+                title="Max tool rounds"
+                description="单轮用户消息内，模型连续调用工具的最大轮数。"
                 min={1}
                 value={defaultAgentListItem?.max_tool_rounds ?? 1}
-                onChange={(e) =>
+                onChange={(raw) =>
                   updateDefaultAgentListItem({
-                    max_tool_rounds: Number.parseInt(e.target.value || "1", 10) || 1,
+                    max_tool_rounds: Number.parseInt(raw || "1", 10) || 1,
                   })
                 }
               />
-            </label>
+            </SettingsGroup>
 
-            <div className="settings-agent-toggles">
-              <label className="settings-agent-toggle">
-                <input
-                  type="checkbox"
-                  checked={Boolean(defaultAgentListItem?.tools?.enable_tools)}
-                  onChange={(e) =>
-                    updateDefaultAgentListItem({
-                      tools: { enable_tools: e.target.checked },
-                    })
-                  }
-                />
-                <span>Enable tools</span>
-              </label>
-              <label className="settings-agent-toggle">
-                <input
-                  type="checkbox"
-                  checked={Boolean(defaultAgentListItem?.tools?.enable_file_tools)}
-                  onChange={(e) =>
-                    updateDefaultAgentListItem({
-                      tools: { enable_file_tools: e.target.checked },
-                    })
-                  }
-                />
-                <span>Enable file tools</span>
-              </label>
-              <label className="settings-agent-toggle">
-                <input
-                  type="checkbox"
-                  checked={Boolean(defaultAgentListItem?.tools?.enable_skills)}
-                  onChange={(e) =>
-                    updateDefaultAgentListItem({
-                      tools: { enable_skills: e.target.checked },
-                    })
-                  }
-                />
-                <span>Enable skills</span>
-              </label>
-              <label className="settings-agent-toggle">
-                <input
-                  type="checkbox"
-                  checked={Boolean(defaultAgentListItem?.tools?.allow_sub_agents)}
-                  onChange={(e) =>
-                    updateDefaultAgentListItem({
-                      tools: { allow_sub_agents: e.target.checked },
-                    })
-                  }
-                />
-                <span>Allow sub-agents</span>
-              </label>
-            </div>
-
-            <button
-              type="button"
-              className="settings-agent-save settings-btn secondary"
-              onClick={handleSave}
-            >
-              Save
-            </button>
-          </section>
+            <SettingsGroup label="Tools">
+              <SettingsToggleRow
+                title="Enable tools"
+                description="允许模型调用内置工具（bash、读写文件等）。"
+                checked={Boolean(defaultAgentListItem?.tools?.enable_tools)}
+                onChange={(checked) =>
+                  updateDefaultAgentListItem({ tools: { enable_tools: checked } })
+                }
+              />
+              <SettingsToggleRow
+                title="Enable file tools"
+                description="允许 read_file、write_file、list_dir 等文件操作。"
+                checked={Boolean(defaultAgentListItem?.tools?.enable_file_tools)}
+                onChange={(checked) =>
+                  updateDefaultAgentListItem({ tools: { enable_file_tools: checked } })
+                }
+              />
+              <SettingsToggleRow
+                title="Enable skills"
+                description="在 system prompt 中注入技能目录，并允许 load_skill。"
+                checked={Boolean(defaultAgentListItem?.tools?.enable_skills)}
+                onChange={(checked) =>
+                  updateDefaultAgentListItem({ tools: { enable_skills: checked } })
+                }
+              />
+              <SettingsToggleRow
+                title="Allow sub-agents"
+                description="允许主 Agent 通过 Task 工具启动子 Agent。"
+                checked={Boolean(defaultAgentListItem?.tools?.allow_sub_agents)}
+                onChange={(checked) =>
+                  updateDefaultAgentListItem({ tools: { allow_sub_agents: checked } })
+                }
+              />
+            </SettingsGroup>
+          </div>
         </div>
       )}
 
-      {activeTab === "models" ? (
+      {activeTab === "models" || activeTab === "context" || activeTab === "agent" ? (
         <footer className="settings-page-footer">
           <button type="button" className="settings-btn secondary" onClick={onBack}>
             取消
@@ -781,6 +1170,19 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
           initialName={providerDialog.initialName || ""}
           onClose={() => setProviderDialog(null)}
           onConfirm={renameProvider}
+        />
+      ) : null}
+      {deleteProviderConfirmOpen ? (
+        <ConfirmDialog
+          message={`确定删除 Provider「${selectedProviderKey}」？`}
+          detail="该 Provider 的 API 连接、密钥及下属模型将被一并移除。保存设置后无法恢复，请确认后再操作。"
+          confirmLabel="删除"
+          cancelLabel="取消"
+          destructive
+          onClose={(confirmed) => {
+            setDeleteProviderConfirmOpen(false);
+            if (confirmed) deleteProvider();
+          }}
         />
       ) : null}
     </div>

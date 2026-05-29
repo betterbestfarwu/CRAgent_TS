@@ -13,71 +13,31 @@ import {
 import { formatTodosForPrompt, mergeTodos } from "./todoState.js";
 import { filterToolsForSubAgent, subAgentSystemPrompt } from "./subAgentTypes.js";
 import { parseModelRef } from "./modelFallback.js";
-
-const COMPACT_KEEP_USER_TURNS = 2;
-const COMPACT_MIN_CONTEXT_MESSAGES = 6;
-
-const COMPACT_SUMMARIZE_SYSTEM = `You compress conversation history for context-window management.
-Summarize the transcript concisely in the same language as the conversation.
-Preserve: goals, decisions, file paths, code identifiers, errors, constraints, and unfinished tasks.
-Do not invent facts. Output only the summary, no preamble.`;
-
-function formatMessagesForSummary(messages) {
-    return messages
-        .map((message) => {
-            if (message.role === "user") {
-                const imageNote = message.images?.length
-                    ? ` [${message.images.length} image(s)]`
-                    : "";
-                return `User: ${message.content || ""}${imageNote}`.trimEnd();
-            }
-            if (message.role === "assistant") {
-                let line = `Assistant: ${message.content || ""}`.trimEnd();
-                if (message.toolCalls?.length) {
-                    const names = message.toolCalls
-                        .map((call) => call.function?.name)
-                        .filter(Boolean)
-                        .join(", ");
-                    if (names) {
-                        line += `\n[tool_calls: ${names}]`;
-                    }
-                }
-                return line;
-            }
-            if (message.role === "tool") {
-                const body = String(message.content || "").slice(0, 800);
-                return `Tool (${message.name || "tool"}): ${body}`;
-            }
-            return "";
-        })
-        .filter(Boolean)
-        .join("\n\n");
-}
-
-function splitMessagesForCompact(messages) {
-    if (messages.length < COMPACT_MIN_CONTEXT_MESSAGES) {
-        return { toSummarize: [], keep: messages };
-    }
-    const keep = [];
-    let userTurns = 0;
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        keep.unshift(messages[index]);
-        if (messages[index].role === "user") {
-            userTurns += 1;
-            if (userTurns >= COMPACT_KEEP_USER_TURNS) {
-                break;
-            }
-        }
-    }
-    const keepCount = keep.length;
-    if (keepCount >= messages.length) {
-        return { toSummarize: [], keep: messages };
-    }
-    return {
-        toSummarize: messages.slice(0, messages.length - keepCount),
-        keep,
-    };
-}
+import {
+    buildCompactTranscript,
+    buildPostCompactContext,
+    calculateContextWarningState,
+    COMPACT_SUMMARIZE_SYSTEM,
+    formatCompactSummary,
+    getContextConfig,
+    microCompactMessages,
+    parseReadFileResult,
+    preCompactMicroCompact,
+    shouldAutoCompact,
+    splitMessagesForCompact,
+    trackLoadedSkill,
+    trackReadFile,
+    trySessionMemoryCompact,
+} from "./contextCompression.js";
+import {
+    buildSessionMemoryTranscript,
+    clearSessionMemory,
+    formatSessionMemory,
+    getPendingMemoryMessages,
+    SESSION_MEMORY_UPDATE_SYSTEM,
+    shouldRefreshSessionMemory,
+    syncSessionMemoryAfterCompact,
+} from "./sessionMemory.js";
 
 function getActiveContextEntries(session) {
     const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
@@ -101,6 +61,7 @@ export class AgentRuntime {
         this.skillLoader = skillLoader;
         this.mainWindowGetter = mainWindowGetter;
         this.busyBySession = new Map();
+        this.compactingSessions = new Set();
         this.chatCommands = createChatCommandHandlers({
             sessionStore: this.sessionStore,
             emit: (channel, payload) => this.emit(channel, payload),
@@ -179,6 +140,14 @@ export class AgentRuntime {
                 id: randomUUID(),
                 role: "user",
                 content: `<conversation_summary>\n${session.meta.contextSummary}\n</conversation_summary>`,
+                createdAt: new Date().toISOString(),
+            });
+        }
+        if (session.meta.postCompactContext) {
+            messages.push({
+                id: randomUUID(),
+                role: "user",
+                content: session.meta.postCompactContext,
                 createdAt: new Date().toISOString(),
             });
         }
@@ -365,41 +334,104 @@ export class AgentRuntime {
         let session = this.sessionStore.appendMessage(sessionId, dividerMessage);
         session.meta.llmContextFromIndex = session.messages.length;
         delete session.meta.contextSummary;
+        delete session.meta.postCompactContext;
+        delete session.meta.recentFiles;
+        delete session.meta.recentSkills;
+        session.meta.compactFailures = 0;
+        clearSessionMemory(session);
         this.sessionStore.save(session);
         this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: dividerMessage });
         this.emit(IPC_CHANNELS.onSessionChanged, session);
     }
 
-    async compactLlmContext(sessionId) {
-        this.setBusy(sessionId, true);
+    emitContextWarning(session) {
+        const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
+        const state = calculateContextWarningState(session, model, getContextConfig(this.configStore));
+        this.emit(IPC_CHANNELS.onContextWarningChanged, {
+            sessionId: session.meta.id,
+            ...state,
+        });
+    }
+
+    applyMicroCompact(session) {
+        const contextConfig = getContextConfig(this.configStore);
+        const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+        const active = session.messages.slice(fromIndex);
+        const { cleared } = microCompactMessages(active, contextConfig);
+        if (cleared) {
+            session.meta.updatedAt = new Date().toISOString();
+            this.sessionStore.save(session);
+            this.emit(IPC_CHANNELS.onSessionChanged, session);
+        }
+        this.emitContextWarning(session);
+        return session;
+    }
+
+    async maybeAutoCompact(sessionId) {
+        const contextConfig = getContextConfig(this.configStore);
+        if (!contextConfig.auto_compact_enabled || this.compactingSessions.has(sessionId)) {
+            return false;
+        }
+
+        let session = this.sessionStore.get(sessionId);
+        const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
+        if (!shouldAutoCompact(session, model, contextConfig)) {
+            return false;
+        }
+
+        await this.compactLlmContext(sessionId, { auto: true });
+        return true;
+    }
+
+    trackToolSideEffects(session, call, result) {
+        const contextConfig = getContextConfig(this.configStore);
+        if (call.function.name === "read_file") {
+            let args = {};
+            try {
+                args = JSON.parse(call.function.arguments || "{}");
+            } catch {
+                args = {};
+            }
+            const parsed = parseReadFileResult(result, args);
+            if (parsed) {
+                trackReadFile(session, parsed.path, parsed.content, contextConfig);
+                this.sessionStore.save(session);
+            }
+            return session;
+        }
+        if (call.function.name === "load_skill") {
+            let args = {};
+            try {
+                args = JSON.parse(call.function.arguments || "{}");
+            } catch {
+                args = {};
+            }
+            const skillName = String(args.name || args.url || "skill").trim();
+            if (skillName) {
+                trackLoadedSkill(session, skillName, result, contextConfig);
+                this.sessionStore.save(session);
+            }
+        }
+        return session;
+    }
+
+    async refreshSessionMemory(sessionId) {
+        const contextConfig = getContextConfig(this.configStore);
+        if (!contextConfig.session_memory_enabled || this.compactingSessions.has(sessionId)) {
+            return;
+        }
+
+        let session = this.sessionStore.get(sessionId);
+        if (!shouldRefreshSessionMemory(session)) {
+            return;
+        }
+
+        session.meta.sessionMemoryRefreshBusy = true;
+        this.sessionStore.save(session);
+
         try {
-            let session = this.sessionStore.get(sessionId);
-            const entries = getActiveContextEntries(session);
-            const activeMessages = entries.map((entry) => entry.message);
-            const { toSummarize, keep } = splitMessagesForCompact(activeMessages);
-
-            if (!toSummarize.length) {
-                const notice = {
-                    id: randomUUID(),
-                    role: "assistant",
-                    content: "当前上下文过短，暂无需压缩。",
-                    createdAt: new Date().toISOString(),
-                };
-                session = this.sessionStore.appendMessage(sessionId, notice);
-                this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: notice });
-                this.emit(IPC_CHANNELS.onSessionChanged, session);
-                return;
-            }
-
-            const transcriptParts = [];
-            if (session.meta.contextSummary) {
-                transcriptParts.push(
-                    `Previous summary:\n${session.meta.contextSummary}`,
-                );
-            }
-            transcriptParts.push(formatMessagesForSummary(toSummarize));
-            const transcript = transcriptParts.join("\n\n---\n\n");
-
+            const pendingMessages = getPendingMemoryMessages(session);
+            const transcript = buildSessionMemoryTranscript(session, pendingMessages);
             const choice = await this.llmClient.complete({
                 model: {
                     providerKey: session.meta.providerKey,
@@ -407,20 +439,120 @@ export class AgentRuntime {
                 },
                 modelChain: this.modelChainForSession(session),
                 messages: [
-                    { role: "system", content: COMPACT_SUMMARIZE_SYSTEM },
+                    { role: "system", content: SESSION_MEMORY_UPDATE_SYSTEM },
                     { role: "user", content: transcript },
                 ],
             });
-            const summary = String(choice.message.content || "").trim();
+            const memory = formatSessionMemory(choice.message.content || "");
+            if (!memory) {
+                return;
+            }
+
+            session = this.sessionStore.get(sessionId);
+            let lastIndex = session.messages.length - 1;
+            while (lastIndex >= 0 && isContextDividerMessage(session.messages[lastIndex])) {
+                lastIndex -= 1;
+            }
+            session.meta.sessionMemory = memory;
+            session.meta.sessionMemoryUpToIndex = Math.max(
+                session.meta.llmContextFromIndex ?? 0,
+                lastIndex,
+            );
+            session.meta.sessionMemoryUpdatedAt = new Date().toISOString();
+            delete session.meta.sessionMemoryRefreshBusy;
+            this.sessionStore.save(session);
+            this.emit(IPC_CHANNELS.onSessionChanged, session);
+            this.emitContextWarning(session);
+        } catch (error) {
+            console.warn(
+                `[CRAgent] session memory refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            session = this.sessionStore.get(sessionId);
+            delete session.meta.sessionMemoryRefreshBusy;
+            this.sessionStore.save(session);
+        }
+    }
+
+    async compactLlmContext(sessionId, options = {}) {
+        const { auto = false } = options;
+        if (this.compactingSessions.has(sessionId)) {
+            return;
+        }
+        this.compactingSessions.add(sessionId);
+        this.setBusy(sessionId, true);
+        try {
+            const contextConfig = getContextConfig(this.configStore);
+            let session = this.sessionStore.get(sessionId);
+            const entries = getActiveContextEntries(session);
+            let activeMessages = entries.map((entry) => entry.message);
+
+            preCompactMicroCompact(activeMessages, contextConfig);
+            this.sessionStore.save(session);
+
+            const { toSummarize, keep, keepStartIndex } = splitMessagesForCompact(
+                activeMessages,
+                contextConfig,
+            );
+
+            if (!toSummarize.length) {
+                if (!auto) {
+                    const notice = {
+                        id: randomUUID(),
+                        role: "assistant",
+                        content: "当前上下文过短，暂无需压缩。",
+                        createdAt: new Date().toISOString(),
+                    };
+                    session = this.sessionStore.appendMessage(sessionId, notice);
+                    this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: notice });
+                    this.emit(IPC_CHANNELS.onSessionChanged, session);
+                }
+                return;
+            }
+
+            let summary = null;
+            let compactMethod = "full_llm";
+            const memoryCompact = trySessionMemoryCompact(session, entries, keepStartIndex);
+            if (memoryCompact.ok && contextConfig.session_memory_enabled) {
+                summary = memoryCompact.summary;
+                compactMethod = memoryCompact.method;
+            } else {
+                session = this.sessionStore.get(sessionId);
+                const { transcript, droppedGroups } = buildCompactTranscript(
+                    session,
+                    toSummarize,
+                    contextConfig,
+                );
+
+                const choice = await this.llmClient.complete({
+                    model: {
+                        providerKey: session.meta.providerKey,
+                        modelId: session.meta.modelId,
+                    },
+                    modelChain: this.modelChainForSession(session),
+                    messages: [
+                        { role: "system", content: COMPACT_SUMMARIZE_SYSTEM },
+                        { role: "user", content: transcript },
+                    ],
+                });
+                summary = formatCompactSummary(choice.message.content || "");
+                if (droppedGroups > 0 && summary) {
+                    summary = `[Note: ${droppedGroups} oldest API round(s) omitted from compact input due to size limits]\n\n${summary}`;
+                }
+            }
+
             if (!summary) {
+                session = this.sessionStore.get(sessionId);
+                session.meta.compactFailures = (session.meta.compactFailures ?? 0) + 1;
+                this.sessionStore.save(session);
                 this.emit(IPC_CHANNELS.onError, {
                     sessionId,
-                    message: "压缩失败：模型未返回有效摘要。",
+                    message: auto
+                        ? "自动压缩失败：模型未返回有效摘要。"
+                        : "压缩失败：模型未返回有效摘要。",
                 });
                 return;
             }
 
-            const keepStartIndex = entries[entries.length - keep.length].index;
             const dividerMessage = {
                 id: randomUUID(),
                 role: CONTEXT_DIVIDER_ROLE,
@@ -428,29 +560,50 @@ export class AgentRuntime {
                 createdAt: new Date().toISOString(),
             };
             session = this.sessionStore.get(sessionId);
-            session.messages.splice(keepStartIndex, 0, dividerMessage);
-            session.meta.llmContextFromIndex = keepStartIndex + 1;
+            const sessionKeepIndex = entries[keepStartIndex]?.index ?? entries[0]?.index ?? 0;
+            session.messages.splice(sessionKeepIndex, 0, dividerMessage);
+            session.meta.llmContextFromIndex = sessionKeepIndex + 1;
             session.meta.contextSummary = summary;
+            session.meta.postCompactContext =
+                buildPostCompactContext(session, contextConfig) || undefined;
+            if (!session.meta.postCompactContext) {
+                delete session.meta.postCompactContext;
+            }
+            session.meta.compactFailures = 0;
             session.meta.updatedAt = new Date().toISOString();
+            const lastSummarizedIndex = entries[keepStartIndex - 1]?.index ?? sessionKeepIndex - 1;
+            syncSessionMemoryAfterCompact(session, summary, lastSummarizedIndex);
             this.sessionStore.save(session);
             this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: dividerMessage });
             this.emit(IPC_CHANNELS.onSessionChanged, session);
+            this.emitContextWarning(session);
 
+            const methodNote =
+                compactMethod === "session_memory" ? "（使用 Session Memory，未调用完整摘要）" : "";
+            const restoredNote = session.meta.postCompactContext
+                ? "，并恢复了最近读取的文件/技能摘要"
+                : "";
             const feedback = {
                 id: randomUUID(),
                 role: "assistant",
-                content: `已压缩 ${toSummarize.length} 条较早消息为摘要，保留最近 ${keep.length} 条消息完整上下文。`,
+                content: auto
+                    ? `[自动压缩${methodNote}] 已将 ${toSummarize.length} 条较早消息压缩为结构化摘要，保留最近 ${keep.length} 条完整消息${restoredNote}。`
+                    : `已压缩 ${toSummarize.length} 条较早消息为结构化摘要，保留最近 ${keep.length} 条消息完整上下文${restoredNote}。`,
                 createdAt: new Date().toISOString(),
             };
             session = this.sessionStore.appendMessage(sessionId, feedback);
             this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: feedback });
             this.emit(IPC_CHANNELS.onSessionChanged, session);
         } catch (error) {
+            const session = this.sessionStore.get(sessionId);
+            session.meta.compactFailures = (session.meta.compactFailures ?? 0) + 1;
+            this.sessionStore.save(session);
             this.emit(IPC_CHANNELS.onError, {
                 sessionId,
                 message: error instanceof Error ? error.message : String(error),
             });
         } finally {
+            this.compactingSessions.delete(sessionId);
             this.setBusy(sessionId, false);
         }
     }
@@ -465,6 +618,9 @@ export class AgentRuntime {
             let round = 0;
 
             while (round < maxRounds) {
+                session = this.sessionStore.get(sessionId);
+                session = this.applyMicroCompact(session);
+                await this.maybeAutoCompact(sessionId);
                 session = this.sessionStore.get(sessionId);
                 const model = {
                     providerKey: session.meta.providerKey,
@@ -487,6 +643,7 @@ export class AgentRuntime {
 
                 const calls = assistant.toolCalls || [];
                 if (!calls.length) {
+                    void this.refreshSessionMemory(sessionId);
                     return;
                 }
 
@@ -513,6 +670,7 @@ export class AgentRuntime {
                     session = this.sessionStore.appendMessage(sessionId, toolMessage);
                     this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: toolMessage });
                     this.emit(IPC_CHANNELS.onSessionChanged, session);
+                    session = this.trackToolSideEffects(session, call, result);
                 }
                 round += 1;
             }

@@ -24,7 +24,7 @@ export const CHAT_COMMANDS = [
   {
     id: "compact_context",
     name: "compact",
-    description: "将较早上下文压缩为摘要（保留最近几轮完整消息）",
+    description: "将较早上下文压缩为结构化摘要（保留最近消息；接近窗口上限时也会自动压缩）",
   },
   {
     id: "help",

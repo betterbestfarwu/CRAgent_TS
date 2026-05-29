@@ -3,6 +3,7 @@ import {
   pickPlaceholderSession,
   titleFromFirstUserMessage,
 } from "@shared/sessionTitle";
+import { DEFAULT_CONTEXT_CONFIG } from "@shared/contextConfig";
 import { formatHelpText, matchChatCommand } from "@shared/chatCommands";
 import {
   CONTEXT_DIVIDER_LABEL,
@@ -43,6 +44,7 @@ function makeDefaultConfig() {
   }));
   return {
     content_limit: 5000,
+    context: { ...DEFAULT_CONTEXT_CONFIG },
     models: {
       openai: {
         baseUrl: "https://api.openai.com/v1",

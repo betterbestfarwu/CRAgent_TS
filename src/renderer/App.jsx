@@ -15,7 +15,7 @@ import { displayTitle } from "./sidebarUtils.js";
 import { isDefaultSessionTitle, titleFromFirstUserMessage } from "@shared/sessionTitle";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
-import { estimateTokens, formatTokens } from "./tokenEstimator";
+import { estimateSessionContextUsage, formatTokens } from "@shared/tokenEstimator";
 
 const SUGGESTIONS = [
   "总结当前项目结构",
@@ -272,22 +272,47 @@ export function App() {
     setModelDisplay(currentModel);
   }, [currentModel]);
 
-  const contextText = useMemo(() => {
-    if (!currentSession || !config) return "";
-    const used = estimateTokens(currentSession.messages);
+  const contextUsage = useMemo(() => {
+    if (!currentSession || !config) return null;
     const model = config.models[currentSession.meta.providerKey]?.models.find(
       (m) => m.id === currentSession.meta.modelId,
     );
-    const cap = model?.contextWindow ?? 0;
-    if (!cap) return `Context ${formatTokens(used)} tok`;
-    const pct = Math.round((used * 100) / cap);
-    return `Context ${pct}% · ${formatTokens(used)} / ${formatTokens(cap)}`;
+    const compactBuffer = config.context?.compact_buffer_tokens;
+    return estimateSessionContextUsage(currentSession, model, {
+      compactBufferTokens: compactBuffer,
+    });
   }, [currentSession, config]);
+
+  const contextText = useMemo(() => {
+    if (!contextUsage) return "";
+    const cap = contextUsage.contextWindow;
+    if (!cap) return `Context ${formatTokens(contextUsage.tokens)} tok`;
+    let text = `Context ${contextUsage.percent}% · ${formatTokens(contextUsage.tokens)} / ${formatTokens(cap)}`;
+    if (contextUsage.isAboveAutoCompactThreshold) {
+      text += " · 即将自动压缩";
+    } else if (contextUsage.isAboveWarningThreshold) {
+      text += " · 接近上限";
+    }
+    return text;
+  }, [contextUsage]);
+
+  const contextClassName = useMemo(() => {
+    if (!contextUsage) return "composer-context";
+    if (contextUsage.isAboveAutoCompactThreshold) {
+      return "composer-context composer-context-critical";
+    }
+    if (contextUsage.isAboveWarningThreshold) {
+      return "composer-context composer-context-warning";
+    }
+    return "composer-context";
+  }, [contextUsage]);
 
   const slashQuery = useMemo(() => {
     const match = input.match(/^\/([^\s]*)$/);
     return match ? match[1].toLowerCase() : null;
   }, [input]);
+
+  const canSend = Boolean(input.trim()) || pendingImages.length > 0;
 
   const slashFilterQuery = slashQuery === null ? "" : slashQuery.trim();
 
@@ -582,7 +607,7 @@ export function App() {
             <div className="chat-history">
               {!active ? (
                 <div className="empty-state">
-                  <h1>我们该构建什么？</h1>
+                  <h1>有什么我能帮你的吗？</h1>
                   <div className="suggestions">
                     {SUGGESTIONS.map((s) => (
                       <button key={s} type="button" onClick={() => void handleSend(s)}>
@@ -699,13 +724,13 @@ export function App() {
                         setInput("");
                         return;
                       }
-                      if (e.key === "Tab" || (e.key === "Enter" && !e.altKey)) {
+                      if (e.key === "Tab" || (e.key === "Enter" && !e.altKey && !e.shiftKey)) {
                         e.preventDefault();
                         activateSlashMenuItem(slashNavItems[slashMenuIndex]);
                         return;
                       }
                     }
-                    if (e.key === "Enter" && !e.altKey) {
+                    if (e.key === "Enter" && !e.altKey && !e.shiftKey) {
                       e.preventDefault();
                       void handleSend();
                     }
@@ -739,6 +764,9 @@ export function App() {
                         const nextModel = e.target.value;
                         setModelDisplay(nextModel);
                         void handleModelChange(nextModel);
+                        requestAnimationFrame(() => {
+                          textareaRef.current?.focus();
+                        });
                       }}
                     >
                       {Object.entries(config?.models || {}).flatMap(([providerKey, provider]) =>
@@ -759,10 +787,10 @@ export function App() {
                       )}
                     </select>
                   </label>
-                  <span className="composer-context">{contextText}</span>
+                  <span className={contextClassName}>{contextText}</span>
                   <button
                     type="button"
-                    className="composer-send"
+                    className={`composer-send${canSend ? " composer-send-ready" : ""}`}
                     onClick={() => void handleSend()}
                     disabled={busy}
                     title={busy ? "正在发送" : "发送"}

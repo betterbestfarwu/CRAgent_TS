@@ -60,18 +60,18 @@ export function SingleDotIcon({ className = "", size = "xs" }) {
       <svg
         className="session-single-dot__svg"
         viewBox="0 0 12 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         role="presentation"
         focusable="false"
       >
-        <circle cx="6" cy="6" r="3.25" fill="currentColor" fillOpacity="0.35" />
-        <circle
-          cx="6"
-          cy="6"
-          r="3.25"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.25"
-        />
+        <polygon points="6 1 11 4.25 11 7.75 6 11 1 7.75 1 4.25" />
+        <line x1="6" y1="11" x2="6" y2="7.75" />
+        <polyline points="11 4.25 6 7.75 1 4.25" />
+        <polyline points="1 4.25 6 1 11 4.25" />
       </svg>
     </span>
   );
