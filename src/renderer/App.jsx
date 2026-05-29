@@ -499,6 +499,8 @@ export function App() {
     return sessionError.message;
   }, [sessionError, currentSession?.meta.id]);
 
+  const canSend = Boolean(input.trim() || pendingImages.length);
+
   return (
     <div className="app-shell">
       <TitleBar
@@ -599,7 +601,48 @@ export function App() {
                     onHoverIndex={setSlashMenuIndex}
                   />
                 ) : null}
-                <div className="composer-box">
+                <div
+                  className={`composer-box${composerDragOver ? " composer-drag-over" : ""}`}
+                  onDragEnter={(e) => {
+                    if (busy || !Array.from(e.dataTransfer?.types || []).includes("Files")) return;
+                    e.preventDefault();
+                    setComposerDragOver(true);
+                  }}
+                  onDragOver={(e) => {
+                    if (busy) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "copy";
+                    setComposerDragOver(true);
+                  }}
+                  onDragLeave={(e) => {
+                    if (e.currentTarget.contains(e.relatedTarget)) return;
+                    setComposerDragOver(false);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setComposerDragOver(false);
+                    if (busy) return;
+                    void addImagesFromFiles(e.dataTransfer?.files);
+                  }}
+                >
+                {pendingImages.length ? (
+                  <div className="composer-attachments" aria-label="待发送图片">
+                    {pendingImages.map((image) => (
+                      <div key={image.id} className="composer-attachment">
+                        <img src={image.dataUrl} alt={image.name || "待发送图片"} />
+                        <button
+                          type="button"
+                          className="composer-attachment-remove"
+                          title="移除图片"
+                          aria-label="移除图片"
+                          onClick={() => removePendingImage(image.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <textarea
                   ref={textareaRef}
                   className="composer-input"
@@ -607,6 +650,14 @@ export function App() {
                   rows={1}
                   onChange={(e) => setInput(e.target.value)}
                   onInput={resizeComposer}
+                  onPaste={(e) => {
+                    const files = Array.from(e.clipboardData?.files || []).filter((file) =>
+                      file.type.startsWith("image/"),
+                    );
+                    if (!files.length) return;
+                    e.preventDefault();
+                    void addImagesFromFiles(files);
+                  }}
                   placeholder="发消息..."
                   onKeyDown={(e) => {
                     if (showSlashMenu && slashNavItems.length) {
@@ -690,7 +741,7 @@ export function App() {
                     type="button"
                     className="composer-send"
                     onClick={() => void handleSend()}
-                    disabled={busy}
+                    disabled={busy || !canSend}
                     title={busy ? "正在发送" : "发送"}
                     aria-label={busy ? "正在发送" : "发送"}
                   >

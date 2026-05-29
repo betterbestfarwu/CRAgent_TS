@@ -375,6 +375,7 @@ export function installWebBridge() {
         content: trimmed,
         createdAt: nowIso(),
         runId,
+        ...(storedImages.length ? { images: storedImages } : {}),
       };
 
       updateState((state) => {
