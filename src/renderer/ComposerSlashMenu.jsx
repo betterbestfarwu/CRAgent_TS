@@ -1,23 +1,5 @@
 import { useMemo } from "react";
-
-const SLASH_COMMANDS = [
-  {
-    name: "new",
-    description: "新建会话（与菜单 New Chat 相同）",
-  },
-  {
-    name: "help",
-    description: "显示可用 slash 指令与工作区说明",
-  },
-  {
-    name: "clear",
-    description: "插入上下文分界，保留聊天记录",
-  },
-  {
-    name: "compact",
-    description: "将较早上下文压缩为摘要（保留最近几轮完整消息）",
-  },
-];
+import { filterSlashCommands as filterChatCommands } from "@shared/chatCommands";
 
 const SKILLS_COLLAPSED_COUNT = 3;
 
@@ -59,9 +41,7 @@ export function filterSlashSkills(skills, query) {
 }
 
 export function filterSlashCommands(query) {
-  return SLASH_COMMANDS.filter((command) =>
-    matchesQuery(command.name, command.description, query),
-  );
+  return filterChatCommands(query);
 }
 
 export function ComposerSlashMenu({

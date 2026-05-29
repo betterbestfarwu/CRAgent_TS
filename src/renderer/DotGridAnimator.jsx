@@ -49,3 +49,30 @@ export function DotGridAnimator(props) {
 export function DotGridIcon(props) {
   return <DotGrid {...props} static />;
 }
+
+export function SingleDotIcon({ className = "", size = "xs" }) {
+  return (
+    <span
+      className={`session-single-dot${className ? ` ${className}` : ""}`}
+      data-size={size}
+      aria-hidden="true"
+    >
+      <svg
+        className="session-single-dot__svg"
+        viewBox="0 0 12 12"
+        role="presentation"
+        focusable="false"
+      >
+        <circle cx="6" cy="6" r="3.25" fill="currentColor" fillOpacity="0.35" />
+        <circle
+          cx="6"
+          cy="6"
+          r="3.25"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.25"
+        />
+      </svg>
+    </span>
+  );
+}

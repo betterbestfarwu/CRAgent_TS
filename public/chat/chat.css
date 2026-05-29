@@ -58,7 +58,7 @@ html, body {
 }
 
 #messages {
-  padding: 16px var(--chat-gutter-x) 48px;
+  padding: 16px var(--chat-gutter-x) 36px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -80,6 +80,7 @@ html, body {
 .msg.user {
   align-self: flex-end;
   align-items: flex-end;
+  width: fit-content;
 }
 
 .msg.assistant,
@@ -128,6 +129,27 @@ html, body {
   overflow-x: auto;
 }
 
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.msg-image {
+  display: block;
+  max-width: min(240px, 100%);
+  max-height: 180px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.08));
+}
+
+.msg.user .msg-images:last-child,
+.msg.user .msg-text:last-child {
+  margin-bottom: 0;
+}
+
 .bubble-collapse:first-child {
   margin-top: 0;
 }
@@ -172,6 +194,8 @@ html, body {
 }
 
 .msg.user .bubble {
+  width: fit-content;
+  max-width: 100%;
   padding: 4px var(--chat-inner-x);
 }
 
@@ -511,6 +535,26 @@ html, body {
   text-align: center;
 }
 
+body::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 36px;
+  pointer-events: none;
+  z-index: 10;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  mask-image: linear-gradient(to bottom, transparent, #000 75%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 75%);
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--bg) 32%, transparent)
+  );
+}
+
 #busy {
   position: fixed;
   bottom: 12px;
@@ -545,7 +589,7 @@ html, body {
 
 @media (max-width: 834px) {
   #messages {
-    padding: 12px var(--chat-gutter-x) 40px;
+    padding: 12px var(--chat-gutter-x) 28px;
   }
 
   .msg {

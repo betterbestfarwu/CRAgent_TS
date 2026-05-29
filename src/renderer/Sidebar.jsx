@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { DotGridAnimator } from "./DotGridAnimator.jsx";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { displayTitle, filterSessions, groupSessions, relativeTime } from "./sidebarUtils.js";
 
 const ICON_BUBBLE = (
@@ -31,10 +30,18 @@ const ICON_PLUS = (
 
 function SessionRow({ meta, active, busy, forceActionButtons, onSelect, onDelete }) {
   const [hovered, setHovered] = useState(false);
+  const rowRef = useRef(null);
   const showActions = hovered || forceActionButtons;
+
+  useEffect(() => {
+    if (active) {
+      rowRef.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [active, meta.id]);
 
   return (
     <div
+      ref={rowRef}
       className={`session-row${active ? " active" : ""}${hovered && !active ? " hovered" : ""}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -43,7 +50,7 @@ function SessionRow({ meta, active, busy, forceActionButtons, onSelect, onDelete
         <button type="button" className="session-row-main" onClick={() => onSelect(meta.id)}>
           <span className="session-icon">
             {busy ? (
-              <DotGridAnimator aria-label="正在回复" />
+              <span className="session-spinner" aria-label="正在回复" />
             ) : (
               ICON_BUBBLE
             )}

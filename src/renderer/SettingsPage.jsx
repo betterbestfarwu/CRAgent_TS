@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { DotGridIcon } from "./DotGridAnimator.jsx";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { SingleDotIcon } from "./DotGridAnimator.jsx";
 
 const ICON_EYE = (
   <svg
@@ -68,6 +68,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
   const [showApiKey, setShowApiKey] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [modelsError, setModelsError] = useState("");
+  const modelListRef = useRef(null);
   const providerKeys = useMemo(
     () => Object.keys(draftConfig.models || {}),
     [draftConfig.models],
@@ -107,6 +108,9 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
       return true;
     });
   }, [selectedProvider, modelSearch, modelStateFilter]);
+  useEffect(() => {
+    modelListRef.current?.scrollTo({ top: 0 });
+  }, [selectedProviderKey, modelSearch, modelStateFilter]);
   const enabledModelRefs = useMemo(
     () =>
       Object.entries(draftConfig.models || {}).flatMap(([providerKey, provider]) =>
@@ -306,7 +310,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                 }}
               >
                 <span className="settings-provider-icon">
-                  <DotGridIcon size="xs" />
+                  <SingleDotIcon size="xs" />
                 </span>
                 <span>{providerKey}</span>
               </button>
@@ -390,7 +394,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                 </div>
 
                 <div className="settings-model-list-shell">
-                  <div className="settings-model-list">
+                  <div className="settings-model-list" ref={modelListRef}>
                   {filteredModels.map((model) => (
                     <div
                       key={model.id}

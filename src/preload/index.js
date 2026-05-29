@@ -13,6 +13,7 @@ const api = {
     getSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getSession, sessionId),
     newSession: () => ipcRenderer.invoke(IPC_CHANNELS.newSession),
     deleteSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.deleteSession, sessionId),
+    deleteMessages: (args) => ipcRenderer.invoke(IPC_CHANNELS.deleteMessages, args),
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),
     updateModel: (args) => ipcRenderer.invoke(IPC_CHANNELS.updateModel, args),
     updateConfig: (next) => ipcRenderer.invoke(IPC_CHANNELS.updateConfig, next),

@@ -11,7 +11,9 @@ import { SettingsPage } from "./SettingsPage.jsx";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { TitleBar } from "./TitleBar.jsx";
 import { displayTitle } from "./sidebarUtils.js";
-import { titleFromFirstUserMessage } from "@shared/sessionTitle";
+import { isDefaultSessionTitle, titleFromFirstUserMessage } from "@shared/sessionTitle";
+import { collectMessageIdsForDeletion } from "@shared/chatMessages";
+import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
 import { estimateTokens, formatTokens } from "./tokenEstimator";
 
 const SUGGESTIONS = [
@@ -45,6 +47,8 @@ export function App() {
   const [config, setConfig] = useState(null);
   const [skills, setSkills] = useState([]);
   const [input, setInput] = useState("");
+  const [pendingImages, setPendingImages] = useState([]);
+  const [composerDragOver, setComposerDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyBySession, setBusyBySession] = useState({});
   const [page, setPage] = useState("chat");
@@ -57,6 +61,7 @@ export function App() {
   const sessionErrorTimerRef = useRef(null);
   const textareaRef = useRef(null);
   const busyBySessionRef = useRef(new Map());
+  const newChatInFlightRef = useRef(false);
 
   const askConfirm = useCallback((options) => {
     return new Promise((resolve) => {
@@ -135,7 +140,7 @@ export function App() {
 
   useLayoutEffect(() => {
     resizeComposer();
-  }, [input, page]);
+  }, [input, page, pendingImages.length]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 834px)");
@@ -171,7 +176,7 @@ export function App() {
                   ...meta,
                   updatedAt: message.createdAt,
                   title:
-                    (meta.title === "新对话" || meta.title === "New Chat") &&
+                    isDefaultSessionTitle(meta.title) &&
                     message.role === "user"
                       ? titleFromFirstUserMessage(message.content) || meta.title
                       : meta.title,
@@ -252,6 +257,12 @@ export function App() {
     return `${currentSession.meta.providerKey}/${currentSession.meta.modelId}`;
   }, [config, currentSession]);
 
+  const [modelDisplay, setModelDisplay] = useState("");
+
+  useEffect(() => {
+    setModelDisplay(currentModel);
+  }, [currentModel]);
+
   const contextText = useMemo(() => {
     if (!currentSession || !config) return "";
     const used = estimateTokens(currentSession.messages);
@@ -324,24 +335,61 @@ export function App() {
     applySlashPick(item.name);
   }
 
+  async function addImagesFromFiles(fileList) {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return;
+
+    const { accepted, errors } = await filesToImageAttachments(files, pendingImages.length);
+    if (accepted.length) {
+      setPendingImages((prev) => [...prev, ...accepted]);
+    }
+    if (errors.length) {
+      showSessionError(errors[0], currentSession?.meta.id);
+    }
+  }
+
+  function removePendingImage(imageId) {
+    setPendingImages((prev) => prev.filter((image) => image.id !== imageId));
+  }
+
   async function handleSend(text = input) {
     if (!currentSession || page !== "chat") return;
     const trimmed = text.trim();
-    if (!trimmed || busy) return;
+    if ((!trimmed && !pendingImages.length) || busy) return;
+    const images = toStoredImages(pendingImages);
     setInput("");
+    setPendingImages([]);
     await window.cragent.sendChat({
       sessionId: currentSession.meta.id,
       userInput: trimmed,
+      images,
     });
   }
 
   async function handleNewChat() {
-    clearSessionError();
-    const next = await window.cragent.newSession();
-    setCurrentSession(next);
-    setSessions((prev) => sortSessions([next.meta, ...prev]));
-    setPage("chat");
-    if (compactLayout) setSidebarOpen(false);
+    if (newChatInFlightRef.current) return;
+    newChatInFlightRef.current = true;
+    try {
+      clearSessionError();
+      const localPlaceholder = sessions
+        .filter((meta) => isDefaultSessionTitle(meta.title))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      if (localPlaceholder) {
+        await handleSwitchSession(localPlaceholder.id);
+        return;
+      }
+      const next = await window.cragent.newSession();
+      setCurrentSession(next);
+      setSessions((prev) => {
+        const has = prev.some((s) => s.id === next.meta.id);
+        if (has) return sortSessions(prev);
+        return sortSessions([next.meta, ...prev]);
+      });
+      setPage("chat");
+      if (compactLayout) setSidebarOpen(false);
+    } finally {
+      newChatInFlightRef.current = false;
+    }
   }
 
   async function handleSwitchSession(sessionId) {
@@ -354,7 +402,7 @@ export function App() {
   }
 
   async function handleDeleteSession(meta) {
-    const title = meta.title || "新对话";
+    const title = meta.title || "新会话";
     const confirmed = await askConfirm({
       message: `删除「${title}」？`,
       detail: "此操作无法撤销。",
@@ -397,14 +445,19 @@ export function App() {
     if (compactLayout) setSidebarOpen(false);
   }
 
-  function handleDeleteMessage(messageId) {
-    setCurrentSession((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        messages: prev.messages.filter((m) => m.id !== messageId),
-      };
-    });
+  async function handleDeleteMessage(messageId) {
+    if (!currentSession || !window.cragent?.deleteMessages) return;
+    const messageIds = collectMessageIdsForDeletion(currentSession.messages, messageId);
+    if (!messageIds.length) return;
+    try {
+      const session = await window.cragent.deleteMessages({
+        sessionId: currentSession.meta.id,
+        messageIds,
+      });
+      setCurrentSession(session);
+    } catch (err) {
+      showSessionError(err instanceof Error ? err.message : String(err), currentSession.meta.id);
+    }
   }
 
   const active = Boolean(currentSession && currentSession.messages.length > 0);
@@ -471,10 +524,6 @@ export function App() {
         onSelect={(sessionId) => void handleSwitchSession(sessionId)}
         onDelete={(meta) => void handleDeleteSession(meta)}
         onNewChat={() => void handleNewChat()}
-        onOpenSettings={() => {
-          setPage("settings");
-          if (compactLayout) setSidebarOpen(false);
-        }}
       />
       {compactLayout && sidebarOpen ? (
         <button
@@ -589,29 +638,53 @@ export function App() {
                   }}
                   disabled={busy}
                 />
+                <div className="composer-toolbar-spacer" aria-hidden="true" />
                 <div className="composer-toolbar">
-                  <select
-                    className="composer-model"
-                    value={currentModel}
-                    onChange={(e) => void handleModelChange(e.target.value)}
-                  >
-                    {Object.entries(config?.models || {}).flatMap(([providerKey, provider]) =>
-                      provider.models
-                        .filter(
-                          (model) =>
-                            model.state ||
-                            currentModel === `${providerKey}/${model.id}`,
-                        )
-                        .map((model) => (
-                          <option
-                            key={`${providerKey}/${model.id}`}
-                            value={`${providerKey}/${model.id}`}
-                          >
-                            {providerKey}/{model.id}
-                          </option>
-                        )),
-                    )}
-                  </select>
+                  <label className="composer-model-wrap">
+                    <span className="composer-model-content">
+                      <span className="composer-model-sizer" aria-hidden="true">
+                        {modelDisplay}
+                      </span>
+                      <span className="composer-model-label">{modelDisplay}</span>
+                    </span>
+                    <span className="composer-model-chevron" aria-hidden="true">
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path
+                          d="M3 4.5L6 7.5L9 4.5"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <select
+                      className="composer-model"
+                      value={modelDisplay}
+                      onChange={(e) => {
+                        const nextModel = e.target.value;
+                        setModelDisplay(nextModel);
+                        void handleModelChange(nextModel);
+                      }}
+                    >
+                      {Object.entries(config?.models || {}).flatMap(([providerKey, provider]) =>
+                        provider.models
+                          .filter(
+                            (model) =>
+                              model.state ||
+                              currentModel === `${providerKey}/${model.id}`,
+                          )
+                          .map((model) => (
+                            <option
+                              key={`${providerKey}/${model.id}`}
+                              value={`${providerKey}/${model.id}`}
+                            >
+                              {providerKey}/{model.id}
+                            </option>
+                          )),
+                      )}
+                    </select>
+                  </label>
                   <span className="composer-context">{contextText}</span>
                   <button
                     type="button"

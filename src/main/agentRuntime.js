@@ -6,6 +6,10 @@ import {
     isContextDividerMessage,
 } from "@shared/chatMessages";
 import { IPC_CHANNELS } from "@shared/ipc";
+import {
+    appendAssistantMessage,
+    createChatCommandHandlers,
+} from "./tools/chatCommandHandlers.js";
 
 const COMPACT_KEEP_USER_TURNS = 2;
 const COMPACT_MIN_CONTEXT_MESSAGES = 6;
@@ -19,7 +23,10 @@ function formatMessagesForSummary(messages) {
     return messages
         .map((message) => {
             if (message.role === "user") {
-                return `User: ${message.content}`;
+                const imageNote = message.images?.length
+                    ? ` [${message.images.length} image(s)]`
+                    : "";
+                return `User: ${message.content || ""}${imageNote}`.trimEnd();
             }
             if (message.role === "assistant") {
                 let line = `Assistant: ${message.content || ""}`.trimEnd();
@@ -91,6 +98,20 @@ export class AgentRuntime {
         this.skillLoader = skillLoader;
         this.mainWindowGetter = mainWindowGetter;
         this.busyBySession = new Map();
+        this.chatCommands = createChatCommandHandlers({
+            sessionStore: this.sessionStore,
+            emit: (channel, payload) => this.emit(channel, payload),
+            clearLlmContext: (sessionId) => this.clearLlmContext(sessionId),
+            compactLlmContext: (sessionId) => this.compactLlmContext(sessionId),
+            appendHelpMessage: (sessionId, content, runId) =>
+                appendAssistantMessage(
+                    this.sessionStore,
+                    (channel, payload) => this.emit(channel, payload),
+                    sessionId,
+                    content,
+                    runId ? { runId } : {},
+                ),
+        });
     }
 
     emit(channel, payload) {
@@ -145,63 +166,57 @@ export class AgentRuntime {
         return messages;
     }
 
-    async sendUserMessage(sessionId, rawInput) {
+    async sendUserMessage(sessionId, rawInput, images = []) {
         const input = rawInput.trim();
-        if (!input) {
+        const storedImages = Array.isArray(images)
+            ? images
+                  .filter((image) => image?.dataUrl && image?.mimeType)
+                  .map((image) => ({
+                      mimeType: image.mimeType,
+                      dataUrl: image.dataUrl,
+                  }))
+            : [];
+        if (!input && !storedImages.length) {
             return;
         }
         if (this.busyBySession.get(sessionId)) {
             return;
         }
 
-        if (input === "/clear") {
-            this.clearLlmContext(sessionId);
-            return;
-        }
-        if (input === "/compact") {
-            await this.compactLlmContext(sessionId);
+        const commandId = this.chatCommands.match(input);
+        if (commandId) {
+            let helpRunId;
+            if (commandId === "help") {
+                helpRunId = randomUUID();
+                const userMessage = {
+                    id: randomUUID(),
+                    role: "user",
+                    content: input,
+                    createdAt: new Date().toISOString(),
+                    runId: helpRunId,
+                };
+                let session = this.sessionStore.appendMessage(sessionId, userMessage);
+                this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: userMessage });
+                this.emit(IPC_CHANNELS.onSessionChanged, session);
+            }
+            await this.chatCommands.execute(commandId, sessionId, helpRunId);
             return;
         }
 
+        const runId = randomUUID();
         const userMessage = {
             id: randomUUID(),
             role: "user",
             content: input,
             createdAt: new Date().toISOString(),
+            runId,
+            ...(storedImages.length ? { images: storedImages } : {}),
         };
         let session = this.sessionStore.appendMessage(sessionId, userMessage);
         this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: userMessage });
         this.emit(IPC_CHANNELS.onSessionChanged, session);
 
-        if (input === "/new") {
-            return;
-        }
-        if (input === "/help") {
-            const helpMessage = {
-                id: randomUUID(),
-                role: "assistant",
-                content: [
-                    "支持指令: /new /clear /help /compact",
-                    "/clear — 保留聊天记录，插入上下文分界并仅重置模型上下文",
-                    "/compact — 将较早对话压缩为摘要，保留最近几轮完整消息",
-                    "",
-                    "Workspace memory (`~/.CRAgent`):",
-                    "- SOUL.md — identity & tone",
-                    "- AGENTS.md — operating rules",
-                    "- USER.md — about you",
-                    "- MEMORY.md — long-term curated memory",
-                    "- memory/YYYY-MM-DD.md — daily notes (today + yesterday loaded each turn)",
-                    "",
-                    "Skills: ~/.CRAgent/skills/ — use load_skill, download_skill, delete_skill",
-                ].join("\n"),
-                createdAt: new Date().toISOString(),
-            };
-            session = this.sessionStore.appendMessage(sessionId, helpMessage);
-            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: helpMessage });
-            this.emit(IPC_CHANNELS.onSessionChanged, session);
-            return;
-        }
-        await this.runLoop(session);
+        await this.runLoop(session, runId);
     }
 
     clearLlmContext(sessionId) {
@@ -303,7 +318,7 @@ export class AgentRuntime {
         }
     }
 
-    async runLoop(session) {
+    async runLoop(session, runId) {
         const sessionId = session.meta.id;
         this.setBusy(sessionId, true);
         try {
@@ -322,7 +337,7 @@ export class AgentRuntime {
                     },
                     tools: toolsEnabled ? this.toolRegistry.schemas() : [],
                 });
-                const assistant = choice.message;
+                const assistant = { ...choice.message, runId };
                 session = this.sessionStore.appendMessage(session.meta.id, assistant);
                 this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: assistant });
                 this.emit(IPC_CHANNELS.onSessionChanged, session);
@@ -347,6 +362,7 @@ export class AgentRuntime {
                         toolCallId: call.id,
                         content: result,
                         createdAt: new Date().toISOString(),
+                        runId,
                     };
                     session = this.sessionStore.appendMessage(sessionId, toolMessage);
                     this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: toolMessage });
@@ -360,6 +376,7 @@ export class AgentRuntime {
                 role: "assistant",
                 content: "已达到工具调用上限，请回复继续。",
                 createdAt: new Date().toISOString(),
+                runId,
             };
             session = this.sessionStore.appendMessage(sessionId, limitMessage);
             this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: limitMessage });

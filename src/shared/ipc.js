@@ -4,6 +4,7 @@ export const IPC_CHANNELS = {
     getSession: "session:get",
     newSession: "session:new",
     deleteSession: "session:delete",
+    deleteMessages: "session:deleteMessages",
     sendChat: "chat:send",
     updateModel: "session:updateModel",
     updateConfig: "config:update",

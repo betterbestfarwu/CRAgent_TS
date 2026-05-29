@@ -15,8 +15,17 @@ function toWireMessage(message) {
     role: message.role,
     content: message.content,
     created_at: message.createdAt,
+    ...(message.runId ? { run_id: message.runId } : {}),
     ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
     ...(message.name ? { name: message.name } : {}),
+    ...(message.images?.length
+      ? {
+          images: message.images.map((image) => ({
+            mime_type: image.mimeType,
+            data_url: image.dataUrl,
+          })),
+        }
+      : {}),
   };
 }
 
@@ -73,8 +82,7 @@ export function ChatView({ messages, busy, onDelete }) {
       }
 
       if (data.action === "delete" && data.id) {
-        onDelete?.(data.id);
-        postToChat("removeMessage", data.id);
+        void onDelete?.(data.id);
       }
     };
 

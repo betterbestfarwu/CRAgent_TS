@@ -26,8 +26,33 @@ function messageToApiPayload(message) {
         }
         return payload;
     }
+    if (message.role === "user" && message.images?.length) {
+        const parts = [];
+        if (message.content) {
+            parts.push({ type: "text", text: message.content });
+        }
+        for (const image of message.images) {
+            parts.push({
+                type: "image_url",
+                image_url: { url: image.dataUrl },
+            });
+        }
+        payload.content = parts;
+        return payload;
+    }
     payload.content = message.content;
     return payload;
+}
+
+function logOutgoingMessages(kind, model, messages, extra = {}) {
+    const payload = {
+        kind,
+        model: `${model.providerKey}/${model.modelId}`,
+        messageCount: messages.length,
+        messages,
+        ...extra,
+    };
+    console.log("[CRAgent][LLM] outgoing messages\n" + JSON.stringify(payload, null, 2));
 }
 
 export class LlmClient {
@@ -47,6 +72,8 @@ export class LlmClient {
             model: model.modelId,
             messages: messages.map(messageToApiPayload),
         };
+
+        logOutgoingMessages("complete", model, body.messages);
 
         const response = await fetch(`${provider.baseUrl}/${provider.api}`, {
             method: "POST",
@@ -94,6 +121,10 @@ export class LlmClient {
             body.tools = tools;
             body.tool_choice = "auto";
         }
+
+        logOutgoingMessages("chat", model, body.messages, {
+            toolCount: tools.length,
+        });
 
         const response = await fetch(`${provider.baseUrl}/${provider.api}`, {
             method: "POST",

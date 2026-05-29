@@ -1,4 +1,13 @@
-import { titleFromFirstUserMessage } from "@shared/sessionTitle";
+import {
+  isDefaultSessionTitle,
+  pickPlaceholderSession,
+  titleFromFirstUserMessage,
+} from "@shared/sessionTitle";
+import { formatHelpText, matchChatCommand } from "@shared/chatCommands";
+import {
+  CONTEXT_DIVIDER_LABEL,
+  CONTEXT_DIVIDER_ROLE,
+} from "@shared/chatMessages";
 
 const CONFIG_KEY = "cragent:web:config";
 const SESSIONS_KEY = "cragent:web:sessions";
@@ -108,7 +117,7 @@ function makeSession(config) {
   return {
     meta: {
       id: randomId(),
-      title: "新对话",
+      title: "新会话",
       providerKey,
       modelId,
       createdAt: timestamp,
@@ -120,6 +129,22 @@ function makeSession(config) {
 
 function sortMetasByUpdatedAt(metas) {
   return [...metas].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function openNewSession(state) {
+  const existing = pickPlaceholderSession(state.sessions);
+  if (existing) {
+    return {
+      ...state,
+      currentSessionId: existing.meta.id,
+    };
+  }
+  const created = makeSession(state.config);
+  return {
+    ...state,
+    sessions: [created, ...state.sessions],
+    currentSessionId: created.meta.id,
+  };
 }
 
 function ensureState() {
@@ -202,14 +227,7 @@ export function installWebBridge() {
     },
 
     async newSession() {
-      const next = updateState((state) => {
-        const created = makeSession(state.config);
-        return {
-          ...state,
-          sessions: [created, ...state.sessions],
-          currentSessionId: created.meta.id,
-        };
-      });
+      const next = updateState((state) => openNewSession(state));
       const session = next.sessions.find((item) => item.meta.id === next.currentSessionId);
       emit(listeners.sessionChanged, session);
       return session;
@@ -231,21 +249,140 @@ export function installWebBridge() {
       return session;
     },
 
-    async sendChat({ sessionId, userInput }) {
+    async deleteMessages({ sessionId, messageIds }) {
+      const idSet = new Set(messageIds);
+      const next = updateState((state) => {
+        const sessions = state.sessions.map((item) => {
+          if (item.meta.id !== sessionId) return item;
+          return {
+            ...item,
+            meta: { ...item.meta, updatedAt: nowIso() },
+            messages: item.messages.filter((message) => !idSet.has(message.id)),
+          };
+        });
+        return { ...state, sessions };
+      });
+      const session = next.sessions.find((item) => item.meta.id === sessionId);
+      emit(listeners.sessionChanged, session);
+      return session;
+    },
+
+    async sendChat({ sessionId, userInput, images = [] }) {
+      const trimmed = String(userInput || "").trim();
+      const storedImages = Array.isArray(images)
+        ? images
+            .filter((image) => image?.dataUrl && image?.mimeType)
+            .map((image) => ({
+              mimeType: image.mimeType,
+              dataUrl: image.dataUrl,
+            }))
+        : [];
+      if (!trimmed && !storedImages.length) {
+        return;
+      }
+
+      const commandId = matchChatCommand(trimmed);
+      if (commandId === "new_session") {
+        const next = updateState((state) => openNewSession(state));
+        const session = next.sessions.find((item) => item.meta.id === next.currentSessionId);
+        emit(listeners.sessionChanged, session);
+        return;
+      }
+      if (commandId === "reset_context") {
+        const dividerMessage = {
+          id: randomId(),
+          role: CONTEXT_DIVIDER_ROLE,
+          content: CONTEXT_DIVIDER_LABEL,
+          createdAt: nowIso(),
+        };
+        updateState((state) => {
+          const sessions = state.sessions.map((item) => {
+            if (item.meta.id !== sessionId) return item;
+            return {
+              ...item,
+              meta: { ...item.meta, updatedAt: dividerMessage.createdAt },
+              messages: [...item.messages, dividerMessage],
+            };
+          });
+          return { ...state, sessions };
+        });
+        emit(listeners.messageAppended, { sessionId, message: dividerMessage });
+        const { sessions } = ensureState();
+        const session = sessions.find((item) => item.meta.id === sessionId);
+        emit(listeners.sessionChanged, session);
+        return;
+      }
+      if (commandId === "help") {
+        const runId = randomId();
+        const userMessage = {
+          id: randomId(),
+          role: "user",
+          content: trimmed,
+          createdAt: nowIso(),
+          runId,
+        };
+        const assistantMessage = {
+          id: randomId(),
+          role: "assistant",
+          content: formatHelpText(),
+          createdAt: nowIso(),
+          runId,
+        };
+        updateState((state) => {
+          const sessions = state.sessions.map((item) => {
+            if (item.meta.id !== sessionId) return item;
+            return {
+              ...item,
+              meta: { ...item.meta, updatedAt: assistantMessage.createdAt },
+              messages: [...item.messages, userMessage, assistantMessage],
+            };
+          });
+          return { ...state, sessions };
+        });
+        emit(listeners.messageAppended, { sessionId, message: userMessage });
+        emit(listeners.messageAppended, { sessionId, message: assistantMessage });
+        const { sessions } = ensureState();
+        const session = sessions.find((item) => item.meta.id === sessionId);
+        emit(listeners.sessionChanged, session);
+        return;
+      }
+      if (commandId === "compact_context") {
+        const notice = {
+          id: randomId(),
+          role: "assistant",
+          content: "Web 演示模式暂不支持 /compact。",
+          createdAt: nowIso(),
+        };
+        updateState((state) => {
+          const sessions = state.sessions.map((item) => {
+            if (item.meta.id !== sessionId) return item;
+            return {
+              ...item,
+              meta: { ...item.meta, updatedAt: notice.createdAt },
+              messages: [...item.messages, notice],
+            };
+          });
+          return { ...state, sessions };
+        });
+        emit(listeners.messageAppended, { sessionId, message: notice });
+        return;
+      }
+
+      const runId = randomId();
       const userMessage = {
         id: randomId(),
         role: "user",
-        content: userInput,
+        content: trimmed,
         createdAt: nowIso(),
+        runId,
       };
 
       updateState((state) => {
         const sessions = state.sessions.map((item) => {
           if (item.meta.id !== sessionId) return item;
-          const title =
-            item.meta.title === "新对话"
-              ? titleFromFirstUserMessage(userInput) || item.meta.title
-              : item.meta.title;
+          const title = isDefaultSessionTitle(item.meta.title)
+            ? titleFromFirstUserMessage(trimmed) || item.meta.title
+            : item.meta.title;
           return {
             ...item,
             meta: { ...item.meta, title, updatedAt: userMessage.createdAt },
@@ -263,8 +400,9 @@ export function installWebBridge() {
           id: randomId(),
           role: "assistant",
           content:
-            "这是 iPad 容器内的本地演示回复。\n\n你刚刚发送的是：\n\n" + userInput,
+            "这是 iPad 容器内的本地演示回复。\n\n你刚刚发送的是：\n\n" + trimmed,
           createdAt: nowIso(),
+          runId,
         };
 
         updateState((state) => {

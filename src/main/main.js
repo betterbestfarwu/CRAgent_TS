@@ -79,7 +79,7 @@ function buildMenu() {
                     label: "New Chat",
                     accelerator: "CmdOrCtrl+N",
                     click: () => {
-                        const session = sessionStore.newSession();
+                        const session = sessionStore.openNewSession();
                         mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
                     },
                 },
@@ -110,9 +110,9 @@ function registerIpc() {
         };
     });
     ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId) => sessionStore.get(sessionId));
-    ipcMain.handle(IPC_CHANNELS.newSession, () => sessionStore.newSession());
+    ipcMain.handle(IPC_CHANNELS.newSession, () => sessionStore.openNewSession());
     ipcMain.handle(IPC_CHANNELS.sendChat, (_event, request) =>
-        runtime.sendUserMessage(request.sessionId, request.userInput),
+        runtime.sendUserMessage(request.sessionId, request.userInput, request.images),
     );
     ipcMain.handle(IPC_CHANNELS.updateModel, (_event, args) => {
         const session = sessionStore.updateModel(args.sessionId, args.providerKey, args.modelId);

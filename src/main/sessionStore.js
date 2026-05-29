@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { titleFromFirstUserMessage } from "@shared/sessionTitle";
+import {
+    isDefaultSessionTitle,
+    pickPlaceholderSession,
+    titleFromFirstUserMessage,
+} from "@shared/sessionTitle";
 function nowIso() {
     return new Date().toISOString();
 }
@@ -25,13 +29,30 @@ export class SessionStore {
         }
         return metas;
     }
+    findPlaceholderSession() {
+        const candidates = [];
+        for (const meta of this.listMetas()) {
+            if (!isDefaultSessionTitle(meta.title)) {
+                continue;
+            }
+            candidates.push(this.get(meta.id));
+        }
+        return pickPlaceholderSession(candidates);
+    }
+    openNewSession() {
+        const existing = this.findPlaceholderSession();
+        if (existing) {
+            return existing;
+        }
+        return this.newSession();
+    }
     newSession() {
         const id = randomUUID();
         const timestamp = nowIso();
         const session = {
             meta: {
                 id,
-                title: "新对话",
+                title: "新会话",
                 providerKey: this.defaultModel.providerKey,
                 modelId: this.defaultModel.modelId,
                 createdAt: timestamp,
@@ -56,12 +77,19 @@ export class SessionStore {
     appendMessage(sessionId, message) {
         const session = this.get(sessionId);
         session.messages.push(message);
-        if (message.role === "user" && (session.meta.title === "新对话" || session.meta.title === "New Chat")) {
+        if (message.role === "user" && isDefaultSessionTitle(session.meta.title)) {
             const derived = titleFromFirstUserMessage(message.content);
             if (derived) {
                 session.meta.title = derived;
             }
         }
+        this.save(session);
+        return session;
+    }
+    removeMessages(sessionId, messageIds) {
+        const idSet = new Set(messageIds);
+        const session = this.get(sessionId);
+        session.messages = session.messages.filter((message) => !idSet.has(message.id));
         this.save(session);
         return session;
     }

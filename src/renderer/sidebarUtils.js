@@ -1,3 +1,5 @@
+import { isDefaultSessionTitle } from "@shared/sessionTitle";
+
 const BUCKET_LABELS = ["今天", "昨天", "本周", "更早"];
 
 export function relativeTime(isoDate) {
@@ -13,10 +15,10 @@ export function relativeTime(isoDate) {
 
 export function displayTitle(meta) {
   const title = (meta.title || "").trim();
-  if (title && title !== "新对话" && title !== "New Chat") {
+  if (!isDefaultSessionTitle(title)) {
     return title;
   }
-  return title || "新对话";
+  return title || "新会话";
 }
 
 function bucketFor(date, now = new Date()) {

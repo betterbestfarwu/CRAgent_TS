@@ -280,6 +280,30 @@
     return wrap;
   }
 
+  function appendUserBubbleContent(bubble, msg) {
+    if (msg.images && msg.images.length) {
+      var gallery = document.createElement('div');
+      gallery.className = 'msg-images';
+      msg.images.forEach(function (image) {
+        var imageEl = document.createElement('img');
+        imageEl.className = 'msg-image';
+        imageEl.src = image.data_url || image.dataUrl || '';
+        imageEl.alt = 'Attached image';
+        imageEl.loading = 'lazy';
+        gallery.appendChild(imageEl);
+      });
+      bubble.appendChild(gallery);
+    }
+    if (String(msg.content || '').trim()) {
+      var text = document.createElement('div');
+      text.className = 'msg-text';
+      text.innerHTML = window.MD.render(msg.content || '');
+      bubble.appendChild(text);
+      typesetMath(text);
+      enhanceCodeCopyButtons(text);
+    }
+  }
+
   function buildBubble(msg) {
     var wrap = document.createElement('div');
     wrap.className = 'msg ' + msg.role;
@@ -297,6 +321,8 @@
         typesetMath(body);
         enhanceCodeCopyButtons(body);
         setupCollapsibleContent(body);
+      } else if (msg.role === 'user') {
+        appendUserBubbleContent(bubble, msg);
       } else {
         bubble.innerHTML = window.MD.render(msg.content || '');
         typesetMath(bubble);
