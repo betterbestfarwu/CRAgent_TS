@@ -15,6 +15,17 @@ export function getMessageRunId(message) {
     return message?.runId ?? message?.run_id ?? null;
 }
 
+export function getMessageModelId(message) {
+    return message?.modelId ?? message?.model_id ?? null;
+}
+
+export function withAssistantModel(message, model) {
+    if (!message || message.role !== "assistant" || !model?.modelId) {
+        return message;
+    }
+    return { ...message, modelId: model.modelId };
+}
+
 function isProcessMessage(message) {
     if (!message) return false;
     if (message.role === "tool") return true;

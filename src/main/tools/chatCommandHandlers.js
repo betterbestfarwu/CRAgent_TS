@@ -39,15 +39,17 @@ export function createChatCommandHandlers({
 }
 
 export function appendAssistantMessage(sessionStore, emit, sessionId, content, options = {}) {
+    const session = sessionStore.get(sessionId);
     const message = {
         id: randomUUID(),
         role: "assistant",
         content,
         createdAt: new Date().toISOString(),
+        modelId: options.modelId ?? session.meta.modelId,
         ...(options.runId ? { runId: options.runId } : {}),
     };
-    const session = sessionStore.appendMessage(sessionId, message);
+    const updated = sessionStore.appendMessage(sessionId, message);
     emit(IPC_CHANNELS.onMessageAppended, { sessionId, message });
-    emit(IPC_CHANNELS.onSessionChanged, session);
-    return session;
+    emit(IPC_CHANNELS.onSessionChanged, updated);
+    return updated;
 }

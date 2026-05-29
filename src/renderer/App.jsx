@@ -591,11 +591,11 @@ export function App() {
             config={config}
             onBack={() => setPage("chat")}
             onSave={saveConfig}
-            onSyncProviderModels={async (providerKey) => {
+            onSyncProviderModels={async (providerKey, connection) => {
               if (!window.cragent?.syncProviderModels) {
                 throw new Error("主进程未支持模型同步，请重启应用。");
               }
-              const result = await window.cragent.syncProviderModels({ providerKey });
+              const result = await window.cragent.syncProviderModels({ providerKey, connection });
               if (!result?.ok) {
                 throw new Error(result?.error || "同步模型失败");
               }

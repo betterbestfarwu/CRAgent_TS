@@ -323,12 +323,14 @@ export function installWebBridge() {
           createdAt: nowIso(),
           runId,
         };
+        const sessionForHelp = ensureState().sessions.find((item) => item.meta.id === sessionId);
         const assistantMessage = {
           id: randomId(),
           role: "assistant",
           content: formatHelpText(),
           createdAt: nowIso(),
           runId,
+          modelId: sessionForHelp?.meta.modelId,
         };
         updateState((state) => {
           const sessions = state.sessions.map((item) => {
@@ -349,11 +351,13 @@ export function installWebBridge() {
         return;
       }
       if (commandId === "compact_context") {
+        const sessionForNotice = ensureState().sessions.find((item) => item.meta.id === sessionId);
         const notice = {
           id: randomId(),
           role: "assistant",
           content: "Web 演示模式暂不支持 /compact。",
           createdAt: nowIso(),
+          modelId: sessionForNotice?.meta.modelId,
         };
         updateState((state) => {
           const sessions = state.sessions.map((item) => {
@@ -399,6 +403,7 @@ export function installWebBridge() {
       emit(listeners.busyChanged, { sessionId, busy: true });
 
       setTimeout(() => {
+        const sessionForReply = ensureState().sessions.find((item) => item.meta.id === sessionId);
         const assistantMessage = {
           id: randomId(),
           role: "assistant",
@@ -406,6 +411,7 @@ export function installWebBridge() {
             "这是 iPad 容器内的本地演示回复。\n\n你刚刚发送的是：\n\n" + trimmed,
           createdAt: nowIso(),
           runId,
+          modelId: sessionForReply?.meta.modelId,
         };
 
         updateState((state) => {
@@ -443,12 +449,29 @@ export function installWebBridge() {
       return nextConfig;
     },
 
-    async syncProviderModels({ providerKey }) {
+    async syncProviderModels({ providerKey, connection }) {
       const { config } = ensureState();
       if (!providerKey || !config.models?.[providerKey]) {
         return { ok: false, error: "未找到 provider" };
       }
-      return { ok: true, providerKey, count: config.models[providerKey].models.length, config };
+      const existing = config.models[providerKey];
+      const provider = connection
+        ? {
+            ...existing,
+            baseUrl: connection.baseUrl ?? existing.baseUrl,
+            apiKey: connection.apiKey ?? existing.apiKey,
+            api: connection.api ?? existing.api,
+          }
+        : existing;
+      const nextConfig = {
+        ...config,
+        models: {
+          ...config.models,
+          [providerKey]: provider,
+        },
+      };
+      updateState((state) => ({ ...state, config: nextConfig }));
+      return { ok: true, providerKey, count: provider.models.length, config: nextConfig };
     },
 
     onMessageAppended(callback) {

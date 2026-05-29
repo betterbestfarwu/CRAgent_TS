@@ -550,14 +550,19 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
   }
 
   async function handleSyncModels() {
-    if (!selectedProviderKey || !onSyncProviderModels) {
+    if (!selectedProviderKey || !onSyncProviderModels || !selectedProvider) {
       setModelsError("模型同步功能未就绪，请重启应用。");
       return;
     }
     setSyncLoading(true);
     setModelsError("");
     try {
-      const result = await onSyncProviderModels(selectedProviderKey);
+      const connection = {
+        baseUrl: selectedProvider.baseUrl || "",
+        apiKey: selectedProvider.apiKey || "",
+        api: selectedProvider.api || "",
+      };
+      const result = await onSyncProviderModels(selectedProviderKey, connection);
       setDraftConfig(clone(result.config));
     } catch (err) {
       setModelsError(err instanceof Error ? err.message : String(err));

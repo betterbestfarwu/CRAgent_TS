@@ -4,6 +4,7 @@ import {
     CONTEXT_DIVIDER_LABEL,
     CONTEXT_DIVIDER_ROLE,
     isContextDividerMessage,
+    withAssistantModel,
 } from "@shared/chatMessages";
 import { IPC_CHANNELS } from "@shared/ipc";
 import {
@@ -496,12 +497,15 @@ export class AgentRuntime {
 
             if (!toSummarize.length) {
                 if (!auto) {
-                    const notice = {
-                        id: randomUUID(),
-                        role: "assistant",
-                        content: "当前上下文过短，暂无需压缩。",
-                        createdAt: new Date().toISOString(),
-                    };
+                    const notice = withAssistantModel(
+                        {
+                            id: randomUUID(),
+                            role: "assistant",
+                            content: "当前上下文过短，暂无需压缩。",
+                            createdAt: new Date().toISOString(),
+                        },
+                        { modelId: session.meta.modelId },
+                    );
                     session = this.sessionStore.appendMessage(sessionId, notice);
                     this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: notice });
                     this.emit(IPC_CHANNELS.onSessionChanged, session);
@@ -583,14 +587,17 @@ export class AgentRuntime {
             const restoredNote = session.meta.postCompactContext
                 ? "，并恢复了最近读取的文件/技能摘要"
                 : "";
-            const feedback = {
-                id: randomUUID(),
-                role: "assistant",
-                content: auto
-                    ? `[自动压缩${methodNote}] 已将 ${toSummarize.length} 条较早消息压缩为结构化摘要，保留最近 ${keep.length} 条完整消息${restoredNote}。`
-                    : `已压缩 ${toSummarize.length} 条较早消息为结构化摘要，保留最近 ${keep.length} 条消息完整上下文${restoredNote}。`,
-                createdAt: new Date().toISOString(),
-            };
+            const feedback = withAssistantModel(
+                {
+                    id: randomUUID(),
+                    role: "assistant",
+                    content: auto
+                        ? `[自动压缩${methodNote}] 已将 ${toSummarize.length} 条较早消息压缩为结构化摘要，保留最近 ${keep.length} 条完整消息${restoredNote}。`
+                        : `已压缩 ${toSummarize.length} 条较早消息为结构化摘要，保留最近 ${keep.length} 条消息完整上下文${restoredNote}。`,
+                    createdAt: new Date().toISOString(),
+                },
+                { modelId: session.meta.modelId },
+            );
             session = this.sessionStore.appendMessage(sessionId, feedback);
             this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: feedback });
             this.emit(IPC_CHANNELS.onSessionChanged, session);
@@ -632,10 +639,11 @@ export class AgentRuntime {
                     modelChain: this.modelChainForSession(session),
                     tools: toolsEnabled ? this.toolRegistry.schemas() : [],
                 });
-                const assistant = { ...choice.message, runId };
+                const usedModel = choice.usedModel || model;
+                let assistant = withAssistantModel({ ...choice.message, runId }, usedModel);
                 if (choice.usedFallback && choice.usedModel) {
                     const note = `(已自动切换至备用模型 ${choice.usedModel.providerKey}/${choice.usedModel.modelId})\n\n`;
-                    assistant.content = `${note}${assistant.content || ""}`;
+                    assistant = { ...assistant, content: `${note}${assistant.content || ""}` };
                 }
                 session = this.sessionStore.appendMessage(session.meta.id, assistant);
                 this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: assistant });
@@ -675,13 +683,16 @@ export class AgentRuntime {
                 round += 1;
             }
 
-            const limitMessage = {
-                id: randomUUID(),
-                role: "assistant",
-                content: "已达到工具调用上限，请回复继续。",
-                createdAt: new Date().toISOString(),
-                runId,
-            };
+            const limitMessage = withAssistantModel(
+                {
+                    id: randomUUID(),
+                    role: "assistant",
+                    content: "已达到工具调用上限，请回复继续。",
+                    createdAt: new Date().toISOString(),
+                    runId,
+                },
+                { modelId: session.meta.modelId },
+            );
             session = this.sessionStore.appendMessage(sessionId, limitMessage);
             this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: limitMessage });
             this.emit(IPC_CHANNELS.onSessionChanged, session);

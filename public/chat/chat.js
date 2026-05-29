@@ -209,6 +209,7 @@
     var thinkingItems = options.thinkingItems || [];
     var thinkingIds = options.thinkingIds || [];
     var contentMsg = options.contentMsg || null;
+    var modelId = options.modelId || messageModelId(contentMsg);
     var startedAt = options.startedAt;
     var endedAt = options.endedAt;
 
@@ -260,7 +261,10 @@
         ICON_COPY +
         '</button>';
     meta.innerHTML =
-      '<span>Assistant' + (time ? ' · ' + time : '') + '</span>' +
+      '<span>' +
+      assistantMetaLabel(modelId ? { model_id: modelId } : contentMsg) +
+      (time ? ' · ' + time : '') +
+      '</span>' +
       '<span class="actions">' +
       copyAction +
       '</span>';
@@ -268,9 +272,18 @@
     return wrap;
   }
 
+  function messageModelId(msg) {
+    return (msg && (msg.model_id || msg.modelId)) || '';
+  }
+
+  function assistantMetaLabel(msg) {
+    var modelId = messageModelId(msg);
+    return modelId ? 'Assistant by ' + escapeText(modelId) : 'Assistant';
+  }
+
   function roleLabel(role, msg) {
     if (role === 'user') return 'You';
-    if (role === 'assistant') return 'Assistant';
+    if (role === 'assistant') return assistantMetaLabel(msg);
     if (role === 'tool') return 'Tool · ' + (msg.name || '');
     if (role === 'system') return 'System';
     return role;
@@ -450,6 +463,13 @@
           index += 1;
         }
 
+        var turnModelId = '';
+        if (finalReply) {
+          turnModelId = messageModelId(finalReply);
+        } else if (contentMessages.length) {
+          turnModelId = messageModelId(contentMessages[contentMessages.length - 1]);
+        }
+
         if (finalReply) {
           var turnIds = ids.concat([finalReply.id]);
           container.appendChild(
@@ -457,6 +477,7 @@
               thinkingItems: items,
               thinkingIds: turnIds,
               contentMsg: finalReply,
+              modelId: turnModelId,
               startedAt: startedAt,
               endedAt: finalReply.created_at || endedAt,
             }),
@@ -467,6 +488,7 @@
               thinkingItems: items,
               thinkingIds: ids,
               contentMsg: null,
+              modelId: turnModelId,
               startedAt: startedAt,
               endedAt: endedAt,
             }),

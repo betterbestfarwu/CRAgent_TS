@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { getMessageModelId } from "@shared/chatMessages.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
 
 function toWireMessage(message) {
@@ -15,6 +16,7 @@ function toWireMessage(message) {
     role: message.role,
     content: message.content,
     created_at: message.createdAt,
+    ...(getMessageModelId(message) ? { model_id: getMessageModelId(message) } : {}),
     ...(message.runId ? { run_id: message.runId } : {}),
     ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
     ...(message.name ? { name: message.name } : {}),
@@ -112,7 +114,7 @@ export function ChatView({ messages, busy, onDelete, onOpenImage }) {
       ref={iframeRef}
       className="chat-frame"
       title="CRAgent chat"
-      src="./chat/chat.html?v=6"
+      src="./chat/chat.html?v=8"
     />
   );
 }

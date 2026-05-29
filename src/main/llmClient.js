@@ -95,7 +95,7 @@ export class LlmClient {
         const data = await response.json();
         const choice = data.choices?.[0]?.message;
         return {
-            message: this.assistantMessage(choice?.content || ""),
+            message: this.assistantMessage(choice?.content || "", undefined, model.modelId),
         };
     }
 
@@ -113,16 +113,25 @@ export class LlmClient {
             } catch (error) {
                 lastError = error;
                 if (!isRetryableLlmError(error)) {
-                    return { message: this.assistantMessage(error.message) };
+                    return {
+                        message: this.assistantMessage(
+                            error.message,
+                            undefined,
+                            currentModel.modelId,
+                        ),
+                    };
                 }
                 console.warn(
                     `[CRAgent][LLM] complete failed for ${currentModel.providerKey}/${currentModel.modelId}: ${error.message}`,
                 );
             }
         }
+        const lastModel = chain[chain.length - 1];
         return {
             message: this.assistantMessage(
                 `所有模型均请求失败。最后错误: ${lastError?.message || "unknown"}`,
+                undefined,
+                lastModel?.modelId,
             ),
         };
     }
@@ -132,7 +141,9 @@ export class LlmClient {
 
         const last = messages[messages.length - 1];
         if (last?.role === "user" && last.content.startsWith("/")) {
-            return { message: this.assistantMessage("已识别 slash 指令。") };
+            return {
+                message: this.assistantMessage("已识别 slash 指令。", undefined, model.modelId),
+            };
         }
 
         const body = {
@@ -174,7 +185,7 @@ export class LlmClient {
         }));
 
         return {
-            message: this.assistantMessage(choice?.content || "", toolCalls),
+            message: this.assistantMessage(choice?.content || "", toolCalls, model.modelId),
         };
     }
 
@@ -192,26 +203,36 @@ export class LlmClient {
             } catch (error) {
                 lastError = error;
                 if (!isRetryableLlmError(error)) {
-                    return { message: this.assistantMessage(error.message) };
+                    return {
+                        message: this.assistantMessage(
+                            error.message,
+                            undefined,
+                            currentModel.modelId,
+                        ),
+                    };
                 }
                 console.warn(
                     `[CRAgent][LLM] chat failed for ${currentModel.providerKey}/${currentModel.modelId}: ${error.message}`,
                 );
             }
         }
+        const lastModel = chain[chain.length - 1];
         return {
             message: this.assistantMessage(
                 `所有模型均请求失败。最后错误: ${lastError?.message || "unknown"}`,
+                undefined,
+                lastModel?.modelId,
             ),
         };
     }
 
-    assistantMessage(content, toolCalls) {
+    assistantMessage(content, toolCalls, modelId) {
         return {
             id: randomUUID(),
             role: "assistant",
             content: content || " ",
             createdAt: new Date().toISOString(),
+            ...(modelId ? { modelId } : {}),
             ...(toolCalls?.length ? { toolCalls } : {}),
         };
     }

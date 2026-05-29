@@ -173,13 +173,23 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.updateConfig, (_event, next) => configStore.update(next));
     ipcMain.handle(IPC_CHANNELS.syncProviderModels, async (_event, args) => {
         const providerKey = args?.providerKey;
+        const connection = args?.connection;
         if (!providerKey) {
             return { ok: false, error: "缺少 providerKey" };
         }
-        const provider = configStore.get().models?.[providerKey];
-        if (!provider) {
+        const existing = configStore.get().models?.[providerKey];
+        if (!existing) {
             return { ok: false, error: `未找到 provider: ${providerKey}` };
         }
+        const provider = connection
+            ? {
+                  ...existing,
+                  baseUrl: connection.baseUrl ?? existing.baseUrl,
+                  apiKey: connection.apiKey ?? existing.apiKey,
+                  api: connection.api ?? existing.api,
+              }
+            : existing;
+        configStore.updateProvider(providerKey, provider);
         try {
             const remoteIds = await fetchProviderModelIds(provider);
             const mergedProvider = mergeProviderModels(provider, remoteIds);

@@ -12,6 +12,7 @@
     "cap:sync:ios": "npm run build:web && npx cap sync ios",
     "cap:open:ios": "npx cap open ios",
     "pack:ios": "npm run cap:sync:ios && npm run cap:open:ios",
+    "pack:ipad": "bash scripts/build-ios.sh",
     "pack": "bash scripts/build-dmg.sh",
     "pack:win": "bash scripts/build-win.sh",
     "test": "node --import ./test/register-test.mjs --test test/*.test.js"
@@ -62,7 +63,11 @@
         "dmg"
       ],
       "minimumSystemVersion": "10.14.0",
-      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+      "identity": "Sand Studio (S7VFHSY63S)",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
       "title": "${productName} ${version}",

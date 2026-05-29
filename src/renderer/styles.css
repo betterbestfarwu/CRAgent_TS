@@ -1704,6 +1704,7 @@ body,
 .settings-general-card {
   background: var(--settings-bg);
   border: 0;
+  border-radius: 0;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -1722,6 +1723,7 @@ body,
   overflow-y: auto;
   padding: 20px 24px 28px;
   box-sizing: border-box;
+  border-radius: 0;
 }
 
 .settings-general-title {
@@ -2142,6 +2144,39 @@ body,
 
 .confirm-dialog-btn-primary.destructive:hover {
   filter: brightness(1.08);
+}
+
+.provider-name-dialog {
+  text-align: left;
+}
+
+.provider-name-dialog .confirm-dialog-title {
+  margin-bottom: 14px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.provider-name-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 18px;
+  border-radius: 7px;
+  border: 1px solid var(--settings-border-subtle);
+  background: var(--settings-input-bg);
+  color: var(--settings-fg);
+  padding: 8px 10px;
+  font: 13px/1.55 var(--cursor-font-family);
+}
+
+.provider-name-input:focus {
+  outline: none;
+  border-color: var(--cursor-accent);
+}
+
+.provider-name-dialog .confirm-dialog-actions {
+  margin-top: 2px;
+  justify-content: center;
 }
 
 .sidebar-toggle {
