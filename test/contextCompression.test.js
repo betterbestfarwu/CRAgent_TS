@@ -21,6 +21,7 @@ import {
 } from "../src/main/sessionMemory.js";
 import {
     estimateMessageTokens,
+    estimateSessionContextBreakdown,
     estimateSessionContextUsage,
 } from "../src/shared/tokenEstimator.js";
 
@@ -183,6 +184,7 @@ test("calculateContextWarningState exposes warning and auto thresholds", () => {
     const state = calculateContextWarningState(session, model);
     assert.equal(state.isAboveWarningThreshold, true);
     assert.equal(state.isAboveAutoCompactThreshold, true);
+    assert.equal(state.isAtBlockingLimit, true);
 });
 
 test("truncateGroupsFromHead removes oldest rounds", () => {
@@ -249,4 +251,35 @@ test("estimateSessionContextUsage counts summary and active messages", () => {
     const usage = estimateSessionContextUsage(session, { contextWindow: 128_000, maxTokens: 8192 });
     assert.ok(usage.tokens > estimateMessageTokens({ role: "user", content: "active message" }));
     assert.equal(usage.contextWindow, 128_000);
+});
+
+test("estimateSessionContextBreakdown keeps non-negative categories aligned to total", () => {
+    const session = {
+        meta: { llmContextFromIndex: 0, todos: [{ id: "1", status: "pending", content: "task" }] },
+        messages: [{ id: "1", role: "user", content: "hi" }],
+    };
+    const model = { contextWindow: 200_000, maxTokens: 8192 };
+    const agentTools = {
+        enable_tools: true,
+        enable_file_tools: true,
+        enable_skills: true,
+        allow_sub_agents: true,
+    };
+
+    const breakdown = estimateSessionContextBreakdown(session, model, {
+        agentTools,
+        skillsCatalogText: "- demo: example skill\n".repeat(20),
+    });
+
+    for (const category of breakdown.categories) {
+        assert.ok(category.tokens >= 0, `${category.id} must be non-negative`);
+    }
+
+    const categorizedTotal = breakdown.categories.reduce((sum, category) => sum + category.tokens, 0);
+    assert.equal(categorizedTotal, breakdown.tokens);
+
+    const system = breakdown.categories.find((category) => category.id === "systemPrompt");
+    if (system) {
+        assert.ok(system.tokens >= 0);
+    }
 });

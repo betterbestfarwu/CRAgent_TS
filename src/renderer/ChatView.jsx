@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import { getMessageModelId } from "@shared/chatMessages.js";
+import { formatAtMentionsForDisplay } from "@shared/atMention.js";
+import { dedupeConsecutiveContextDividers, getMessageModelId } from "@shared/chatMessages.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
 
 function toWireMessage(message) {
@@ -11,21 +12,31 @@ function toWireMessage(message) {
         : JSON.stringify(call.function?.arguments ?? {}),
   }));
 
+  const hasAtMentions = Boolean(message.atMentions?.length);
+  const content =
+    message.role === "user"
+      ? hasAtMentions
+        ? message.userText ?? ""
+        : formatAtMentionsForDisplay(message.content)
+      : message.content;
+
   return {
     id: message.id,
     role: message.role,
-    content: message.content,
+    content,
     created_at: message.createdAt,
     ...(getMessageModelId(message) ? { model_id: getMessageModelId(message) } : {}),
     ...(message.runId ? { run_id: message.runId } : {}),
     ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
     ...(message.name ? { name: message.name } : {}),
-    ...(message.images?.length
+    ...(message.images?.length ? { image_count: message.images.length } : {}),
+    ...(hasAtMentions
       ? {
-          images: message.images.map((image) => ({
-            mime_type: image.mimeType,
-            data_url: image.dataUrl,
+          at_mentions: message.atMentions.map((mention) => ({
+            name: mention.name,
+            relative_path: mention.relativePath,
           })),
+          user_text: message.userText ?? "",
         }
       : {}),
   };
@@ -37,6 +48,7 @@ export function ChatView({ messages, todoRuns, busy, onDelete, onOpenImage }) {
   const pendingRef = useRef([]);
   const messagesRef = useRef(messages);
   const todoRunsRef = useRef(todoRuns);
+  const wireSnapshotRef = useRef({ ids: [], todoJson: "" });
   messagesRef.current = messages;
   todoRunsRef.current = todoRuns;
 
@@ -54,10 +66,33 @@ export function ChatView({ messages, todoRuns, busy, onDelete, onOpenImage }) {
   }, []);
 
   const syncMessages = useCallback(() => {
-    postToChat("renderAll", {
-      messages: (messagesRef.current || []).map(toWireMessage),
-      todoRuns: todoRunsRef.current || {},
-    });
+    const wireMessages = dedupeConsecutiveContextDividers(messagesRef.current || []).map(toWireMessage);
+    const ids = wireMessages.map((message) => message.id);
+    const todoJson = JSON.stringify(todoRunsRef.current || {});
+    const prev = wireSnapshotRef.current;
+    const idsSame =
+      ids.length === prev.ids.length && ids.every((id, index) => id === prev.ids[index]);
+    const idsAppended =
+      prev.ids.length > 0 &&
+      ids.length >= prev.ids.length &&
+      prev.ids.every((id, index) => id === ids[index]);
+    const todosOnly = idsSame && todoJson !== prev.todoJson;
+
+    if (todosOnly) {
+      postToChat("updateTodoRuns", todoRunsRef.current || {});
+    } else if (idsAppended && ids.length > prev.ids.length) {
+      postToChat("patchActiveRun", {
+        messages: wireMessages,
+        todoRuns: todoRunsRef.current || {},
+      });
+    } else {
+      postToChat("renderAll", {
+        messages: wireMessages,
+        todoRuns: todoRunsRef.current || {},
+      });
+    }
+
+    wireSnapshotRef.current = { ids, todoJson };
   }, [postToChat]);
 
   useEffect(() => {
@@ -116,7 +151,7 @@ export function ChatView({ messages, todoRuns, busy, onDelete, onOpenImage }) {
       ref={iframeRef}
       className="chat-frame"
       title="CRAgent chat"
-      src="./chat/chat.html?v=11"
+      src="./chat/chat.html?v=18"
     />
   );
 }

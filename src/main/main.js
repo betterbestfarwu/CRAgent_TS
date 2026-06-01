@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { IPC_CHANNELS } from "@shared/ipc";
 import { getAppPaths } from "./appPaths";
@@ -104,15 +104,38 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.getSnapshot, () => {
         const sessions = sessionStore.listMetas();
         return {
+            projects: sessionStore.listProjects(),
             sessions,
             currentSessionId: sessions[0]?.id ?? "",
             config: configStore.get(),
         };
     });
+    ipcMain.handle(IPC_CHANNELS.listProjects, () => sessionStore.listProjects());
+    ipcMain.handle(IPC_CHANNELS.addProject, (_event, directoryPath) =>
+        sessionStore.addProject(directoryPath),
+    );
+    ipcMain.handle(IPC_CHANNELS.pickProjectDirectory, async () => {
+        const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
+            title: "选择项目目录",
+            properties: ["openDirectory", "createDirectory"],
+        });
+        if (result.canceled || !result.filePaths?.length) {
+            return null;
+        }
+        return result.filePaths[0];
+    });
     ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId) => sessionStore.get(sessionId));
-    ipcMain.handle(IPC_CHANNELS.newSession, () => sessionStore.openNewSession());
+    ipcMain.handle(IPC_CHANNELS.newSession, (_event, args = {}) =>
+        sessionStore.openNewSession(args),
+    );
     ipcMain.handle(IPC_CHANNELS.sendChat, (_event, request) =>
-        runtime.sendUserMessage(request.sessionId, request.userInput, request.images),
+        runtime.sendUserMessage(
+            request.sessionId,
+            request.userInput,
+            request.images,
+            request.atMentions,
+            request.userText,
+        ),
     );
     ipcMain.handle(IPC_CHANNELS.updateModel, (_event, args) => {
         const session = sessionStore.updateModel(args.sessionId, args.providerKey, args.modelId);
@@ -125,7 +148,7 @@ function bootstrap() {
     const appPaths = getAppPaths();
     configStore = new ConfigStore(appPaths.configFile);
     const primary = configStore.resolvePrimaryRef();
-    sessionStore = new SessionStore(appPaths.sessionsDir, primary);
+    sessionStore = new SessionStore(appPaths.sessionsDir, primary, appPaths.projectsFile);
     const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey]);
     const toolRegistry = new ToolRegistry(appPaths.memoryFile);
     runtime = new AgentRuntime(sessionStore, configStore, llmClient, toolRegistry, () => mainWindow);

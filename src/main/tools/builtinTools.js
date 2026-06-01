@@ -51,7 +51,8 @@ async function runBash(command, cwd) {
 }
 
 export function createBuiltinTools({
-    getWorkspace,
+    getAgentWorkspace,
+    getDefaultWorkspace,
     workspaceMemory,
     skillLoader,
     getAgentTools,
@@ -71,8 +72,8 @@ export function createBuiltinTools({
                 },
                 required: ["path"],
             }),
-            async execute(args) {
-                const workspace = getWorkspace();
+            async execute(args, context) {
+                const workspace = getAgentWorkspace(context?.sessionId);
                 const filePath = resolvePathInWorkspace(workspace, args.path);
                 if (!fsSync.existsSync(filePath)) {
                     throw new Error(`file not found: ${filePath}`);
@@ -99,8 +100,8 @@ export function createBuiltinTools({
                 },
                 required: ["path", "content"],
             }),
-            async execute(args) {
-                const workspace = getWorkspace();
+            async execute(args, context) {
+                const workspace = getAgentWorkspace(context?.sessionId);
                 const filePath = resolvePathInWorkspace(workspace, args.path);
                 assertWritableTarget(workspace, filePath);
                 await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -118,8 +119,8 @@ export function createBuiltinTools({
                     path: { type: "string", description: "Directory relative to workspace; defaults to workspace root" },
                 },
             }),
-            async execute(args) {
-                const workspace = getWorkspace();
+            async execute(args, context) {
+                const workspace = getAgentWorkspace(context?.sessionId);
                 const dirPath = args.path
                     ? resolvePathInWorkspace(workspace, args.path)
                     : workspace;
@@ -143,12 +144,12 @@ export function createBuiltinTools({
                     required: ["command"],
                 },
             ),
-            async execute(args) {
+            async execute(args, context) {
                 const command = String(args.command || "").trim();
                 if (!command) {
                     throw new Error("'command' is required");
                 }
-                const workspace = getWorkspace();
+                const workspace = getAgentWorkspace(context?.sessionId);
                 const cwd = resolveCwd(workspace, args.cwd);
                 const safety = classifyBashCommand(command);
                 if (safety.kind === "blocked") {
@@ -242,7 +243,7 @@ export function createBuiltinTools({
                 const flags = args.case_insensitive ? "i" : "";
                 const regex = new RegExp(pattern, flags);
                 const cap = 80;
-                const workspace = getWorkspace();
+                const workspace = getDefaultWorkspace();
                 const matches = [];
                 for (const filePath of workspaceMemory.listSearchableMemoryFiles()) {
                     const rel = filePath.startsWith(`${workspace}${path.sep}`)

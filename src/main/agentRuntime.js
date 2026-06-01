@@ -7,13 +7,17 @@ import {
     withAssistantModel,
 } from "@shared/chatMessages";
 import { IPC_CHANNELS } from "@shared/ipc";
+import { expandAtMentionsToAbsolute } from "./atMentionExpand.js";
+import { normalizeAtMentions } from "@shared/atMention.js";
 import {
     appendAssistantMessage,
     createChatCommandHandlers,
 } from "./tools/chatCommandHandlers.js";
 import { formatTodosForPrompt, mergeTodos } from "./todoState.js";
 import { filterToolsForSubAgent, subAgentSystemPrompt } from "./subAgentTypes.js";
-import { parseModelRef } from "./modelFallback.js";
+import { isContextOverflowError, parseModelRef } from "./modelFallback.js";
+
+const MAX_CONTEXT_OVERFLOW_RETRIES = 2;
 import {
     buildCompactTranscript,
     buildPostCompactContext,
@@ -39,6 +43,14 @@ import {
     shouldRefreshSessionMemory,
     syncSessionMemoryAfterCompact,
 } from "./sessionMemory.js";
+import { resolveSessionWorkspace, resolveWorkspace } from "./workspacePaths.js";
+
+const PLAN_MODE_SYSTEM_PROMPT = [
+    "You are in Plan Mode.",
+    "Do not call tools or claim actions were executed.",
+    "Return a concise implementation plan only:",
+    "1) understanding, 2) steps, 3) risks/checks, 4) explicit handoff asking user to switch to Goal Mode for execution.",
+].join("\n");
 
 function getActiveContextEntries(session) {
     const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
@@ -98,6 +110,11 @@ export class AgentRuntime {
         );
     }
 
+    executionMode() {
+        const mode = this.configStore.get().agents?.default?.execution_mode;
+        return mode === "plan" ? "plan" : "goal";
+    }
+
     messagesForLLM(session, options = {}) {
         const {
             subAgentPrompt = null,
@@ -108,6 +125,19 @@ export class AgentRuntime {
         if (subAgentPrompt) {
             parts.push(subAgentSystemPrompt(subagentType));
         }
+        const sessionWorkspace = resolveSessionWorkspace(
+            this.sessionStore,
+            this.configStore,
+            session.meta.id,
+        );
+        const defaultWorkspace = resolveWorkspace(this.configStore);
+        if (sessionWorkspace !== defaultWorkspace) {
+            parts.push(
+                `<session_workspace path="${sessionWorkspace}">\n` +
+                    "This session belongs to a project. File tools and shell commands use this directory as the working directory.\n" +
+                    "</session_workspace>",
+            );
+        }
         const workspace = this.workspaceMemory.bootstrapSystemContent();
         if (workspace) {
             parts.push(workspace);
@@ -115,6 +145,9 @@ export class AgentRuntime {
         const agent = this.defaultAgent();
         if (agent?.tools?.enable_skills !== false) {
             parts.push(this.skillLoader.systemPromptSection());
+        }
+        if (this.executionMode() === "plan") {
+            parts.push(PLAN_MODE_SYSTEM_PROMPT);
         }
         const todoPrompt = formatTodosForPrompt(session.meta.todos);
         if (todoPrompt) {
@@ -208,12 +241,14 @@ export class AgentRuntime {
         return { skillName, rest, loaded };
     }
 
-    enqueueMessage(sessionId, rawInput, images = []) {
+    enqueueMessage(sessionId, rawInput, images = [], atMentions = [], userText = null) {
         const queue = this.pendingQueues.get(sessionId) || [];
         queue.push({
             id: randomUUID(),
             input: rawInput,
             images,
+            atMentions: normalizeAtMentions(atMentions),
+            userText,
             createdAt: new Date().toISOString(),
         });
         this.pendingQueues.set(sessionId, queue);
@@ -254,7 +289,7 @@ export class AgentRuntime {
         if (!next) {
             return;
         }
-        await this.dispatchUserMessage(sessionId, next.input, next.images);
+        await this.dispatchUserMessage(sessionId, next.input, next.images, next.atMentions, next.userText);
     }
 
     createAbortSignal(sessionId) {
@@ -369,8 +404,9 @@ export class AgentRuntime {
         return `Sub-agent "${description}" reached tool round limit before finishing.`;
     }
 
-    async sendUserMessage(sessionId, rawInput, images = []) {
+    async sendUserMessage(sessionId, rawInput, images = [], atMentions = [], userText = null) {
         const input = rawInput.trim();
+        const normalizedMentions = normalizeAtMentions(atMentions);
         const storedImages = Array.isArray(images)
             ? images
                   .filter((image) => image?.dataUrl && image?.mimeType)
@@ -379,18 +415,20 @@ export class AgentRuntime {
                       dataUrl: image.dataUrl,
                   }))
             : [];
-        if (!input && !storedImages.length) {
+        if (!input && !storedImages.length && !normalizedMentions.length) {
             return;
         }
         if (this.busyBySession.get(sessionId)) {
-            this.enqueueMessage(sessionId, rawInput, storedImages);
+            this.enqueueMessage(sessionId, rawInput, storedImages, normalizedMentions, userText);
             return { queued: true };
         }
-        await this.dispatchUserMessage(sessionId, rawInput, storedImages);
+        await this.dispatchUserMessage(sessionId, rawInput, storedImages, normalizedMentions, userText);
     }
 
-    async dispatchUserMessage(sessionId, rawInput, storedImages = []) {
+    async dispatchUserMessage(sessionId, rawInput, storedImages = [], atMentions = [], userText = null) {
+        const normalizedMentions = normalizeAtMentions(atMentions);
         const input = rawInput.trim();
+        const displayText = userText != null ? String(userText).trim() : input;
         if (!input && !storedImages.length) {
             return;
         }
@@ -418,11 +456,12 @@ export class AgentRuntime {
 
         const skillInvoke = this.parseSkillInvocation(input);
         const runId = randomUUID();
-        let messageContent = input;
+        const projectRoot = this.sessionStore.getProjectDirectory(sessionId);
+        let messageContent = expandAtMentionsToAbsolute(input, projectRoot);
         if (skillInvoke) {
-            messageContent =
-                skillInvoke.rest ||
-                `请按照已加载的 skill「${skillInvoke.skillName}」执行任务。`;
+            messageContent = skillInvoke.rest
+                ? expandAtMentionsToAbsolute(skillInvoke.rest, projectRoot)
+                : `请按照已加载的 skill「${skillInvoke.skillName}」执行任务。`;
         }
 
         const userMessage = {
@@ -431,6 +470,9 @@ export class AgentRuntime {
             content: messageContent,
             createdAt: new Date().toISOString(),
             runId,
+            ...(normalizedMentions.length
+                ? { atMentions: normalizedMentions, userText: displayText }
+                : {}),
             ...(skillInvoke
                 ? { skillName: skillInvoke.skillName, skillLoaded: true }
                 : {}),
@@ -453,8 +495,81 @@ export class AgentRuntime {
         this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: userMessage });
         this.emit(IPC_CHANNELS.onSessionChanged, session);
 
+        if (this.executionMode() === "plan") {
+            await this.runPlanLoop(session, runId);
+            await this.processQueue(sessionId);
+            return;
+        }
+
         await this.runLoop(session, runId);
         await this.processQueue(sessionId);
+    }
+
+    async runPlanLoop(session, runId) {
+        const sessionId = session.meta.id;
+        this.setBusy(sessionId, true);
+        const signal = this.createAbortSignal(sessionId);
+        try {
+            if (this.wasRunCancelled(sessionId)) {
+                return;
+            }
+            session = this.sessionStore.get(sessionId);
+            const model = {
+                providerKey: session.meta.providerKey,
+                modelId: session.meta.modelId,
+            };
+            const llmResult = await this.requestAgentLlm(sessionId, () =>
+                this.llmClient.complete({
+                    messages: this.messagesForLLM(session),
+                    model,
+                    modelChain: this.modelChainForSession(session),
+                    signal,
+                }),
+            );
+            if (this.wasRunCancelled(sessionId)) {
+                return;
+            }
+            if (llmResult.blocked) {
+                const blockedMessage = withAssistantModel(
+                    {
+                        id: randomUUID(),
+                        role: "assistant",
+                        content: this.contextBlockedMessage(llmResult.state),
+                        createdAt: new Date().toISOString(),
+                        runId,
+                    },
+                    model,
+                );
+                session = this.sessionStore.appendMessage(session.meta.id, blockedMessage);
+                this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: blockedMessage });
+                this.emit(IPC_CHANNELS.onSessionChanged, session);
+                return;
+            }
+            const choice = llmResult.choice;
+            const usedModel = choice.usedModel || model;
+            const assistant = withAssistantModel(
+                {
+                    ...choice.message,
+                    runId,
+                },
+                usedModel,
+            );
+            session = this.sessionStore.appendMessage(session.meta.id, assistant);
+            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: assistant });
+            this.emit(IPC_CHANNELS.onSessionChanged, session);
+        } catch (error) {
+            if (error?.name === "AbortError" || this.cancelledRuns.has(sessionId)) {
+                this.cancelledRuns.delete(sessionId);
+                return;
+            }
+            this.emit(IPC_CHANNELS.onError, {
+                sessionId,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            this.clearAbortSignal(sessionId);
+            this.setBusy(sessionId, false);
+        }
     }
 
     clearLlmContext(sessionId) {
@@ -512,8 +627,82 @@ export class AgentRuntime {
             return false;
         }
 
-        await this.compactLlmContext(sessionId, { auto: true });
+        await this.compactLlmContext(sessionId, {
+            auto: true,
+            preserveBusy: Boolean(this.busyBySession.get(sessionId)),
+            silent: Boolean(this.busyBySession.get(sessionId)),
+        });
         return true;
+    }
+
+    contextBlockedMessage(state) {
+        const percent = state?.percent ?? 0;
+        return (
+            `上下文已接近模型上限（约 ${percent}%），自动压缩后仍超出安全范围。` +
+            "请使用 /compact_context 或 /clear_context，或切换到更大上下文窗口的模型后继续。"
+        );
+    }
+
+    async prepareContextForLlm(sessionId) {
+        const contextConfig = getContextConfig(this.configStore);
+        let session = this.sessionStore.get(sessionId);
+        const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
+        let state = calculateContextWarningState(session, model, contextConfig);
+        this.emitContextWarning(session);
+
+        if (!state.isAtBlockingLimit) {
+            return { blocked: false, state };
+        }
+
+        await this.compactLlmContext(sessionId, {
+            auto: true,
+            preserveBusy: Boolean(this.busyBySession.get(sessionId)),
+            silent: true,
+        });
+        session = this.sessionStore.get(sessionId);
+        state = calculateContextWarningState(session, model, contextConfig);
+        this.emitContextWarning(session);
+
+        if (state.isAtBlockingLimit) {
+            return { blocked: true, state };
+        }
+        return { blocked: false, state };
+    }
+
+    async requestAgentLlm(sessionId, invoke) {
+        let overflowRetries = 0;
+
+        while (true) {
+            const prep = await this.prepareContextForLlm(sessionId);
+            if (prep.blocked) {
+                return { blocked: true, state: prep.state };
+            }
+
+            try {
+                const choice = await invoke();
+                return { blocked: false, choice };
+            } catch (error) {
+                if (error?.name === "AbortError") {
+                    throw error;
+                }
+                if (
+                    !isContextOverflowError(error) ||
+                    overflowRetries >= MAX_CONTEXT_OVERFLOW_RETRIES
+                ) {
+                    throw error;
+                }
+                overflowRetries += 1;
+                await this.compactLlmContext(sessionId, {
+                    auto: true,
+                    preserveBusy: Boolean(this.busyBySession.get(sessionId)),
+                    silent: true,
+                });
+            }
+        }
+    }
+
+    requestAgentChat(sessionId, chatArgs) {
+        return this.requestAgentLlm(sessionId, () => this.llmClient.chat(chatArgs));
     }
 
     trackToolSideEffects(session, call, result) {
@@ -607,12 +796,15 @@ export class AgentRuntime {
     }
 
     async compactLlmContext(sessionId, options = {}) {
-        const { auto = false } = options;
+        const { auto = false, preserveBusy = false, silent = false } = options;
         if (this.compactingSessions.has(sessionId)) {
             return;
         }
         this.compactingSessions.add(sessionId);
-        this.setBusy(sessionId, true);
+        const manageBusy = !preserveBusy;
+        if (manageBusy) {
+            this.setBusy(sessionId, true);
+        }
         try {
             const contextConfig = getContextConfig(this.configStore);
             let session = this.sessionStore.get(sessionId);
@@ -714,25 +906,29 @@ export class AgentRuntime {
             this.emit(IPC_CHANNELS.onSessionChanged, session);
             this.emitContextWarning(session);
 
-            const methodNote =
-                compactMethod === "session_memory" ? "（使用 Session Memory，未调用完整摘要）" : "";
-            const restoredNote = session.meta.postCompactContext
-                ? "，并恢复了最近读取的文件/技能摘要"
-                : "";
-            const feedback = withAssistantModel(
-                {
-                    id: randomUUID(),
-                    role: "assistant",
-                    content: auto
-                        ? `[自动压缩${methodNote}] 已将 ${toSummarize.length} 条较早消息压缩为结构化摘要，保留最近 ${keep.length} 条完整消息${restoredNote}。`
-                        : `已压缩 ${toSummarize.length} 条较早消息为结构化摘要，保留最近 ${keep.length} 条消息完整上下文${restoredNote}。`,
-                    createdAt: new Date().toISOString(),
-                },
-                { modelId: session.meta.modelId },
-            );
-            session = this.sessionStore.appendMessage(sessionId, feedback);
-            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: feedback });
-            this.emit(IPC_CHANNELS.onSessionChanged, session);
+            if (!silent) {
+                const methodNote =
+                    compactMethod === "session_memory"
+                        ? "（使用 Session Memory，未调用完整摘要）"
+                        : "";
+                const restoredNote = session.meta.postCompactContext
+                    ? "，并恢复了最近读取的文件/技能摘要"
+                    : "";
+                const feedback = withAssistantModel(
+                    {
+                        id: randomUUID(),
+                        role: "assistant",
+                        content: auto
+                            ? `[自动压缩${methodNote}] 已将 ${toSummarize.length} 条较早消息压缩为结构化摘要，保留最近 ${keep.length} 条完整消息${restoredNote}。`
+                            : `已压缩 ${toSummarize.length} 条较早消息为结构化摘要，保留最近 ${keep.length} 条消息完整上下文${restoredNote}。`,
+                        createdAt: new Date().toISOString(),
+                    },
+                    { modelId: session.meta.modelId },
+                );
+                session = this.sessionStore.appendMessage(sessionId, feedback);
+                this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: feedback });
+                this.emit(IPC_CHANNELS.onSessionChanged, session);
+            }
         } catch (error) {
             const session = this.sessionStore.get(sessionId);
             session.meta.compactFailures = (session.meta.compactFailures ?? 0) + 1;
@@ -743,7 +939,9 @@ export class AgentRuntime {
             });
         } finally {
             this.compactingSessions.delete(sessionId);
-            this.setBusy(sessionId, false);
+            if (manageBusy) {
+                this.setBusy(sessionId, false);
+            }
         }
     }
 
@@ -769,7 +967,7 @@ export class AgentRuntime {
                     providerKey: session.meta.providerKey,
                     modelId: session.meta.modelId,
                 };
-                const choice = await this.llmClient.chat({
+                const chatResult = await this.requestAgentChat(sessionId, {
                     messages: this.messagesForLLM(session),
                     model,
                     modelChain: this.modelChainForSession(session),
@@ -779,6 +977,26 @@ export class AgentRuntime {
                 if (this.wasRunCancelled(sessionId)) {
                     return;
                 }
+                if (chatResult.blocked) {
+                    const blockedMessage = withAssistantModel(
+                        {
+                            id: randomUUID(),
+                            role: "assistant",
+                            content: this.contextBlockedMessage(chatResult.state),
+                            createdAt: new Date().toISOString(),
+                            runId,
+                        },
+                        { modelId: session.meta.modelId },
+                    );
+                    session = this.sessionStore.appendMessage(sessionId, blockedMessage);
+                    this.emit(IPC_CHANNELS.onMessageAppended, {
+                        sessionId,
+                        message: blockedMessage,
+                    });
+                    this.emit(IPC_CHANNELS.onSessionChanged, session);
+                    return;
+                }
+                const choice = chatResult.choice;
                 const usedModel = choice.usedModel || model;
                 let assistant = withAssistantModel({ ...choice.message, runId }, usedModel);
                 if (choice.usedFallback && choice.usedModel) {

@@ -62,6 +62,7 @@ export function estimateSessionContextUsage(session, model, options = {}) {
     const compactBuffer = options.compactBufferTokens ?? DEFAULT_COMPACT_BUFFER;
     const autoCompactThreshold = Math.max(0, effectiveWindow - compactBuffer);
     const warningThreshold = Math.max(0, autoCompactThreshold - CONTEXT_WARNING_TOKENS);
+    const blockingLimit = Math.max(0, effectiveWindow - 3000);
 
     return {
         tokens,
@@ -69,12 +70,14 @@ export function estimateSessionContextUsage(session, model, options = {}) {
         effectiveWindow,
         autoCompactThreshold,
         warningThreshold,
+        blockingLimit,
         percent: contextWindow ? Math.round((tokens * 100) / contextWindow) : 0,
         percentLeft: contextWindow
             ? Math.max(0, Math.round(((contextWindow - tokens) * 100) / contextWindow))
             : 100,
         isAboveWarningThreshold: tokens >= warningThreshold,
         isAboveAutoCompactThreshold: autoCompactThreshold > 0 && tokens >= autoCompactThreshold,
+        isAtBlockingLimit: blockingLimit > 0 && tokens >= blockingLimit,
     };
 }
 
@@ -128,6 +131,49 @@ function estimateToolDefinitionsTokens(agentTools = {}) {
     return count * TOKENS_PER_TOOL_SCHEMA;
 }
 
+function reconcileBreakdownCategories(categories, targetTotal) {
+    const order = CONTEXT_BREAKDOWN_CATEGORIES.map((category) => category.id);
+    const sorted = [...categories].sort(
+        (left, right) => order.indexOf(left.id) - order.indexOf(right.id),
+    );
+
+    let total = sorted.reduce((sum, category) => sum + category.tokens, 0);
+    if (!sorted.length || total === targetTotal) {
+        return sorted;
+    }
+
+    if (total < targetTotal) {
+        const delta = targetTotal - total;
+        const systemCategory = sorted.find((category) => category.id === "systemPrompt");
+        if (systemCategory) {
+            systemCategory.tokens += delta;
+        } else {
+            const definition = CONTEXT_BREAKDOWN_CATEGORIES.find(
+                (category) => category.id === "systemPrompt",
+            );
+            sorted.unshift({ ...definition, tokens: delta });
+        }
+        return sorted;
+    }
+
+    const scale = targetTotal / total;
+    const scaled = sorted.map((category) => ({
+        ...category,
+        tokens: Math.floor(category.tokens * scale),
+    }));
+
+    let remainder = targetTotal - scaled.reduce((sum, category) => sum + category.tokens, 0);
+    for (const category of scaled) {
+        if (remainder <= 0) {
+            break;
+        }
+        category.tokens += 1;
+        remainder -= 1;
+    }
+
+    return scaled.filter((category) => category.tokens > 0);
+}
+
 export function estimateSessionContextBreakdown(session, model, options = {}) {
     const usage = estimateSessionContextUsage(session, model, options);
     const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
@@ -158,8 +204,16 @@ export function estimateSessionContextBreakdown(session, model, options = {}) {
     const mcp = options.mcpTokens ?? 0;
     const subagentDefinitions = agentTools.allow_sub_agents ? 406 : 0;
 
-    let systemPrompt = usage.tokens - conversationTokens - toolDefinitions - skills - rules - mcp - subagentDefinitions;
-    systemPrompt = Math.max(487, systemPrompt);
+    const systemPrompt = Math.max(
+        0,
+        usage.tokens -
+            conversationTokens -
+            toolDefinitions -
+            skills -
+            rules -
+            mcp -
+            subagentDefinitions,
+    );
 
     const byId = {
         systemPrompt,
@@ -171,18 +225,13 @@ export function estimateSessionContextBreakdown(session, model, options = {}) {
         conversation: conversationTokens,
     };
 
-    const categories = CONTEXT_BREAKDOWN_CATEGORIES.map((category) => ({
-        ...category,
-        tokens: byId[category.id] ?? 0,
-    })).filter((category) => category.tokens > 0);
-
-    const categorizedTotal = categories.reduce((sum, category) => sum + category.tokens, 0);
-    if (categorizedTotal !== usage.tokens && categories.length) {
-        const systemCategory = categories.find((category) => category.id === "systemPrompt");
-        if (systemCategory) {
-            systemCategory.tokens += usage.tokens - categorizedTotal;
-        }
-    }
+    const categories = reconcileBreakdownCategories(
+        CONTEXT_BREAKDOWN_CATEGORIES.map((category) => ({
+            ...category,
+            tokens: byId[category.id] ?? 0,
+        })).filter((category) => category.tokens > 0),
+        usage.tokens,
+    );
 
     return {
         ...usage,

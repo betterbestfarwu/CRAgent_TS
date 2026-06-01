@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "./ChatView.jsx";
-import { ComposerAuthMenu } from "./ComposerAuthMenu.jsx";
+import { ComposerAuthMenu, ComposerMenuCheckIcon } from "./ComposerAuthMenu.jsx";
 import { ComposerContextRing } from "./ComposerContextRing.jsx";
 import { ComposerContextPopup } from "./ComposerContextPopup.jsx";
 import { ComposerQueuePanel } from "./ComposerQueuePanel.jsx";
@@ -10,6 +10,17 @@ import {
   filterSlashCommands,
   filterSlashSkills,
 } from "./ComposerSlashMenu.jsx";
+import { ComposerAtMenu } from "./ComposerAtMenu.jsx";
+import { ComposerAtChips } from "./ComposerAtChips.jsx";
+import {
+  atMentionFileName,
+  buildAtNavItems,
+  buildInputWithAtMentions,
+  filterDirectoryEntries,
+  parentRelativePath,
+  parseActiveAtMention,
+  splitAtQueryPath,
+} from "@shared/atMention.js";
 import { Sidebar } from "./Sidebar.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
@@ -20,6 +31,7 @@ import { isDefaultSessionTitle, titleFromFirstUserMessage } from "@shared/sessio
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
 import { estimateSessionContextBreakdown } from "@shared/tokenEstimator";
+import { formatModelRef, modelRefLabel } from "@shared/modelRef.js";
 
 const SUGGESTIONS = [
   "总结当前项目结构",
@@ -47,12 +59,16 @@ function sessionMessagesEqual(left, right) {
 }
 
 export function App() {
+  const [projects, setProjects] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [currentSession, setCurrentSession] = useState(null);
   const [config, setConfig] = useState(null);
   const [skills, setSkills] = useState([]);
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState([]);
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [pendingAtMentions, setPendingAtMentions] = useState([]);
   const [composerDragOver, setComposerDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyBySession, setBusyBySession] = useState({});
@@ -66,7 +82,12 @@ export function App() {
   const [messageQueue, setMessageQueue] = useState([]);
   const [queuePanelOpen, setQueuePanelOpen] = useState(false);
   const [contextPopupOpen, setContextPopupOpen] = useState(false);
+  const [runtimeContextState, setRuntimeContextState] = useState(null);
+  const [executionModeSaving, setExecutionModeSaving] = useState(false);
+  const [composerQuickMenuOpen, setComposerQuickMenuOpen] = useState(false);
   const contextRingRef = useRef(null);
+  const composerQuickMenuRef = useRef(null);
+  const filePickerRef = useRef(null);
   const sessionIdRef = useRef(null);
   const sessionErrorTimerRef = useRef(null);
   const textareaRef = useRef(null);
@@ -118,6 +139,7 @@ export function App() {
     try {
       const snapshot = await window.cragent.getSnapshot();
       setConfig(snapshot.config);
+      setProjects(Array.isArray(snapshot.projects) ? snapshot.projects : []);
       const sorted = sortSessions(snapshot.sessions);
       setSessions(sorted);
       const sessionId = snapshot.currentSessionId || sorted[0]?.id;
@@ -127,6 +149,7 @@ export function App() {
       }
       const session = await window.cragent.getSession(sessionId);
       setCurrentSession(session);
+      setSelectedProjectId(session?.meta?.projectId || null);
     } catch (err) {
       showSessionError(err instanceof Error ? err.message : String(err));
     }
@@ -150,7 +173,17 @@ export function App() {
 
   useLayoutEffect(() => {
     resizeComposer();
-  }, [input, page, pendingImages.length]);
+  }, [input, page, pendingImages.length, pendingFiles.length, pendingAtMentions.length]);
+
+  useEffect(() => {
+    if (!composerQuickMenuOpen) return;
+    const onPointerDown = (event) => {
+      if (composerQuickMenuRef.current?.contains(event.target)) return;
+      setComposerQuickMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [composerQuickMenuOpen]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 834px)");
@@ -199,6 +232,7 @@ export function App() {
 
     const offSession = window.cragent.onSessionChanged((session) => {
       clearSessionError();
+      setSelectedProjectId(session?.meta?.projectId || null);
       setCurrentSession((prev) => {
         if (
           prev &&
@@ -282,6 +316,12 @@ export function App() {
       setPage("settings");
     });
 
+    const offContextWarning = window.cragent.onContextWarningChanged?.((payload) => {
+      if (sessionIdRef.current === payload.sessionId) {
+        setRuntimeContextState(payload);
+      }
+    });
+
     return () => {
       offMessage();
       offSession();
@@ -291,6 +331,7 @@ export function App() {
       offConfirm?.();
       offError();
       offSettings();
+      offContextWarning?.();
     };
   }, []);
 
@@ -302,7 +343,7 @@ export function App() {
 
   const currentModel = useMemo(() => {
     if (!config || !currentSession) return "";
-    return `${currentSession.meta.providerKey}/${currentSession.meta.modelId}`;
+    return formatModelRef(currentSession.meta.providerKey, currentSession.meta.modelId);
   }, [config, currentSession]);
 
   const [modelDisplay, setModelDisplay] = useState("");
@@ -310,6 +351,10 @@ export function App() {
   useEffect(() => {
     setModelDisplay(currentModel);
   }, [currentModel]);
+
+  useEffect(() => {
+    setRuntimeContextState(null);
+  }, [currentSession?.meta?.id]);
 
   const contextUsage = useMemo(() => {
     if (!currentSession || !config) return null;
@@ -323,19 +368,131 @@ export function App() {
     const skillsCatalogText = skills
       .map((skill) => `- ${skill.name}: ${skill.description || ""}`)
       .join("\n");
-    return estimateSessionContextBreakdown(currentSession, model, {
+    const estimated = estimateSessionContextBreakdown(currentSession, model, {
       compactBufferTokens: compactBuffer,
       agentTools,
       skillsCatalogText,
     });
-  }, [currentSession, config, skills]);
+    if (
+      !runtimeContextState ||
+      runtimeContextState.sessionId !== currentSession.meta.id
+    ) {
+      return estimated;
+    }
+    return {
+      ...estimated,
+      percent: runtimeContextState.percent ?? estimated.percent,
+      isAboveWarningThreshold:
+        runtimeContextState.isAboveWarningThreshold ?? estimated.isAboveWarningThreshold,
+      isAboveAutoCompactThreshold:
+        runtimeContextState.isAboveAutoCompactThreshold ??
+        estimated.isAboveAutoCompactThreshold,
+      isAtBlockingLimit: runtimeContextState.isAtBlockingLimit ?? estimated.isAtBlockingLimit,
+    };
+  }, [currentSession, config, skills, runtimeContextState]);
 
   const slashQuery = useMemo(() => {
     const match = input.match(/^\/([^\s]*)$/);
     return match ? match[1].toLowerCase() : null;
   }, [input]);
 
-  const canSend = Boolean(input.trim()) || pendingImages.length > 0;
+  const atMention = useMemo(() => parseActiveAtMention(input), [input]);
+
+  const activeProject = useMemo(() => {
+    const projectId = currentSession?.meta?.projectId;
+    if (!projectId) return null;
+    return projects.find((project) => project.id === projectId) || null;
+  }, [currentSession?.meta?.projectId, projects]);
+
+  const atPathParts = useMemo(() => {
+    if (!atMention) return { relativePath: "", filter: "" };
+    return splitAtQueryPath(atMention.query);
+  }, [atMention]);
+
+  const [atBrowseRelativePath, setAtBrowseRelativePath] = useState("");
+  const [atDirEntries, setAtDirEntries] = useState([]);
+  const [atDirLoading, setAtDirLoading] = useState(false);
+  const [atDirError, setAtDirError] = useState("");
+  const [atMenuIndex, setAtMenuIndex] = useState(0);
+  const [atMenuExpanded, setAtMenuExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!atMention) {
+      setAtBrowseRelativePath("");
+      setAtDirEntries([]);
+      setAtDirError("");
+      return;
+    }
+    setAtBrowseRelativePath(atPathParts.relativePath);
+  }, [atMention, atPathParts.relativePath]);
+
+  useEffect(() => {
+    setAtMenuIndex(0);
+    setAtMenuExpanded(false);
+  }, [atMention?.query, atBrowseRelativePath]);
+
+  useEffect(() => {
+    if (!atMention || !activeProject?.id) {
+      setAtDirEntries([]);
+      setAtDirLoading(false);
+      setAtDirError("");
+      return;
+    }
+    let cancelled = false;
+    setAtDirLoading(true);
+    setAtDirError("");
+    window.cragent
+      .listProjectDirectory({
+        projectId: activeProject.id,
+        relativePath: atBrowseRelativePath,
+      })
+      .then((result) => {
+        if (cancelled) return;
+        setAtDirEntries(Array.isArray(result?.entries) ? result.entries : []);
+        setAtDirError("");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setAtDirEntries([]);
+        setAtDirError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setAtDirLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [atMention, activeProject?.id, atBrowseRelativePath]);
+
+  const atFilteredEntries = useMemo(
+    () => filterDirectoryEntries(atDirEntries, atPathParts.filter),
+    [atDirEntries, atPathParts.filter],
+  );
+
+  const atNavItems = useMemo(() => {
+    if (!atMention) return [];
+    return buildAtNavItems(
+      atFilteredEntries,
+      atBrowseRelativePath,
+      Boolean(atBrowseRelativePath),
+    );
+  }, [atMention, atFilteredEntries, atBrowseRelativePath]);
+
+  useEffect(() => {
+    if (!atNavItems.length) {
+      setAtMenuIndex(0);
+      return;
+    }
+    if (atMenuIndex >= atNavItems.length) {
+      setAtMenuIndex(0);
+    }
+  }, [atNavItems, atMenuIndex]);
+
+  const canSend =
+    Boolean(input.trim()) ||
+    pendingImages.length > 0 ||
+    pendingFiles.length > 0 ||
+    pendingAtMentions.length > 0;
 
   const slashFilterQuery = slashQuery === null ? "" : slashQuery.trim();
 
@@ -373,6 +530,69 @@ export function App() {
   }, [slashNavItems, slashMenuIndex]);
 
   const showSlashMenu = page === "chat" && slashQuery !== null;
+  const showAtMenu =
+    page === "chat" && atMention !== null && Boolean(activeProject?.id) && !showSlashMenu;
+  const sendButtonDisabled = !busy && !canSend;
+
+  function replaceActiveAtMention(nextMentionBody) {
+    if (!atMention) return;
+    const prefix = input.slice(0, atMention.mentionStart);
+    const suffix = input.slice(atMention.mentionEnd);
+    const body = String(nextMentionBody ?? "");
+    setInput(`${prefix}@${body}${suffix}`);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      resizeComposer();
+    });
+  }
+
+  function applyAtFilePick(relativePath) {
+    const cleanPath = String(relativePath ?? "").trim();
+    if (!cleanPath) return;
+    const name = atMentionFileName(cleanPath);
+    setPendingAtMentions((prev) => {
+      if (prev.some((mention) => mention.relativePath === cleanPath)) {
+        return prev;
+      }
+      return [...prev, { id: crypto.randomUUID(), name, relativePath: cleanPath }];
+    });
+    if (atMention) {
+      const prefix = input.slice(0, atMention.mentionStart);
+      const suffix = input.slice(atMention.mentionEnd);
+      setInput(`${prefix}${suffix}`);
+    }
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      resizeComposer();
+    });
+  }
+
+  function enterAtDirectory(relativePath) {
+    const next = relativePath ? `${relativePath}/` : "";
+    replaceActiveAtMention(next);
+    setAtBrowseRelativePath(relativePath);
+  }
+
+  function goAtParentDirectory() {
+    const parent = parentRelativePath(atBrowseRelativePath);
+    const next = parent ? `${parent}/` : "";
+    replaceActiveAtMention(next);
+    setAtBrowseRelativePath(parent);
+  }
+
+  function activateAtMenuItem(item) {
+    if (!item) return;
+    if (item.kind === "parent") {
+      goAtParentDirectory();
+      return;
+    }
+    const { entry } = item;
+    if (entry.kind === "dir") {
+      enterAtDirectory(entry.relativePath);
+      return;
+    }
+    applyAtFilePick(entry.relativePath);
+  }
 
   function applySlashPick(name) {
     const next = `/${name} `;
@@ -405,26 +625,119 @@ export function App() {
     }
   }
 
+  async function addFilesFromPicker(fileList) {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return;
+    const imageFiles = files.filter((file) => file.type?.startsWith("image/"));
+    const normalFiles = files.filter((file) => !file.type?.startsWith("image/"));
+    if (imageFiles.length) {
+      const { accepted, errors } = await filesToImageAttachments(imageFiles, pendingImages.length);
+      if (accepted.length) {
+        setPendingImages((prev) => [...prev, ...accepted]);
+      }
+      if (errors.length) {
+        showSessionError(errors[0], currentSession?.meta.id);
+      }
+    }
+    if (normalFiles.length) {
+      setPendingFiles((prev) => {
+        const seen = new Set(
+          prev.map((item) => `${item.path || item.name}:${item.size}`),
+        );
+        const appended = normalFiles
+          .map((file) => ({
+            id: crypto.randomUUID(),
+            name: file.name || "file",
+            size: Number(file.size || 0),
+            path: typeof file.path === "string" ? file.path : "",
+          }))
+          .filter((item) => {
+            const key = `${item.path || item.name}:${item.size}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        return [...prev, ...appended];
+      });
+    }
+  }
+
   function removePendingImage(imageId) {
     setPendingImages((prev) => prev.filter((image) => image.id !== imageId));
+  }
+
+  function removePendingFile(fileId) {
+    setPendingFiles((prev) => prev.filter((file) => file.id !== fileId));
+  }
+
+  async function handleAddProjectDirectory(directoryPath) {
+    const cleanPath = String(directoryPath || "").trim();
+    if (!cleanPath) return;
+    try {
+      const project = await window.cragent.addProject(cleanPath);
+      setProjects((prev) => {
+        if (prev.some((item) => item.id === project.id)) {
+          return prev;
+        }
+        return [...prev, project].sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+      });
+      setSelectedProjectId(project.id);
+    } catch (err) {
+      showSessionError(err instanceof Error ? err.message : String(err), currentSession?.meta?.id);
+    }
+  }
+
+  function removePendingAtMention(mentionId) {
+    setPendingAtMentions((prev) => prev.filter((mention) => mention.id !== mentionId));
+  }
+
+  function removeLastPendingAtMention() {
+    setPendingAtMentions((prev) => (prev.length ? prev.slice(0, -1) : prev));
+  }
+
+  const composerPlaceholder =
+    pendingAtMentions.length || pendingImages.length || pendingFiles.length ? "" : "发消息...";
+
+  function buildSendPayload(trimmed) {
+    const atMentions = pendingAtMentions.map(({ name, relativePath }) => ({ name, relativePath }));
+    const withAtMentions = buildInputWithAtMentions(trimmed, atMentions);
+    return {
+      userInput: buildInputWithFiles(withAtMentions, pendingFiles),
+      userText: trimmed,
+      atMentions,
+    };
+  }
+
+  function buildInputWithFiles(text, files) {
+    if (!files.length) return text;
+    const lines = files.map((file) => `- ${file.path || file.name}`);
+    const fileBlock = `已附加文件：\n${lines.join("\n")}\n\n请先阅读这些文件，再继续处理当前任务。`;
+    const trimmed = text.trim();
+    return trimmed ? `${trimmed}\n\n${fileBlock}` : fileBlock;
   }
 
   async function handleSend(text = input) {
     if (!currentSession || page !== "chat") return;
     const trimmed = text.trim();
-    if (!trimmed && !pendingImages.length) return;
+    if (!trimmed && !pendingImages.length && !pendingFiles.length && !pendingAtMentions.length) return;
 
     const sessionId = currentSession.meta.id;
     const images = toStoredImages(pendingImages);
+    const sendPayload = buildSendPayload(trimmed);
 
     if (busy) {
+      setComposerQuickMenuOpen(false);
       setInput("");
       setPendingImages([]);
+      setPendingFiles([]);
+      setPendingAtMentions([]);
       setComposerDragOver(false);
       try {
         await window.cragent.sendChat({
           sessionId,
-          userInput: trimmed,
+          userInput: sendPayload.userInput,
+          userText: sendPayload.userText,
+          atMentions: sendPayload.atMentions,
           images,
         });
         setQueuePanelOpen(true);
@@ -436,15 +749,37 @@ export function App() {
 
     setInput("");
     setPendingImages([]);
+    setPendingFiles([]);
+    setPendingAtMentions([]);
+    setComposerQuickMenuOpen(false);
     setComposerDragOver(false);
+    busyBySessionRef.current.set(sessionId, true);
+    setBusyBySession((prev) => ({ ...prev, [sessionId]: true }));
+    setBusy(true);
 
     try {
-      await window.cragent.sendChat({
+      const result = await window.cragent.sendChat({
         sessionId,
-        userInput: trimmed,
+        userInput: sendPayload.userInput,
+        userText: sendPayload.userText,
+        atMentions: sendPayload.atMentions,
         images,
       });
+      // Runtime should emit busy=false when a run completes. Keep a local fallback
+      // to avoid a stuck sidebar spinner if that event is dropped/out of order.
+      if (!result?.queued) {
+        busyBySessionRef.current.set(sessionId, false);
+        setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
+        if (sessionIdRef.current === sessionId) {
+          setBusy(false);
+        }
+      }
     } catch (err) {
+      busyBySessionRef.current.set(sessionId, false);
+      setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
+      if (sessionIdRef.current === sessionId) {
+        setBusy(false);
+      }
       showSessionError(err instanceof Error ? err.message : String(err), sessionId);
     }
   }
@@ -474,20 +809,14 @@ export function App() {
     });
   }
 
-  async function handleNewChat() {
+  async function handleNewChat(projectId = selectedProjectId) {
     if (newChatInFlightRef.current) return;
     newChatInFlightRef.current = true;
     try {
       clearSessionError();
-      const localPlaceholder = sessions
-        .filter((meta) => isDefaultSessionTitle(meta.title))
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-      if (localPlaceholder) {
-        await handleSwitchSession(localPlaceholder.id);
-        return;
-      }
-      const next = await window.cragent.newSession();
+      const next = await window.cragent.newSession({ projectId: projectId || null });
       setCurrentSession(next);
+      setSelectedProjectId(next?.meta?.projectId || null);
       setSessions((prev) => {
         const has = prev.some((s) => s.id === next.meta.id);
         if (has) return sortSessions(prev);
@@ -500,13 +829,27 @@ export function App() {
     }
   }
 
+  function handleSelectProject(projectId) {
+    if (projectId === null) {
+      setSelectedProjectId(null);
+      return;
+    }
+    setSelectedProjectId((prev) => (prev === projectId ? null : projectId));
+  }
+
   async function handleSwitchSession(sessionId) {
     clearSessionError();
     const session = await window.cragent.getSession(sessionId);
     setCurrentSession(session);
+    setSelectedProjectId(session?.meta?.projectId || null);
     setBusy(busyBySessionRef.current.get(sessionId) ?? false);
     setPage("chat");
     if (compactLayout) setSidebarOpen(false);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+      });
+    });
   }
 
   async function handleDeleteSession(meta) {
@@ -531,6 +874,7 @@ export function App() {
     });
     if (currentSession?.meta.id === meta.id) {
       setCurrentSession(session);
+      setSelectedProjectId(session?.meta?.projectId || null);
       setPage("chat");
     }
     if (compactLayout) setSidebarOpen(false);
@@ -544,6 +888,38 @@ export function App() {
       providerKey,
       modelId,
     });
+  }
+
+  const executionMode =
+    config?.agents?.default?.execution_mode === "plan" ? "plan" : "goal";
+
+  async function handleExecutionModeChange(nextMode) {
+    if (!config || nextMode === executionMode || executionModeSaving) return;
+    const nextConfig = {
+      ...config,
+      agents: {
+        ...config.agents,
+        default: {
+          ...(config.agents?.default || {}),
+          execution_mode: nextMode,
+        },
+      },
+    };
+    setExecutionModeSaving(true);
+    try {
+      const updated = await window.cragent.updateConfig(nextConfig);
+      setConfig(updated);
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+      });
+    } catch (err) {
+      showSessionError(
+        err instanceof Error ? err.message : String(err),
+        currentSession?.meta.id,
+      );
+    } finally {
+      setExecutionModeSaving(false);
+    }
   }
 
   async function saveConfig(next) {
@@ -596,6 +972,15 @@ export function App() {
     });
   }
 
+  function handleTitlebarToggleSettings() {
+    if (onSettingsPage) {
+      setPage("chat");
+      return;
+    }
+    setPage("settings");
+    if (compactLayout) setSidebarOpen(false);
+  }
+
   const visibleSessionError = useMemo(() => {
     if (!sessionError?.message) return "";
     if (
@@ -615,20 +1000,28 @@ export function App() {
         onToggleSidebar={handleTitlebarToggleSidebar}
         onFocusSearch={handleTitlebarFocusSearch}
         onNewChat={() => void handleNewChat()}
-        onOpenSettings={() => {
-          setPage("settings");
-          if (compactLayout) setSidebarOpen(false);
-        }}
+        onOpenSettings={handleTitlebarToggleSettings}
       />
       <div
         className={`app${compactLayout ? " app-compact" : ""}${sidebarHidden ? " app-sidebar-hidden" : ""}`}
       >
       <Sidebar
         open={sidebarOpen}
+        projects={projects}
+        selectedProjectId={selectedProjectId}
         sessions={sessions}
         currentSessionId={currentSession?.meta.id}
         busyBySession={busyBySession}
         settingsActive={onSettingsPage}
+        onSelectProject={handleSelectProject}
+        onAddProject={async () => {
+          const directoryPath = await window.cragent.pickProjectDirectory?.();
+          if (directoryPath) {
+            await handleAddProjectDirectory(directoryPath);
+          }
+        }}
+        onAddProjectByPath={(directoryPath) => void handleAddProjectDirectory(directoryPath)}
+        onNewProjectChat={(projectId) => void handleNewChat(projectId)}
         onSelect={(sessionId) => void handleSwitchSession(sessionId)}
         onDelete={(meta) => void handleDeleteSession(meta)}
         onNewChat={() => void handleNewChat()}
@@ -709,6 +1102,31 @@ export function App() {
                     onHoverIndex={setSlashMenuIndex}
                   />
                 ) : null}
+                {showAtMenu ? (
+                  <ComposerAtMenu
+                    projectName={activeProject?.name || "项目"}
+                    projectDirectoryPath={activeProject?.directoryPath || ""}
+                    browseRelativePath={atBrowseRelativePath}
+                    entries={atDirEntries}
+                    filter={atPathParts.filter}
+                    loading={atDirLoading}
+                    error={atDirError}
+                    selectedIndex={atMenuIndex}
+                    expanded={atMenuExpanded}
+                    onExpandedChange={setAtMenuExpanded}
+                    onHoverIndex={setAtMenuIndex}
+                    onEnterDirectory={enterAtDirectory}
+                    onGoParent={goAtParentDirectory}
+                    onPickFile={applyAtFilePick}
+                  />
+                ) : null}
+                {atMention && !activeProject?.id && page === "chat" && !showSlashMenu ? (
+                  <div className="at-menu-wrap">
+                    <div className="at-menu" role="listbox" aria-label="文件与目录">
+                      <div className="at-menu-empty">请在项目下创建或选择会话后再使用 @</div>
+                    </div>
+                  </div>
+                ) : null}
                 <div
                   className={`composer-box${composerDragOver ? " composer-drag-over" : ""}${messageQueue.length ? " has-queue-toggle" : ""}`}
                   onDragEnter={(e) => {
@@ -739,8 +1157,8 @@ export function App() {
                     onRemove={removeQueuedMessage}
                   />
                 ) : null}
-                {pendingImages.length ? (
-                  <div className="composer-attachments" aria-label="待发送图片">
+                {pendingImages.length || pendingFiles.length ? (
+                  <div className="composer-attachments" aria-label="待发送附件">
                     {pendingImages.map((image) => (
                       <div key={image.id} className="composer-attachment">
                         <img src={image.dataUrl} alt={image.name || "待发送图片"} />
@@ -755,9 +1173,30 @@ export function App() {
                         </button>
                       </div>
                     ))}
+                    {pendingFiles.map((file) => (
+                      <div key={file.id} className="composer-file-attachment">
+                        <span className="composer-file-name" title={file.path || file.name}>
+                          {file.name}
+                        </span>
+                        <button
+                          type="button"
+                          className="composer-file-remove"
+                          title="移除文件"
+                          aria-label="移除文件"
+                          onClick={() => removePendingFile(file.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 ) : null}
-                <textarea
+                <div className="composer-input-row">
+                  <ComposerAtChips
+                    mentions={pendingAtMentions}
+                    onRemove={removePendingAtMention}
+                  />
+                  <textarea
                   ref={textareaRef}
                   className="composer-input"
                   value={input}
@@ -772,8 +1211,18 @@ export function App() {
                     e.preventDefault();
                     void addImagesFromFiles(files);
                   }}
-                  placeholder="发消息..."
+                  placeholder={composerPlaceholder}
                   onKeyDown={(e) => {
+                    if (e.key === "Backspace" && pendingAtMentions.length > 0) {
+                      const el = textareaRef.current;
+                      const start = el?.selectionStart ?? 0;
+                      const end = el?.selectionEnd ?? 0;
+                      if (start === 0 && end === 0) {
+                        e.preventDefault();
+                        removeLastPendingAtMention();
+                        return;
+                      }
+                    }
                     if (showSlashMenu && slashNavItems.length) {
                       if (e.key === "ArrowDown") {
                         e.preventDefault();
@@ -796,14 +1245,153 @@ export function App() {
                         return;
                       }
                     }
+                    if (showAtMenu && atNavItems.length) {
+                      const activeItem = atNavItems[atMenuIndex];
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setAtMenuIndex((prev) => Math.min(prev + 1, atNavItems.length - 1));
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setAtMenuIndex((prev) => Math.max(prev - 1, 0));
+                        return;
+                      }
+                      if (e.key === "ArrowRight" && activeItem?.kind === "entry" && activeItem.entry.kind === "dir") {
+                        e.preventDefault();
+                        enterAtDirectory(activeItem.entry.relativePath);
+                        return;
+                      }
+                      if (e.key === "ArrowLeft" && atBrowseRelativePath) {
+                        e.preventDefault();
+                        goAtParentDirectory();
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        if (atMention) {
+                          setInput(input.slice(0, atMention.mentionStart) + input.slice(atMention.mentionEnd));
+                        }
+                        return;
+                      }
+                      if (e.key === "Tab" || (e.key === "Enter" && !e.altKey && !e.shiftKey)) {
+                        e.preventDefault();
+                        activateAtMenuItem(activeItem);
+                        return;
+                      }
+                    }
                     if (e.key === "Enter" && !e.altKey && !e.shiftKey) {
                       e.preventDefault();
                       void handleSend();
                     }
                   }}
                 />
+                </div>
                 <div className="composer-toolbar-spacer" aria-hidden="true" />
                 <div className="composer-toolbar">
+                  <div className="composer-quick-menu-wrap" ref={composerQuickMenuRef}>
+                    <button
+                      type="button"
+                      className={`composer-quick-btn${composerQuickMenuOpen ? " is-open" : ""}`}
+                      title="更多操作"
+                      aria-label="更多操作"
+                      onClick={() => setComposerQuickMenuOpen((prev) => !prev)}
+                    >
+                      +
+                    </button>
+                    {composerQuickMenuOpen ? (
+                      <div className="composer-quick-menu">
+                        <button
+                          type="button"
+                          className="composer-quick-item"
+                          onClick={() => {
+                            setComposerQuickMenuOpen(false);
+                            filePickerRef.current?.click();
+                          }}
+                        >
+                          <span className="composer-quick-item-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none">
+                              <path
+                                d="M12 5v14M5 12h14"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          </span>
+                          <span className="composer-quick-item-label">添加照片和文件</span>
+                        </button>
+                        <div className="composer-quick-menu-divider" role="separator" aria-hidden="true" />
+                        <button
+                          type="button"
+                          className={`composer-quick-item${executionMode === "plan" ? " active" : ""}`}
+                          role="menuitemradio"
+                          aria-checked={executionMode === "plan"}
+                          onClick={() => {
+                            setComposerQuickMenuOpen(false);
+                            void handleExecutionModeChange("plan");
+                          }}
+                        >
+                          <span className="composer-quick-item-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none">
+                              <path
+                                d="M4 7h16M4 12h10M4 17h6"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          </span>
+                          <span className="composer-quick-item-label">计划模式</span>
+                          <span className="composer-quick-item-check">
+                            {executionMode === "plan" ? <ComposerMenuCheckIcon /> : null}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`composer-quick-item${executionMode === "goal" ? " active" : ""}`}
+                          role="menuitemradio"
+                          aria-checked={executionMode === "goal"}
+                          onClick={() => {
+                            setComposerQuickMenuOpen(false);
+                            void handleExecutionModeChange("goal");
+                          }}
+                        >
+                          <span className="composer-quick-item-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none">
+                              <path
+                                d="M12 3a9 9 0 1 0 9 9"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                              />
+                              <path
+                                d="M12 8v5l3 2"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                          <span className="composer-quick-item-label">追求目标</span>
+                          <span className="composer-quick-item-check">
+                            {executionMode === "goal" ? <ComposerMenuCheckIcon /> : null}
+                          </span>
+                        </button>
+                      </div>
+                    ) : null}
+                    <input
+                      ref={filePickerRef}
+                      type="file"
+                      multiple
+                      className="composer-hidden-file-input"
+                      onChange={(event) => {
+                        void addFilesFromPicker(event.target.files);
+                        event.target.value = "";
+                      }}
+                    />
+                  </div>
                   <ComposerAuthMenu
                     authMode={currentSession?.meta?.authMode}
                     onChange={(mode) => void handleAuthModeChange(mode)}
@@ -812,9 +1400,9 @@ export function App() {
                   <label className="composer-model-wrap">
                     <span className="composer-model-content">
                       <span className="composer-model-sizer" aria-hidden="true">
-                        {modelDisplay}
+                        {modelRefLabel(modelDisplay)}
                       </span>
-                      <span className="composer-model-label">{modelDisplay}</span>
+                      <span className="composer-model-label">{modelRefLabel(modelDisplay)}</span>
                     </span>
                     <span className="composer-model-chevron" aria-hidden="true">
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -844,14 +1432,14 @@ export function App() {
                           .filter(
                             (model) =>
                               model.state ||
-                              currentModel === `${providerKey}/${model.id}`,
+                              currentModel === formatModelRef(providerKey, model.id),
                           )
                           .map((model) => (
                             <option
-                              key={`${providerKey}/${model.id}`}
-                              value={`${providerKey}/${model.id}`}
+                              key={formatModelRef(providerKey, model.id)}
+                              value={formatModelRef(providerKey, model.id)}
                             >
-                              {providerKey}/{model.id}
+                              {model.id}
                             </option>
                           )),
                       )}
@@ -862,7 +1450,7 @@ export function App() {
                       buttonRef={contextRingRef}
                       percent={contextUsage?.percent ?? 0}
                       className={
-                        contextUsage?.isAboveAutoCompactThreshold
+                        contextUsage?.isAtBlockingLimit || contextUsage?.isAboveAutoCompactThreshold
                           ? "composer-context-ring-critical"
                           : contextUsage?.isAboveWarningThreshold
                             ? "composer-context-ring-warning"
@@ -887,7 +1475,7 @@ export function App() {
                           : ""
                     }`}
                     onClick={() => (busy ? void handleCancelRun() : void handleSend())}
-                    disabled={!busy && !canSend}
+                    disabled={sendButtonDisabled}
                     title={busy ? "中断当前任务" : "发送"}
                     aria-label={busy ? "中断当前任务" : "发送"}
                   >

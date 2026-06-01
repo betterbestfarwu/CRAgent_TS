@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { isRetryableLlmError } from "./modelFallback.js";
+import { isContextOverflowError, isRetryableLlmError } from "./modelFallback.js";
+
+function createLlmHttpError(status, bodyText) {
+    const error = new Error(`模型请求失败: ${status} ${bodyText.slice(0, 200)}`);
+    error.status = status;
+    return error;
+}
 
 function messageToApiPayload(message) {
     const payload = { role: message.role };
@@ -69,7 +75,7 @@ export class LlmClient {
         return provider;
     }
 
-    async completeOnce({ messages, model }) {
+    async completeOnce({ messages, model, signal }) {
         const provider = this.resolveProviderOrThrow(model);
         const body = {
             model: model.modelId,
@@ -85,11 +91,12 @@ export class LlmClient {
                 Authorization: `Bearer ${provider.apiKey}`,
             },
             body: JSON.stringify(body),
+            ...(signal ? { signal } : {}),
         });
 
         if (!response.ok) {
             const text = await response.text();
-            throw new Error(`模型请求失败: ${response.status} ${text.slice(0, 200)}`);
+            throw createLlmHttpError(response.status, text);
         }
 
         const data = await response.json();
@@ -99,18 +106,28 @@ export class LlmClient {
         };
     }
 
-    async complete({ messages, model, modelChain = [] }) {
+    async complete({ messages, model, modelChain = [], signal }) {
         const chain = modelChain.length ? modelChain : [model];
         let lastError = null;
         for (const currentModel of chain) {
             try {
-                const result = await this.completeOnce({ messages, model: currentModel });
+                const result = await this.completeOnce({
+                    messages,
+                    model: currentModel,
+                    signal,
+                });
                 return {
                     ...result,
                     usedModel: currentModel,
                     usedFallback: chain.indexOf(currentModel) > 0,
                 };
             } catch (error) {
+                if (error?.name === "AbortError") {
+                    throw error;
+                }
+                if (isContextOverflowError(error)) {
+                    throw error;
+                }
                 lastError = error;
                 if (!isRetryableLlmError(error)) {
                     return {
@@ -164,7 +181,7 @@ export class LlmClient {
 
         if (!response.ok) {
             const text = await response.text();
-            throw new Error(`模型请求失败: ${response.status} ${text.slice(0, 200)}`);
+            throw createLlmHttpError(response.status, text);
         }
 
         const data = await response.json();
@@ -198,6 +215,9 @@ export class LlmClient {
                 if (error?.name === "AbortError") {
                     throw error;
                 }
+                if (isContextOverflowError(error)) {
+                    throw error;
+                }
                 lastError = error;
                 if (!isRetryableLlmError(error)) {
                     return {
@@ -214,6 +234,9 @@ export class LlmClient {
             }
         }
         const lastModel = chain[chain.length - 1];
+        if (isContextOverflowError(lastError)) {
+            throw lastError;
+        }
         return {
             message: this.assistantMessage(
                 `所有模型均请求失败。最后错误: ${lastError?.message || "unknown"}`,

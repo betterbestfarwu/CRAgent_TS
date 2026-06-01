@@ -11,6 +11,24 @@ export function isContextDividerMessage(message) {
     return message?.role === CONTEXT_DIVIDER_ROLE;
 }
 
+/** Collapse back-to-back context dividers with the same label for chat UI. */
+export function dedupeConsecutiveContextDividers(messages) {
+    if (!messages?.length) {
+        return messages || [];
+    }
+    const result = [];
+    for (const message of messages) {
+        if (isContextDividerMessage(message) && result.length > 0) {
+            const previous = result[result.length - 1];
+            if (isContextDividerMessage(previous) && previous.content === message.content) {
+                continue;
+            }
+        }
+        result.push(message);
+    }
+    return result;
+}
+
 export function getMessageRunId(message) {
     return message?.runId ?? message?.run_id ?? null;
 }

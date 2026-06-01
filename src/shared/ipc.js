@@ -1,6 +1,10 @@
 export const IPC_CHANNELS = {
     getSnapshot: "app:getSnapshot",
     listSkills: "skills:list",
+    listProjects: "project:list",
+    addProject: "project:add",
+    pickProjectDirectory: "project:pickDirectory",
+    listProjectDirectory: "project:listDirectory",
     getSession: "session:get",
     newSession: "session:new",
     deleteSession: "session:delete",

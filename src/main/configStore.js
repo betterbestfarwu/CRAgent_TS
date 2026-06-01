@@ -91,6 +91,7 @@ export class ConfigStore {
                 default: {
                     model: { primary: "openai/gpt-4o-mini", fallbacks: [] },
                     workspace: "~/.CRAgent",
+                    execution_mode: "goal",
                 },
                 list: [
                     {

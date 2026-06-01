@@ -8,8 +8,12 @@ function subscribe(channel, callback) {
 const api = {
     getSnapshot: () => ipcRenderer.invoke(IPC_CHANNELS.getSnapshot),
     listSkills: () => ipcRenderer.invoke(IPC_CHANNELS.listSkills),
+    listProjects: () => ipcRenderer.invoke(IPC_CHANNELS.listProjects),
+    addProject: (directoryPath) => ipcRenderer.invoke(IPC_CHANNELS.addProject, directoryPath),
+    pickProjectDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.pickProjectDirectory),
+    listProjectDirectory: (args) => ipcRenderer.invoke(IPC_CHANNELS.listProjectDirectory, args),
     getSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getSession, sessionId),
-    newSession: () => ipcRenderer.invoke(IPC_CHANNELS.newSession),
+    newSession: (args) => ipcRenderer.invoke(IPC_CHANNELS.newSession, args),
     deleteSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.deleteSession, sessionId),
     deleteMessages: (args) => ipcRenderer.invoke(IPC_CHANNELS.deleteMessages, args),
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),

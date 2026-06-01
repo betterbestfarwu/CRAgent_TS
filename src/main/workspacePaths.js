@@ -24,6 +24,26 @@ export function resolveWorkspace(configStore) {
     return workspace;
 }
 
+export function resolveSessionWorkspace(sessionStore, configStore, sessionId) {
+    const fallback = resolveWorkspace(configStore);
+    if (!sessionId || !sessionStore) {
+        return fallback;
+    }
+    try {
+        const projectRoot = sessionStore.getProjectDirectory?.(sessionId);
+        if (!projectRoot) {
+            return fallback;
+        }
+        const resolved = path.resolve(expandTilde(projectRoot));
+        if (!fs.existsSync(resolved)) {
+            return fallback;
+        }
+        return resolved;
+    } catch {
+        return fallback;
+    }
+}
+
 export function resolvePathInWorkspace(workspace, rawPath) {
     const raw = String(rawPath || "").trim();
     if (!raw) {

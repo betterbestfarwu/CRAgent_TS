@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AUTH_MODES, normalizeAuthMode } from "@shared/authMode.js";
 
-function CheckIcon() {
+export function ComposerMenuCheckIcon() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
       <path
@@ -72,7 +72,9 @@ export function ComposerAuthMenu({ authMode, onChange }) {
                 }}
               >
                 <span className="composer-auth-item-label">{mode.label}</span>
-                <span className="composer-auth-item-check">{selected ? <CheckIcon /> : null}</span>
+                <span className="composer-auth-item-check">
+                  {selected ? <ComposerMenuCheckIcon /> : null}
+                </span>
               </button>
             );
           })}

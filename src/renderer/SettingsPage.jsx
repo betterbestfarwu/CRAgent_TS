@@ -587,6 +587,19 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
     }));
   }
 
+  function updateDefaultExecutionMode(mode) {
+    setDraftConfig((prev) => ({
+      ...prev,
+      agents: {
+        ...prev.agents,
+        default: {
+          ...prev.agents.default,
+          execution_mode: mode,
+        },
+      },
+    }));
+  }
+
   function updateDefaultAgentListItem(patch) {
     setDraftConfig((prev) => {
       const list = prev.agents?.list || [];
@@ -736,7 +749,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                 <SettingsGroup label="Connection">
                   <SettingsTextRow
                     title="Base URL"
-                    description="OpenAI 兼容 API 的根地址。"
+                    description="Provider API 的根地址。"
                     value={selectedProvider.baseUrl || ""}
                     onChange={(value) => updateProvider({ baseUrl: value })}
                     action={
@@ -1100,6 +1113,15 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
             </SettingsGroup>
 
             <SettingsGroup label="Execution">
+              <SettingsSelectRow
+                title="Work mode"
+                description="Plan 模式只输出方案，不调用工具；Goal 模式按任务直接执行。"
+                value={defaultAgentConfig.execution_mode || "goal"}
+                onChange={updateDefaultExecutionMode}
+              >
+                <option value="plan">Plan（先出方案）</option>
+                <option value="goal">Goal（直接执行）</option>
+              </SettingsSelectRow>
               <SettingsNumberRow
                 title="Max tool rounds"
                 description="单轮用户消息内，模型连续调用工具的最大轮数。"

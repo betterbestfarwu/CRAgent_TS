@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { displayTitle, filterSessions, groupSessions, relativeTime } from "./sidebarUtils.js";
+import { displayTitle, filterSessions, groupSessions } from "./sidebarUtils.js";
 
 const ICON_BUBBLE = (
   <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true">
@@ -45,6 +45,72 @@ const ICON_PLUS = (
   </svg>
 );
 
+const ICON_FOLDER = (
+  <svg
+    viewBox="0 0 24 24"
+    width="16"
+    height="16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+  </svg>
+);
+
+const ICON_CARET_RIGHT = (
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+    <path d="M6 4.5 10.5 8 6 11.5V4.5Z" />
+  </svg>
+);
+
+const ICON_CARET_DOWN = (
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+    <path d="M4.5 6 8 10.5 11.5 6H4.5Z" />
+  </svg>
+);
+
+function ProjectNodeHead({ project, expanded, active, onSelect, onNewChat }) {
+  const [hovered, setHovered] = useState(false);
+  const showAddBtn = hovered;
+
+  return (
+    <div
+      className={`project-node-head${active ? " active" : ""}${hovered && !expanded ? " hovered" : ""}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div className="project-node-surface">
+        <button
+          type="button"
+          className="project-node-main"
+          title={project.directoryPath}
+          onClick={() => onSelect?.(project.id)}
+        >
+          <span className="project-node-icon">
+            {expanded ? ICON_CARET_DOWN : hovered ? ICON_CARET_RIGHT : ICON_FOLDER}
+          </span>
+          <span className="project-node-name">{project.name}</span>
+        </button>
+        {showAddBtn ? (
+          <button
+            type="button"
+            className="project-node-add-chat"
+            title="在此项目新建会话"
+            aria-label="在此项目新建会话"
+            onClick={() => onNewChat?.(project.id)}
+          >
+            {ICON_PLUS}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function SessionRow({ meta, active, busy, forceActionButtons, onSelect, onDelete }) {
   const [hovered, setHovered] = useState(false);
   const rowRef = useRef(null);
@@ -73,9 +139,6 @@ function SessionRow({ meta, active, busy, forceActionButtons, onSelect, onDelete
             )}
           </span>
           <span className="session-title">{displayTitle(meta)}</span>
-          {!showActions ? (
-            <span className="session-time">{relativeTime(meta.createdAt)}</span>
-          ) : null}
         </button>
         {showActions ? (
           <button
@@ -98,6 +161,8 @@ function SessionRow({ meta, active, busy, forceActionButtons, onSelect, onDelete
 
 export function Sidebar({
   open,
+  projects = [],
+  selectedProjectId = null,
   sessions,
   currentSessionId,
   busyBySession = {},
@@ -105,14 +170,55 @@ export function Sidebar({
   onSelect,
   onDelete,
   onNewChat,
+  onSelectProject,
+  onAddProject,
+  onAddProjectByPath,
+  onNewProjectChat,
 }) {
   const [search, setSearch] = useState("");
   const [forceActionButtons, setForceActionButtons] = useState(false);
+  const [projectDropActive, setProjectDropActive] = useState(false);
 
-  const rows = useMemo(() => {
+  const filteredSessions = useMemo(() => {
     const filtered = filterSessions(sessions, search);
-    return groupSessions(filtered);
+    return filtered;
   }, [sessions, search]);
+
+  const fixedRows = useMemo(() => {
+    const fixed = filteredSessions.filter((meta) => !meta.projectId);
+    return groupSessions(fixed);
+  }, [filteredSessions]);
+
+  const projectRows = useMemo(() => {
+    const byProject = new Map();
+    for (const meta of filteredSessions) {
+      if (!meta.projectId) continue;
+      const list = byProject.get(meta.projectId) || [];
+      list.push(meta);
+      byProject.set(meta.projectId, list);
+    }
+    const rowsByProject = new Map();
+    for (const project of projects) {
+      rowsByProject.set(project.id, groupSessions(byProject.get(project.id) || []));
+    }
+    return rowsByProject;
+  }, [filteredSessions, projects]);
+
+  function extractDroppedPath(dataTransfer) {
+    const files = Array.from(dataTransfer?.files || []);
+    const first = files[0];
+    if (!first) return "";
+    if (first.webkitRelativePath) {
+      const segments = first.webkitRelativePath.split("/").filter(Boolean);
+      let path = first.path || "";
+      const trimCount = Math.max(1, segments.length - 1);
+      for (let i = 0; i < trimCount; i += 1) {
+        path = path.replace(/[/\\][^/\\]+$/, "");
+      }
+      return path;
+    }
+    return first.path || "";
+  }
 
   useEffect(() => {
     const media = window.matchMedia("(pointer: coarse)");
@@ -146,26 +252,98 @@ export function Sidebar({
         </button>
       </div>
       <div className="session-list">
-        {rows.map((row, index) => {
-          if (row.kind === "header") {
-            return (
-              <div key={`h-${row.label}-${index}`} className="session-group-header">
-                {row.label}
-              </div>
-            );
-          }
-          return (
+        <button
+          type="button"
+          className="session-root-label"
+          title="切换到临时会话分组"
+          onClick={() => onSelectProject?.(null)}
+        >
+          会话
+        </button>
+        <div className="session-node-content">
+          {fixedRows.map((meta) => (
             <SessionRow
-              key={row.meta.id}
-              meta={row.meta}
-              active={!settingsActive && row.meta.id === currentSessionId}
-              busy={Boolean(busyBySession[row.meta.id])}
+              key={meta.id}
+              meta={meta}
+              active={!settingsActive && meta.id === currentSessionId}
+              busy={Boolean(busyBySession[meta.id])}
               forceActionButtons={forceActionButtons}
               onSelect={onSelect}
               onDelete={onDelete}
             />
-          );
-        })}
+          ))}
+        </div>
+        <div
+          className={`project-section${projectDropActive ? " drag-over" : ""}`}
+          onDragEnter={(event) => {
+            if (!Array.from(event.dataTransfer?.types || []).includes("Files")) return;
+            event.preventDefault();
+            setProjectDropActive(true);
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+            setProjectDropActive(true);
+          }}
+          onDragLeave={(event) => {
+            if (event.currentTarget.contains(event.relatedTarget)) return;
+            setProjectDropActive(false);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setProjectDropActive(false);
+            const directoryPath = extractDroppedPath(event.dataTransfer);
+            if (!directoryPath) return;
+            onAddProjectByPath?.(directoryPath);
+          }}
+        >
+          <div className="project-header-row">
+            <div className="session-group-header project-group-header">项目</div>
+            <button
+              type="button"
+              className="project-add-btn"
+              title="添加项目目录"
+              aria-label="添加项目目录"
+              onClick={onAddProject}
+            >
+              {ICON_PLUS}
+            </button>
+          </div>
+          <div className="project-node-list">
+          {projects.map((project) => {
+            const rows = projectRows.get(project.id) || [];
+            const expanded = selectedProjectId === project.id;
+            const hasActiveChild =
+              !settingsActive && rows.some((meta) => meta.id === currentSessionId);
+            return (
+              <div key={project.id} className="project-node">
+                <ProjectNodeHead
+                  project={project}
+                  expanded={expanded}
+                  active={expanded && !hasActiveChild}
+                  onSelect={onSelectProject}
+                  onNewChat={onNewProjectChat}
+                />
+                {expanded ? (
+                  <div className="project-node-content">
+                    {rows.map((meta) => (
+                      <SessionRow
+                        key={meta.id}
+                        meta={meta}
+                        active={!settingsActive && meta.id === currentSessionId}
+                        busy={Boolean(busyBySession[meta.id])}
+                        forceActionButtons={forceActionButtons}
+                        onSelect={onSelect}
+                        onDelete={onDelete}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+          </div>
+        </div>
       </div>
     </aside>
   );

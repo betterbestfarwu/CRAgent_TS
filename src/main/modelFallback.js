@@ -29,8 +29,32 @@ export function buildModelChain(primary, fallbackRefs = []) {
     return chain;
 }
 
+const CONTEXT_OVERFLOW_PATTERNS = [
+    /\b413\b/,
+    /request too large/i,
+    /payload too large/i,
+    /context.*(length|window|limit)/i,
+    /maximum.*tokens/i,
+    /token limit/i,
+    /too many tokens/i,
+];
+
+export function isContextOverflowError(error) {
+    if (!error) {
+        return false;
+    }
+    if (error.status === 413) {
+        return true;
+    }
+    const message = String(error.message || error);
+    return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(message));
+}
+
 export function isRetryableLlmError(error) {
     if (!error) {
+        return false;
+    }
+    if (isContextOverflowError(error)) {
         return false;
     }
     const message = String(error.message || error);

@@ -72,6 +72,7 @@ function makeRuntimeHarness(options = {}) {
     };
 
     const llmCalls = [];
+    const llmCompleteCalls = [];
     const llmClient = {
         chat: async (args) => {
             llmCalls.push(args);
@@ -87,14 +88,20 @@ function makeRuntimeHarness(options = {}) {
                 },
             };
         },
-        complete: async () => ({
-            message: {
-                id: "assistant-complete",
-                role: "assistant",
-                content: "summary",
-                createdAt: new Date().toISOString(),
-            },
-        }),
+        complete: async (args) => {
+            llmCompleteCalls.push(args);
+            if (options.completeImpl) {
+                return options.completeImpl(args, llmCompleteCalls.length);
+            }
+            return {
+                message: {
+                    id: "assistant-complete",
+                    role: "assistant",
+                    content: "summary",
+                    createdAt: new Date().toISOString(),
+                },
+            };
+        },
     };
 
     const toolRegistry = new ToolRegistry(() => {
@@ -125,7 +132,17 @@ function makeRuntimeHarness(options = {}) {
         if (channel === "events:error") events.errors.push(payload);
     };
 
-    return { dir, configStore, sessionStore, session, runtime, events, llmCalls, toolRegistry };
+    return {
+        dir,
+        configStore,
+        sessionStore,
+        session,
+        runtime,
+        events,
+        llmCalls,
+        llmCompleteCalls,
+        toolRegistry,
+    };
 }
 
 test("ConfigStore.resolveModelChain includes session model and configured fallbacks", () => {
@@ -291,6 +308,179 @@ test("runLoop annotates assistant message when fallback model is used", async ()
     assert.match(assistant.content, /main reply/);
 });
 
+test("sendUserMessage drives TodoWrite from creation through auto-run to completion", async () => {
+    let llmRound = 0;
+    const { session, runtime, events, sessionStore, configStore } = makeRuntimeHarness({
+        chatImpl: (args) => {
+            llmRound += 1;
+            if (llmRound >= 2) {
+                const system = args.messages.find((message) => message.role === "system");
+                assert.ok(system, "later rounds should inject active todos into system prompt");
+                assert.match(system.content, /<active_todos>/);
+                assert.match(system.content, /Step one/);
+            }
+            if (llmRound === 1) {
+                return {
+                    message: {
+                        id: "assistant-todo-create",
+                        role: "assistant",
+                        content: "",
+                        toolCalls: [
+                            {
+                                id: "call-create",
+                                function: {
+                                    name: "TodoWrite",
+                                    arguments: JSON.stringify({
+                                        merge: false,
+                                        todos: [
+                                            { id: "s1", content: "Step one", status: "pending" },
+                                            { id: "s2", content: "Step two", status: "pending" },
+                                        ],
+                                    }),
+                                },
+                            },
+                        ],
+                        createdAt: new Date().toISOString(),
+                    },
+                };
+            }
+            if (llmRound === 2) {
+                return {
+                    message: {
+                        id: "assistant-todo-start",
+                        role: "assistant",
+                        content: "",
+                        toolCalls: [
+                            {
+                                id: "call-start",
+                                function: {
+                                    name: "TodoWrite",
+                                    arguments: JSON.stringify({
+                                        merge: true,
+                                        todos: [
+                                            { id: "s1", content: "Step one", status: "in_progress" },
+                                        ],
+                                    }),
+                                },
+                            },
+                        ],
+                        createdAt: new Date().toISOString(),
+                    },
+                };
+            }
+            if (llmRound === 3) {
+                return {
+                    message: {
+                        id: "assistant-todo-progress",
+                        role: "assistant",
+                        content: "",
+                        toolCalls: [
+                            {
+                                id: "call-progress",
+                                function: {
+                                    name: "TodoWrite",
+                                    arguments: JSON.stringify({
+                                        merge: true,
+                                        todos: [
+                                            { id: "s1", content: "Step one", status: "completed" },
+                                            { id: "s2", content: "Step two", status: "in_progress" },
+                                        ],
+                                    }),
+                                },
+                            },
+                        ],
+                        createdAt: new Date().toISOString(),
+                    },
+                };
+            }
+            if (llmRound === 4) {
+                return {
+                    message: {
+                        id: "assistant-todo-finish",
+                        role: "assistant",
+                        content: "",
+                        toolCalls: [
+                            {
+                                id: "call-finish",
+                                function: {
+                                    name: "TodoWrite",
+                                    arguments: JSON.stringify({
+                                        merge: true,
+                                        todos: [
+                                            { id: "s2", content: "Step two", status: "completed" },
+                                        ],
+                                    }),
+                                },
+                            },
+                        ],
+                        createdAt: new Date().toISOString(),
+                    },
+                };
+            }
+            return {
+                message: {
+                    id: "assistant-done",
+                    role: "assistant",
+                    content: "All todos completed.",
+                    createdAt: new Date().toISOString(),
+                },
+            };
+        },
+    });
+    configStore.update({
+        ...configStore.get(),
+        agents: {
+            ...configStore.get().agents,
+            list: configStore.get().agents.list.map((agent, index) =>
+                index === 0 ? { ...agent, max_tool_rounds: 6 } : agent,
+            ),
+        },
+    });
+
+    await runtime.sendUserMessage(session.meta.id, "请分步完成这两个任务");
+
+    const updated = sessionStore.get(session.meta.id);
+    const userMessage = updated.messages.find((message) => message.role === "user");
+    assert.ok(userMessage);
+    assert.equal(userMessage.content, "请分步完成这两个任务");
+    const runId = userMessage.runId;
+    assert.ok(runId);
+
+    const todoRun = updated.meta.todoRuns[runId];
+    assert.ok(todoRun);
+    const byId = Object.fromEntries(todoRun.todos.map((todo) => [todo.id, todo]));
+    assert.equal(byId.s1.status, "completed");
+    assert.equal(byId.s2.status, "completed");
+    assert.deepEqual(
+        updated.meta.todos.map((todo) => todo.status),
+        ["completed", "completed"],
+    );
+
+    assert.equal(runtime.busyBySession.get(session.meta.id), false);
+    assert.equal(events.errors.length, 0);
+    assert.ok(events.todosChanged.length >= 4);
+    assert.ok(
+        events.todosChanged.every((entry) => entry.sessionId === session.meta.id),
+    );
+    assert.ok(
+        events.todosChanged.some(
+            (entry) => entry.runId === runId && entry.todos.some((todo) => todo.status === "in_progress"),
+        ),
+    );
+
+    const toolMessages = updated.messages.filter(
+        (message) => message.role === "tool" && message.name === "TodoWrite",
+    );
+    assert.equal(toolMessages.length, 4);
+    assert.match(toolMessages[0].content, /请立即开始执行上述 todos/);
+    assert.match(toolMessages[0].content, /\[pending\] Step one/);
+    assert.match(toolMessages[toolMessages.length - 1].content, /\[completed\] Step two/);
+
+    const assistantMessages = updated.messages.filter((message) => message.role === "assistant");
+    assert.match(assistantMessages[assistantMessages.length - 1].content, /All todos completed/);
+    assert.equal(llmRound, 5);
+});
+
 test("runLoop auto-progresses todos across TodoWrite rounds", async () => {
     let llmRound = 0;
     const { session, runtime, events, sessionStore } = makeRuntimeHarness({
@@ -406,4 +596,128 @@ test("messagesForLLM injects active todos into system prompt", () => {
     assert.ok(system);
     assert.match(system.content, /<active_todos>/);
     assert.match(system.content, /Write tests/);
+});
+
+test("runLoop compacts and retries after context overflow error", async () => {
+    let chatCount = 0;
+    const { session, runtime, events, sessionStore } = makeRuntimeHarness({
+        chatImpl: () => {
+            chatCount += 1;
+            if (chatCount === 1) {
+                const error = new Error("模型请求失败: 413 payload too large");
+                error.status = 413;
+                throw error;
+            }
+            return {
+                message: {
+                    id: "assistant-recovered",
+                    role: "assistant",
+                    content: "recovered after compact",
+                    createdAt: new Date().toISOString(),
+                },
+            };
+        },
+        completeImpl: () => ({
+            message: {
+                id: "assistant-summary",
+                role: "assistant",
+                content: "<summary>compressed history</summary>",
+                createdAt: new Date().toISOString(),
+            },
+        }),
+    });
+
+    let working = session;
+    for (let i = 0; i < 8; i += 1) {
+        working = sessionStore.appendMessage(session.meta.id, {
+            id: `ctx-${i}`,
+            role: i % 2 === 0 ? "user" : "assistant",
+            content: `round ${i} ${"y".repeat(5000)}`,
+            createdAt: new Date().toISOString(),
+        });
+    }
+
+    await runtime.runLoop(working, "run-413");
+
+    assert.equal(chatCount, 2);
+    const assistant = events.messageAppended.find(
+        (entry) => entry.message.role === "assistant" && entry.message.content.includes("recovered"),
+    )?.message;
+    assert.ok(assistant);
+    assert.match(assistant.content, /recovered after compact/);
+});
+
+test("runLoop stops with guidance when context remains blocked", async () => {
+    const { session, runtime, events, sessionStore, configStore, llmCalls } = makeRuntimeHarness();
+    const config = configStore.get();
+    configStore.update({
+        ...config,
+        models: {
+            ...config.models,
+            openai: {
+                ...config.models.openai,
+                models: config.models.openai.models.map((model) =>
+                    model.id === "gpt-4o-mini"
+                        ? { ...model, contextWindow: 12_000 }
+                        : model,
+                ),
+            },
+        },
+    });
+
+    let working = session;
+    for (let i = 0; i < 3; i += 1) {
+        working = sessionStore.appendMessage(session.meta.id, {
+            id: `bulk-${i}`,
+            role: "user",
+            content: "z".repeat(100_000),
+            createdAt: new Date().toISOString(),
+        });
+    }
+
+    await runtime.runLoop(working, "run-blocked");
+
+    assert.equal(llmCalls.length, 0);
+    const assistant = events.messageAppended.find(
+        (entry) =>
+            entry.message.role === "assistant" &&
+            entry.message.content.includes("上下文已接近模型上限"),
+    )?.message;
+    assert.ok(assistant);
+    assert.match(assistant.content, /compact_context/);
+});
+
+test("plan execution mode returns plan without entering tool loop", async () => {
+    const { session, runtime, configStore, llmCalls, llmCompleteCalls, events } = makeRuntimeHarness({
+        completeImpl: () => ({
+            message: {
+                id: "assistant-plan",
+                role: "assistant",
+                content:
+                    "计划如下：\n1. 先定位入口\n2. 再拆解改动\n3. 最后验证\n\n若确认执行，请切换到 Goal 模式。",
+                createdAt: new Date().toISOString(),
+            },
+        }),
+    });
+    configStore.update({
+        ...configStore.get(),
+        agents: {
+            ...configStore.get().agents,
+            default: {
+                ...configStore.get().agents.default,
+                execution_mode: "plan",
+            },
+        },
+    });
+
+    await runtime.sendUserMessage(session.meta.id, "帮我改这个项目的会话标题策略");
+
+    assert.equal(llmCalls.length, 0);
+    assert.equal(llmCompleteCalls.length, 1);
+    const assistant = events.messageAppended.find(
+        (entry) => entry.message.role === "assistant",
+    )?.message;
+    assert.ok(assistant);
+    assert.match(assistant.content, /计划如下/);
+    assert.match(assistant.content, /切换到 Goal 模式/);
 });

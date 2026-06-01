@@ -9,6 +9,10 @@ dist-electron/
 release/
 .cache/
 
+# Local scratch / frame captures
+tmp_frames/
+tmp_frames_analysis/
+
 # OS / editor
 .DS_Store
 *.log

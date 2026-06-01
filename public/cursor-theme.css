@@ -21,6 +21,12 @@
   --cursor-font-size-code: 12px;
   --cursor-line-height: 1.55;
   --cursor-line-height-tight: 1.33;
+  /* Sidebar session list (VS Code / Cursor workbench list typography) */
+  --cursor-sidebar-list-size: var(--cursor-font-size);
+  --cursor-sidebar-list-size-secondary: var(--cursor-font-size-sm);
+  --cursor-sidebar-list-weight: 400;
+  --cursor-sidebar-list-line-height: 18px;
+  --cursor-sidebar-section-line-height: 16px;
 
   /* cursor-light */
   --cursor-bg-sidebar: #f3f3f3;

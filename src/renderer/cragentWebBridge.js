@@ -58,6 +58,7 @@ function makeDefaultConfig() {
       default: {
         model: { primary: "openai/gpt-4o-mini", fallbacks: [] },
         workspace: "~/.CRAgent",
+        execution_mode: "goal",
       },
       list: [
         {
@@ -113,7 +114,7 @@ function defaultModelRef(config) {
   return { providerKey, modelId };
 }
 
-function makeSession(config) {
+function makeSession(config, projectId = null) {
   const timestamp = nowIso();
   const { providerKey, modelId } = defaultModelRef(config);
   return {
@@ -122,6 +123,7 @@ function makeSession(config) {
       title: "新会话",
       providerKey,
       modelId,
+      projectId,
       createdAt: timestamp,
       updatedAt: timestamp,
     },
@@ -134,14 +136,23 @@ function sortMetasByUpdatedAt(metas) {
 }
 
 function openNewSession(state) {
-  const existing = pickPlaceholderSession(state.sessions);
+  const projectId =
+    typeof state.newSessionProjectId === "string" && state.newSessionProjectId.trim()
+      ? state.newSessionProjectId.trim()
+      : null;
+  const existing = pickPlaceholderSession(
+    state.sessions.filter((session) => {
+      const id = typeof session.meta?.projectId === "string" ? session.meta.projectId.trim() : null;
+      return id === projectId;
+    }),
+  );
   if (existing) {
     return {
       ...state,
       currentSessionId: existing.meta.id,
     };
   }
-  const created = makeSession(state.config);
+  const created = makeSession(state.config, projectId);
   return {
     ...state,
     sessions: [created, ...state.sessions],
@@ -212,6 +223,7 @@ export function installWebBridge() {
       const { config, sessions, currentSessionId } = ensureState();
       return {
         config,
+        projects: [],
         sessions: sortMetasByUpdatedAt(sessions.map((session) => session.meta)),
         currentSessionId,
       };
@@ -228,8 +240,29 @@ export function installWebBridge() {
       return [];
     },
 
-    async newSession() {
-      const next = updateState((state) => openNewSession(state));
+    async listProjects() {
+      return [];
+    },
+
+    async addProject() {
+      throw new Error("Web 演示模式暂不支持添加项目目录。");
+    },
+
+    async pickProjectDirectory() {
+      return null;
+    },
+
+    async listProjectDirectory() {
+      return { relativePath: "", entries: [] };
+    },
+
+    async newSession(args = {}) {
+      const next = updateState((state) =>
+        openNewSession({
+          ...state,
+          newSessionProjectId: args?.projectId ?? null,
+        }),
+      );
       const session = next.sessions.find((item) => item.meta.id === next.currentSessionId);
       emit(listeners.sessionChanged, session);
       return session;

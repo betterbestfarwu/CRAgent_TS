@@ -107,7 +107,7 @@ export function calculateContextWarningState(session, model, contextConfig = DEF
         isAboveWarningThreshold: tokens >= warningThreshold,
         isAboveAutoCompactThreshold:
             autoCompactEnabled && autoCompactThreshold > 0 && tokens >= autoCompactThreshold,
-        isAtBlockingLimit: tokens >= blockingLimit,
+        isAtBlockingLimit: blockingLimit > 0 && tokens >= blockingLimit,
     };
 }
 

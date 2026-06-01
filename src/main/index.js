@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { applyAppIcon } from "./appIcon.js";
 import { IPC_CHANNELS } from "@shared/ipc";
@@ -10,12 +10,13 @@ import { ToolRegistry } from "./toolRegistry";
 import { AgentRuntime } from "./agentRuntime";
 import { WorkspaceMemory } from "./workspaceMemory.js";
 import { SkillLoader } from "./skillLoader.js";
-import { resolveWorkspace } from "./workspacePaths.js";
+import { resolveSessionWorkspace, resolveWorkspace } from "./workspacePaths.js";
 import { createBuiltinTools } from "./tools/builtinTools.js";
 import { createMetaTools } from "./tools/metaTools.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
 import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
 import { normalizeAuthMode } from "@shared/authMode.js";
+import { listProjectDirectory } from "./projectBrowse.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(devServerUrl) || process.env.NODE_ENV === "development";
@@ -148,14 +149,43 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.getSnapshot, () => {
         const sessions = sessionStore.listMetas();
         return {
+            projects: sessionStore.listProjects(),
             sessions,
             currentSessionId: sessions[0]?.id ?? "",
             config: configStore.get(),
         };
     });
     ipcMain.handle(IPC_CHANNELS.listSkills, () => skillLoader.listSummaries());
+    ipcMain.handle(IPC_CHANNELS.listProjects, () => sessionStore.listProjects());
+    ipcMain.handle(IPC_CHANNELS.addProject, (_event, directoryPath) =>
+        sessionStore.addProject(directoryPath),
+    );
+    ipcMain.handle(IPC_CHANNELS.pickProjectDirectory, async () => {
+        const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
+            title: "选择项目目录",
+            properties: ["openDirectory", "createDirectory"],
+        });
+        if (result.canceled || !result.filePaths?.length) {
+            return null;
+        }
+        return result.filePaths[0];
+    });
+    ipcMain.handle(IPC_CHANNELS.listProjectDirectory, async (_event, args = {}) => {
+        const projectId = String(args.projectId || "").trim();
+        const relativePath = String(args.relativePath || "");
+        if (!projectId) {
+            throw new Error("缺少 projectId");
+        }
+        const project = sessionStore.listProjects().find((item) => item.id === projectId);
+        if (!project?.directoryPath) {
+            throw new Error("未找到项目");
+        }
+        return listProjectDirectory(project.directoryPath, relativePath);
+    });
     ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId) => sessionStore.get(sessionId));
-    ipcMain.handle(IPC_CHANNELS.newSession, () => sessionStore.openNewSession());
+    ipcMain.handle(IPC_CHANNELS.newSession, (_event, args = {}) =>
+        sessionStore.openNewSession(args),
+    );
     ipcMain.handle(IPC_CHANNELS.deleteSession, (_event, sessionId) => {
         const fallbackMeta = sessionStore.delete(sessionId);
         return sessionStore.get(fallbackMeta.id);
@@ -166,7 +196,13 @@ function registerIpc() {
         return session;
     });
     ipcMain.handle(IPC_CHANNELS.sendChat, (_event, request) =>
-        runtime.sendUserMessage(request.sessionId, request.userInput, request.images),
+        runtime.sendUserMessage(
+            request.sessionId,
+            request.userInput,
+            request.images,
+            request.atMentions,
+            request.userText,
+        ),
     );
     ipcMain.handle(IPC_CHANNELS.cancelRun, (_event, sessionId) => runtime.cancelRun(sessionId));
     ipcMain.handle(IPC_CHANNELS.removeQueuedMessage, (_event, args) =>
@@ -224,8 +260,10 @@ function bootstrap() {
     registerConfirmBridge();
     const appPaths = getAppPaths();
     configStore = new ConfigStore(appPaths.configFile);
-    const getWorkspace = () => resolveWorkspace(configStore);
-    const workspaceMemory = new WorkspaceMemory(getWorkspace, appPaths.memoryDir);
+    const getDefaultWorkspace = () => resolveWorkspace(configStore);
+    const getAgentWorkspace = (sessionId) =>
+        resolveSessionWorkspace(sessionStore, configStore, sessionId);
+    const workspaceMemory = new WorkspaceMemory(getDefaultWorkspace, appPaths.memoryDir);
     workspaceMemory.bootstrapIfNeeded();
 
     skillLoader = new SkillLoader(appPaths.skillsDir);
@@ -239,7 +277,7 @@ function bootstrap() {
     };
 
     const primary = configStore.resolvePrimaryRef();
-    sessionStore = new SessionStore(appPaths.sessionsDir, primary);
+    sessionStore = new SessionStore(appPaths.sessionsDir, primary, appPaths.projectsFile);
 
     const getAuthMode = (sessionId) => {
         try {
@@ -255,7 +293,8 @@ function bootstrap() {
     const toolRegistry = new ToolRegistry(
         () => {
             const builtin = createBuiltinTools({
-                getWorkspace,
+                getAgentWorkspace,
+                getDefaultWorkspace,
                 workspaceMemory,
                 skillLoader,
                 getAgentTools,

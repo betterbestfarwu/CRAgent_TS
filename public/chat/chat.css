@@ -30,6 +30,7 @@ html, body {
   font-size: var(--cursor-font-size);
   line-height: var(--cursor-line-height);
   overflow-x: hidden;
+  overflow-anchor: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--cursor-scrollbar-thumb) transparent;
 }
@@ -66,6 +67,7 @@ html, body {
   max-width: 100%;
   min-width: 0;
   overflow-x: hidden;
+  overflow-anchor: auto;
   box-sizing: border-box;
 }
 
@@ -359,6 +361,181 @@ html, body {
 
 .bubble pre code { background: transparent; padding: 0; }
 
+.bubble .mermaid-diagram-card {
+  position: relative;
+  margin: 0.6em 0;
+  max-width: 100%;
+  padding: 12px;
+  background: var(--cursor-bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+
+.bubble .mermaid-diagram-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.bubble .mermaid-diagram-card:hover .mermaid-diagram-toolbar,
+.bubble .mermaid-diagram-card:focus-within .mermaid-diagram-toolbar {
+  opacity: 1;
+}
+
+.bubble .mermaid-diagram-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 3px;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bubble .mermaid-diagram-btn:hover {
+  color: var(--fg);
+}
+
+.bubble .mermaid-diagram-body {
+  overflow-x: auto;
+  padding-top: 4px;
+}
+
+.bubble .mermaid-diagram-body .mermaid {
+  display: flex;
+  justify-content: center;
+  min-height: 1px;
+}
+
+.bubble .mermaid-diagram-body svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.bubble ul.task-list {
+  list-style: none;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.bubble ul.task-list li {
+  list-style: none;
+}
+
+.bubble ul.task-list input[type="checkbox"] {
+  margin-right: 0.35em;
+  vertical-align: middle;
+}
+
+.bubble del {
+  opacity: 0.72;
+}
+
+.bubble mark {
+  background: rgba(255, 212, 0, 0.35);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .bubble mark {
+    background: rgba(255, 212, 0, 0.22);
+  }
+}
+
+.bubble .footnotes {
+  margin-top: 1em;
+  padding-top: 0.5em;
+  border-top: 1px solid var(--border);
+  font-size: var(--cursor-font-size-sm);
+  color: var(--muted);
+}
+
+.bubble .footnotes ol {
+  margin: 0.4em 0 0 1.2em;
+  padding: 0;
+}
+
+.bubble .footnote-ref a {
+  text-decoration: none;
+  color: var(--cursor-accent);
+}
+
+.bubble .footnote-backref {
+  text-decoration: none;
+  margin-left: 0.25em;
+}
+
+.mermaid-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+}
+
+.mermaid-modal.is-open {
+  display: block;
+}
+
+.mermaid-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.mermaid-modal-panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(96vw, 1200px);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--cursor-bg-input);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 36px 20px 20px;
+  box-sizing: border-box;
+}
+
+.mermaid-modal-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.mermaid-modal-body {
+  display: flex;
+  justify-content: center;
+}
+
+.mermaid-modal-body svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.bubble pre code.hljs {
+  background: transparent;
+  padding: 0;
+}
+
 .bubble h1, .bubble h2, .bubble h3 {
   margin: 0.6em 0 0.3em;
 }
@@ -559,6 +736,33 @@ html, body {
   width: auto;
   padding-inline: 0;
   text-align: right;
+}
+
+.msg-user-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.msg-at-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.msg-at-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  color: var(--link);
+  font-size: inherit;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.msg-at-chip:hover {
+  text-decoration: underline;
 }
 
 .todo-inline-block {

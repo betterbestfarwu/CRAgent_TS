@@ -15,6 +15,8 @@
   // Feather-style icons; stroke inherits color so they pick up text color.
   var ICON_COPY = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
   var ICON_CHECK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+  var ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+  var ICON_EXPAND = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
 
   var todoRunsById = {};
 
@@ -34,6 +36,152 @@
     });
   }
 
+  var mermaidReady = false;
+  var mermaidModalEl = null;
+
+  function mermaidIsDark() {
+    return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+
+  function mermaidThemeConfig() {
+    if (mermaidIsDark()) {
+      return {
+        theme: 'base',
+        themeVariables: {
+          primaryColor: '#262626',
+          primaryTextColor: '#e4e4e4',
+          primaryBorderColor: '#555',
+          lineColor: '#888',
+          secondaryColor: '#1e1e1e',
+          tertiaryColor: '#181818',
+          fontFamily: 'system-ui, sans-serif',
+          fontSize: '13px'
+        }
+      };
+    }
+    return {
+      theme: 'base',
+      themeVariables: {
+        primaryColor: '#f3f3f3',
+        primaryTextColor: '#141414',
+        primaryBorderColor: '#d4d4d4',
+        lineColor: '#888',
+        secondaryColor: '#fafafa',
+        tertiaryColor: '#fff',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '13px'
+      }
+    };
+  }
+
+  function ensureMermaid() {
+    if (!window.mermaid || mermaidReady) return;
+    var cfg = mermaidThemeConfig();
+    window.mermaid.initialize({
+      startOnLoad: false,
+      theme: cfg.theme,
+      themeVariables: cfg.themeVariables,
+      flowchart: { curve: 'basis', padding: 16 },
+      securityLevel: 'strict'
+    });
+    mermaidReady = true;
+  }
+
+  function typesetMermaid(root) {
+    if (!root || !window.mermaid) return Promise.resolve();
+    ensureMermaid();
+    var nodes = root.querySelectorAll('.mermaid:not([data-mermaid-done])');
+    if (!nodes.length) return Promise.resolve();
+    var result = window.mermaid.run({ nodes: nodes, suppressErrors: true });
+    if (result && typeof result.then === 'function') {
+      return result.then(function () {
+        nodes.forEach(function (node) {
+          node.setAttribute('data-mermaid-done', '1');
+        });
+        enhanceMermaidDiagrams(root);
+      }).catch(function () {
+        enhanceMermaidDiagrams(root);
+      });
+    }
+    enhanceMermaidDiagrams(root);
+    return Promise.resolve();
+  }
+
+  function highlightCodeBlocks(root) {
+    if (!root || !window.hljs) return;
+    root.querySelectorAll('pre code').forEach(function (block) {
+      if (block.closest('.mermaid-diagram-card')) return;
+      if (block.dataset.hljsDone === '1') return;
+      try {
+        window.hljs.highlightElement(block);
+        block.dataset.hljsDone = '1';
+      } catch (_) {}
+    });
+  }
+
+  function enhanceMermaidDiagrams(root) {
+    if (!root) return;
+    root.querySelectorAll('.mermaid-diagram-card').forEach(function (card) {
+      if (card.querySelector('.mermaid-diagram-toolbar')) return;
+      var toolbar = document.createElement('div');
+      toolbar.className = 'mermaid-diagram-toolbar';
+      var copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'icon-btn mermaid-diagram-btn';
+      copyBtn.dataset.action = 'copy-mermaid';
+      copyBtn.title = '复制 Mermaid 源码';
+      copyBtn.setAttribute('aria-label', '复制 Mermaid 源码');
+      copyBtn.innerHTML = ICON_COPY;
+      var expandBtn = document.createElement('button');
+      expandBtn.type = 'button';
+      expandBtn.className = 'icon-btn mermaid-diagram-btn';
+      expandBtn.dataset.action = 'expand-mermaid';
+      expandBtn.title = '放大查看';
+      expandBtn.setAttribute('aria-label', '放大查看');
+      expandBtn.innerHTML = ICON_EXPAND;
+      toolbar.appendChild(copyBtn);
+      toolbar.appendChild(expandBtn);
+      card.insertBefore(toolbar, card.firstChild);
+    });
+  }
+
+  function mermaidSourceFromCard(card) {
+    var pre = card && card.querySelector('.mermaid-source');
+    return (pre && pre.textContent) || '';
+  }
+
+  function openMermaidModal(card) {
+    var svg = card && card.querySelector('.mermaid svg');
+    if (!svg) return;
+    if (!mermaidModalEl) {
+      mermaidModalEl = document.createElement('div');
+      mermaidModalEl.className = 'mermaid-modal';
+      mermaidModalEl.innerHTML =
+        '<div class="mermaid-modal-backdrop" data-action="close-mermaid-modal"></div>' +
+        '<div class="mermaid-modal-panel" role="dialog" aria-modal="true">' +
+          '<button type="button" class="mermaid-modal-close icon-btn" data-action="close-mermaid-modal" aria-label="关闭">×</button>' +
+          '<div class="mermaid-modal-body"></div>' +
+        '</div>';
+      document.body.appendChild(mermaidModalEl);
+    }
+    var body = mermaidModalEl.querySelector('.mermaid-modal-body');
+    body.innerHTML = '';
+    body.appendChild(svg.cloneNode(true));
+    mermaidModalEl.classList.add('is-open');
+  }
+
+  function closeMermaidModal() {
+    if (mermaidModalEl) mermaidModalEl.classList.remove('is-open');
+  }
+
+  function postProcessRenderedContent(root) {
+    if (!root) return;
+    typesetMath(root);
+    highlightCodeBlocks(root);
+    enhanceCodeCopyButtons(root);
+    typesetMermaid(root);
+  }
+
   function preText(pre) {
     var code = pre.querySelector('code');
     return (code ? code.textContent : pre.textContent) || '';
@@ -42,7 +190,7 @@
   function enhanceCodeCopyButtons(root) {
     if (!root) return;
     root.querySelectorAll('pre').forEach(function (pre) {
-      if (pre.closest('.code-block')) return;
+      if (pre.closest('.code-block') || pre.closest('.mermaid-diagram-card')) return;
       var wrap = document.createElement('div');
       wrap.className = 'code-block';
       pre.parentNode.insertBefore(wrap, pre);
@@ -81,6 +229,8 @@
     if (turnContent) return turnContent.innerText.trim();
     var body = bubbleEl.querySelector('.bubble-collapse-body');
     if (body) return body.innerText.trim();
+    var userBody = bubbleEl.querySelector('.msg-user-body');
+    if (userBody) return userBody.innerText.trim();
     var msgText = bubbleEl.querySelector('.msg-text');
     if (msgText) return msgText.innerText.trim();
     var clone = bubbleEl.cloneNode(true);
@@ -301,8 +451,7 @@
       contentWrap.className = 'assistant-turn-content';
       contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
       bubble.appendChild(contentWrap);
-      typesetMath(bubble);
-      enhanceCodeCopyButtons(bubble);
+      postProcessRenderedContent(bubble);
       setupCollapsibleContent(contentWrap);
     }
     wrap.appendChild(bubble);
@@ -320,6 +469,11 @@
         escapeAttr(contentMsg.id) +
         '" title="复制" aria-label="复制">' +
         ICON_COPY +
+        '</button>' +
+        '<button class="icon-btn" data-action="delete" data-id="' +
+        escapeAttr(contentMsg.id) +
+        '" title="删除" aria-label="删除">' +
+        ICON_TRASH +
         '</button>'
       : '<button class="icon-btn" data-action="copy-thinking" data-thinking-ids="' +
         escapeAttr(thinkingIds.join(',')) +
@@ -378,39 +532,49 @@
     return wrap;
   }
 
+  function formatAtMentionsForDisplayInline(text) {
+    return String(text || '').replace(/@([^\s@]+)/g, function (full, mentionPath) {
+      var raw = String(mentionPath || '').trim();
+      if (!raw) return full;
+      var parts = raw.split(/[/\\]/);
+      var name = parts[parts.length - 1] || raw;
+      return '@' + name;
+    });
+  }
+
   function appendUserBubbleContent(bubble, msg) {
-    if (msg.images && msg.images.length) {
-      var gallery = document.createElement('div');
-      gallery.className = 'msg-images';
-      msg.images.forEach(function (image) {
-        var imageEl = document.createElement('img');
-        imageEl.className = 'msg-image';
-        imageEl.src = image.data_url || image.dataUrl || '';
-        imageEl.alt = 'Attached image';
-        imageEl.title = '双击查看大图';
-        imageEl.loading = 'lazy';
-        imageEl.addEventListener('dblclick', function (event) {
-          event.preventDefault();
-          event.stopPropagation();
-          var dataUrl = imageEl.src;
-          if (!dataUrl) return;
-          notifyHost({
-            action: 'openImage',
-            dataUrl: dataUrl,
-            mimeType: image.mime_type || image.mimeType || '',
-          });
-        });
-        gallery.appendChild(imageEl);
+    var mentions = msg.at_mentions || [];
+    var userText = String(msg.user_text || msg.content || '').trim();
+
+    if (mentions.length) {
+      var body = document.createElement('div');
+      body.className = 'msg-user-body';
+      if (userText) {
+        var text = document.createElement('div');
+        text.className = 'msg-text';
+        text.textContent = userText;
+        body.appendChild(text);
+      }
+      var chips = document.createElement('div');
+      chips.className = 'msg-at-chips';
+      mentions.forEach(function (mention) {
+        var chip = document.createElement('span');
+        chip.className = 'msg-at-chip';
+        chip.title = mention.relative_path || mention.name || '';
+        chip.textContent = '@' + (mention.name || '');
+        chips.appendChild(chip);
       });
-      bubble.appendChild(gallery);
+      body.appendChild(chips);
+      bubble.appendChild(body);
+      return;
     }
-    if (String(msg.content || '').trim()) {
-      var text = document.createElement('div');
-      text.className = 'msg-text';
-      text.innerHTML = window.MD.render(msg.content || '');
-      bubble.appendChild(text);
-      typesetMath(text);
-      enhanceCodeCopyButtons(text);
+
+    if (userText) {
+      var plain = document.createElement('div');
+      plain.className = 'msg-text';
+      plain.innerHTML = window.MD.render(formatAtMentionsForDisplayInline(userText));
+      bubble.appendChild(plain);
+      postProcessRenderedContent(plain);
     }
   }
 
@@ -428,15 +592,13 @@
         body.className = 'bubble-collapse-body';
         body.innerHTML = window.MD.render(msg.content || '');
         bubble.appendChild(body);
-        typesetMath(body);
-        enhanceCodeCopyButtons(body);
+        postProcessRenderedContent(body);
         setupCollapsibleContent(body);
       } else if (msg.role === 'user') {
         appendUserBubbleContent(bubble, msg);
       } else {
         bubble.innerHTML = window.MD.render(msg.content || '');
-        typesetMath(bubble);
-        enhanceCodeCopyButtons(bubble);
+        postProcessRenderedContent(bubble);
       }
     }
     wrap.appendChild(bubble);
@@ -459,6 +621,9 @@
     meta.innerHTML = '<span>' + roleLabel(msg.role, msg) + (time ? ' · ' + time : '') + '</span>' +
                      '<span class="actions">' +
                        '<button class="icon-btn" data-action="copy" data-id="' + escapeAttr(msg.id) + '" title="复制" aria-label="复制">' + ICON_COPY + '</button>' +
+                       (msg.role === 'assistant'
+                         ? '<button class="icon-btn" data-action="delete" data-id="' + escapeAttr(msg.id) + '" title="删除" aria-label="删除">' + ICON_TRASH + '</button>'
+                         : '') +
                      '</span>';
     wrap.appendChild(meta);
     return wrap;
@@ -482,11 +647,8 @@
   }
 
   function afterRenderScroll(wasNearBottom, prevScrollTop, prevScrollHeight) {
-    restoreScrollAfterRender(wasNearBottom, prevScrollTop, prevScrollHeight);
     requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        restoreScrollAfterRender(wasNearBottom, prevScrollTop, prevScrollHeight);
-      });
+      restoreScrollAfterRender(wasNearBottom, prevScrollTop, prevScrollHeight);
     });
   }
 
@@ -496,6 +658,119 @@
       prevScrollTop: window.scrollY,
       prevScrollHeight: document.documentElement.scrollHeight,
     };
+  }
+
+  function collectRunMessagesForUser(messages, userIndex) {
+    var runId = messages[userIndex].run_id;
+    var runMessages = [];
+    var index = userIndex + 1;
+    while (index < messages.length && messages[index].run_id === runId) {
+      runMessages.push(messages[index]);
+      index += 1;
+    }
+    return { runMessages: runMessages, runId: runId, nextIndex: index };
+  }
+
+  function findLastActiveRunUserIndex(messages) {
+    for (var i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user' && messages[i].run_id) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function patchInProgressRunTurn(turn, runId, runMessages) {
+    var split = splitRunMessages(runMessages);
+    var thinking = buildRunThinkingItems(split.thinkingMessages);
+    var bubble = turn.querySelector('.bubble');
+    if (!bubble) return;
+
+    var thinkingGroup = bubble.querySelector('.thinking-group');
+    var wasOpen = Boolean(thinkingGroup && thinkingGroup.open);
+
+    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking.items);
+
+    thinkingGroup = bubble.querySelector('.thinking-group');
+    if (thinkingGroup && wasOpen) {
+      thinkingGroup.open = true;
+    }
+
+    postProcessRenderedContent(bubble);
+
+    var metaLabel = turn.querySelector('.meta > span:first-child');
+    if (metaLabel) {
+      var turnModelId = messageModelId(split.thinkingMessages[split.thinkingMessages.length - 1]);
+      var time = formatTimeRange(
+        runMessages[0] && runMessages[0].created_at,
+        runMessages[runMessages.length - 1] && runMessages[runMessages.length - 1].created_at,
+      );
+      metaLabel.textContent =
+        assistantMetaLabel(turnModelId ? { model_id: turnModelId } : null) + (time ? ' · ' + time : '');
+    }
+  }
+
+  function updateTodoRuns(todoRuns) {
+    todoRunsById = todoRuns || {};
+    var anchor = captureScrollAnchor();
+    container.querySelectorAll('.assistant-turn[data-run-id]').forEach(function (turn) {
+      var runId = turn.dataset.runId;
+      if (!runId) return;
+      var bubble = turn.querySelector('.bubble');
+      if (!bubble) return;
+      var todoBlock = bubble.querySelector('.todo-inline-block');
+      var todoHtml = renderTodoBlockHtml(runId);
+      if (todoHtml) {
+        if (todoBlock) {
+          todoBlock.outerHTML = todoHtml;
+        } else {
+          bubble.insertAdjacentHTML('afterbegin', todoHtml);
+        }
+      } else if (todoBlock) {
+        todoBlock.remove();
+      }
+    });
+    afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
+  }
+
+  function patchActiveRun(payload) {
+    var messages = payload && payload.messages ? payload.messages : [];
+    todoRunsById = (payload && payload.todoRuns) || {};
+    var anchor = captureScrollAnchor();
+    var userIndex = findLastActiveRunUserIndex(messages);
+    if (userIndex < 0) {
+      renderMessageList(payload);
+      afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
+      return;
+    }
+
+    var collected = collectRunMessagesForUser(messages, userIndex);
+    var turn = container.querySelector('.assistant-turn[data-run-id="' + collected.runId + '"]');
+    if (!turn) {
+      renderMessageList(payload);
+      afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
+      return;
+    }
+
+    var split = splitRunMessages(collected.runMessages);
+    if (split.finalReply) {
+      var thinking = buildRunThinkingItems(split.thinkingMessages);
+      turn.replaceWith(
+        buildAssistantTurn({
+          thinkingItems: thinking.items,
+          thinkingIds: thinking.ids.concat([split.finalReply.id]),
+          contentMsg: split.finalReply,
+          modelId: messageModelId(split.finalReply),
+          startedAt: collected.runMessages[0] && collected.runMessages[0].created_at,
+          endedAt: split.finalReply.created_at,
+          runId: collected.runId,
+        }),
+      );
+    } else {
+      patchInProgressRunTurn(turn, collected.runId, collected.runMessages);
+    }
+
+    afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
   }
 
   function renderMessageList(payload) {
@@ -514,12 +789,9 @@
         container.appendChild(buildBubble(msg));
         var runId = msg.run_id;
         if (runId) {
-          var runMessages = [];
-          index += 1;
-          while (index < messages.length && messages[index].run_id === runId) {
-            runMessages.push(messages[index]);
-            index += 1;
-          }
+          var collected = collectRunMessagesForUser(messages, index);
+          var runMessages = collected.runMessages;
+          index = collected.nextIndex;
           if (runMessages.length) {
             var split = splitRunMessages(runMessages);
             var thinking = buildRunThinkingItems(split.thinkingMessages);
@@ -609,6 +881,8 @@
         if (ids.indexOf(id) >= 0) group.remove();
       });
     },
+    updateTodoRuns: updateTodoRuns,
+    patchActiveRun: patchActiveRun,
     setBusy: function () {}
   };
 
@@ -640,6 +914,26 @@
       return;
     }
 
+    if (action === 'copy-mermaid') {
+      var card = btn.closest('.mermaid-diagram-card');
+      if (card) {
+        copyToClipboard(mermaidSourceFromCard(card));
+        flashCopied(btn);
+      }
+      return;
+    }
+
+    if (action === 'expand-mermaid') {
+      var expandCard = btn.closest('.mermaid-diagram-card');
+      if (expandCard) openMermaidModal(expandCard);
+      return;
+    }
+
+    if (action === 'close-mermaid-modal') {
+      closeMermaidModal();
+      return;
+    }
+
     if (action === 'copy-thinking') {
       var group = btn.closest('.assistant-turn, .thinking-group-msg');
       var bubbleEl = group && group.querySelector('.bubble');
@@ -667,6 +961,10 @@
       window.webkit.messageHandlers.host.postMessage(payload);
     }
   }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeMermaidModal();
+  });
 
   window.app = app;
   notifyHost({ action: 'ready' });
