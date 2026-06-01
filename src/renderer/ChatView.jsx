@@ -5,6 +5,7 @@ import { injectChatLayout } from "./chatLayoutSync.js";
 
 function toWireMessage(message) {
   const toolCalls = message.toolCalls?.map((call) => ({
+    ...(call.id ? { id: call.id } : {}),
     name: call.function?.name || call.name || "tool",
     arguments:
       typeof call.function?.arguments === "string"
@@ -28,6 +29,7 @@ function toWireMessage(message) {
     ...(getMessageModelId(message) ? { model_id: getMessageModelId(message) } : {}),
     ...(message.runId ? { run_id: message.runId } : {}),
     ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
+    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
     ...(message.name ? { name: message.name } : {}),
     ...(message.images?.length ? { image_count: message.images.length } : {}),
     ...(hasAtMentions

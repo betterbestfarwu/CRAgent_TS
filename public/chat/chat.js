@@ -20,6 +20,7 @@
 
   var todoRunsById = {};
   var chatUi = window.CRAgentChatUtils || {};
+  var verboseThinking = false;
 
   var MATH_DELIMITERS = [
     { left: '$$', right: '$$', display: true },
@@ -288,7 +289,7 @@
 
   function buildRunThinking(messages) {
     if (chatUi.buildThinkingSummary) {
-      return chatUi.buildThinkingSummary(messages);
+      return chatUi.buildThinkingSummary(messages, { verbose: verboseThinking });
     }
     var items = [];
     var ids = [];
@@ -386,12 +387,50 @@
         '</details>'
       );
     }
+    if (item.kind === 'tool-call-group') {
+      var count = item.calls ? item.calls.length : 0;
+      var groupBody = (item.calls || []).map(function (call, index) {
+        var callArgs = call.arguments || '';
+        try { callArgs = JSON.stringify(JSON.parse(callArgs), null, 2); } catch (_) {}
+        return (
+          '<pre class="tool-call">' +
+            escapeText(String(index + 1) + '. ' + (call.name || item.name)) +
+            '\n' +
+            escapeText(callArgs) +
+          '</pre>'
+        );
+      }).join('');
+      return (
+        '<details class="thinking thinking-step thinking-step-group">' +
+          '<summary>Thinking · ' + escapeText(item.name) + ' × ' + count + '</summary>' +
+          '<div class="thinking-group-steps">' + groupBody + '</div>' +
+        '</details>'
+      );
+    }
     if (item.kind === 'tool-result') {
       var label = 'Thinking · tool result' + (item.name ? ' (' + escapeText(item.name) + ')' : '');
       return (
         '<details class="thinking thinking-step">' +
           '<summary>' + label + '</summary>' +
           '<pre class="tool-call">' + escapeText(item.content || '') + '</pre>' +
+        '</details>'
+      );
+    }
+    if (item.kind === 'tool-result-group') {
+      var resultCount = item.results ? item.results.length : 0;
+      var resultsBody = (item.results || []).map(function (content, index) {
+        return (
+          '<pre class="tool-call">' +
+            escapeText(String(index + 1) + '. ' + (item.name || 'tool')) +
+            '\n' +
+            escapeText(content || '') +
+          '</pre>'
+        );
+      }).join('');
+      return (
+        '<details class="thinking thinking-step thinking-step-group">' +
+          '<summary>Thinking · ' + escapeText(item.name) + ' results × ' + resultCount + '</summary>' +
+          '<div class="thinking-group-steps">' + resultsBody + '</div>' +
         '</details>'
       );
     }
@@ -890,7 +929,10 @@
     },
     updateTodoRuns: updateTodoRuns,
     patchActiveRun: patchActiveRun,
-    setBusy: function () {}
+    setBusy: function () {},
+    setVerboseThinking: function (value) {
+      verboseThinking = Boolean(value);
+    },
   };
 
   function copyToClipboard(text) {

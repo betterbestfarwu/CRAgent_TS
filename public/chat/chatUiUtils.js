@@ -20,6 +20,7 @@ var CRAgentChatUtils = (() => {
   // src/shared/chatUiUtils.js
   var chatUiUtils_exports = {};
   __export(chatUiUtils_exports, {
+    GROUPABLE_TOOLS: () => GROUPABLE_TOOLS,
     MAX_TODO_INLINE_DISPLAY: () => MAX_TODO_INLINE_DISPLAY,
     buildThinkingSummary: () => buildThinkingSummary,
     formatThinkingSummaryLine: () => formatThinkingSummaryLine,
@@ -34,6 +35,14 @@ var CRAgentChatUtils = (() => {
   var SHELL_TOOLS = /* @__PURE__ */ new Set(["bash"]);
   var WEB_TOOLS = /* @__PURE__ */ new Set(["web_fetch"]);
   var WRITE_TOOLS = /* @__PURE__ */ new Set(["write_file"]);
+  var GROUPABLE_TOOLS = /* @__PURE__ */ new Set([
+    ...READ_TOOLS,
+    ...LIST_TOOLS,
+    ...SEARCH_TOOLS,
+    ...SHELL_TOOLS,
+    ...WEB_TOOLS,
+    ...WRITE_TOOLS
+  ]);
   var TODO_STATUS_RANK = {
     in_progress: 0,
     pending: 1,
@@ -79,6 +88,7 @@ var CRAgentChatUtils = (() => {
       return [];
     }
     return msg.tool_calls.map((call) => ({
+      id: call.id ? String(call.id) : "",
       name: call.name || "tool",
       arguments: call.arguments ?? ""
     }));
@@ -89,10 +99,151 @@ var CRAgentChatUtils = (() => {
   function hasVisibleAssistantContent(msg) {
     return msg?.role === "assistant" && String(msg.content || "").trim().length > 0;
   }
-  function pushThinkingItem(items, item) {
-    items.push(item);
+  function recordToolCallStats(call, stats) {
+    const category = categorizeToolName(call.name);
+    if (category === "read") {
+      stats.read += 1;
+      const args = parseToolArguments(call.arguments);
+      const filePath = args.path || args.file_path || args.filePath;
+      if (filePath) {
+        stats.readPaths.add(String(filePath));
+      }
+    } else if (category === "list") {
+      stats.list += 1;
+    } else if (category === "search") {
+      stats.search += 1;
+    } else if (category === "shell") {
+      stats.shell += 1;
+    } else if (category === "web") {
+      stats.web += 1;
+    } else if (category === "write") {
+      stats.write += 1;
+    } else {
+      stats.other += 1;
+    }
   }
-  function buildThinkingSummary(thinkingMessages) {
+  function groupCallsInAssistantMessage(calls, verbose) {
+    if (verbose || calls.length < 2) {
+      return calls.map((call) => ({ type: "single", call }));
+    }
+    const segments = [];
+    let index = 0;
+    while (index < calls.length) {
+      const call = calls[index];
+      if (!GROUPABLE_TOOLS.has(call.name)) {
+        segments.push({ type: "single", call });
+        index += 1;
+        continue;
+      }
+      let end = index + 1;
+      while (end < calls.length && calls[end].name === call.name && GROUPABLE_TOOLS.has(calls[end].name)) {
+        end += 1;
+      }
+      const slice = calls.slice(index, end);
+      if (slice.length >= 2) {
+        segments.push({ type: "group", name: call.name, calls: slice });
+      } else {
+        segments.push({ type: "single", call: slice[0] });
+      }
+      index = end;
+    }
+    return segments;
+  }
+  function createResultCollector(verbose) {
+    const openGroups = [];
+    let pendingConsecutive = null;
+    function flushConsecutive(items) {
+      if (!pendingConsecutive) {
+        return;
+      }
+      const { name, contents } = pendingConsecutive;
+      if (!verbose && contents.length >= 2 && GROUPABLE_TOOLS.has(name)) {
+        items.push({
+          kind: "tool-result-group",
+          name,
+          results: contents
+        });
+      } else {
+        for (const content of contents) {
+          items.push({
+            kind: "tool-result",
+            name,
+            content
+          });
+        }
+      }
+      pendingConsecutive = null;
+    }
+    return {
+      registerOpenGroup(name, calls) {
+        const expectedIds = new Set(calls.map((call) => call.id).filter(Boolean));
+        if (expectedIds.size >= 2) {
+          openGroups.push({
+            name,
+            expectedIds,
+            results: /* @__PURE__ */ new Map(),
+            calls
+          });
+        }
+      },
+      addToolResult(items, msg) {
+        const toolCallId = msg.tool_call_id ? String(msg.tool_call_id) : "";
+        const name = msg.name || "";
+        const content = msg.content || "";
+        for (let index = 0; index < openGroups.length; index += 1) {
+          const group = openGroups[index];
+          if (!toolCallId || !group.expectedIds.has(toolCallId)) {
+            continue;
+          }
+          group.results.set(toolCallId, content);
+          if (group.results.size !== group.expectedIds.size) {
+            return;
+          }
+          openGroups.splice(index, 1);
+          items.push({
+            kind: "tool-result-group",
+            name: group.name,
+            results: group.calls.map((call) => group.results.get(call.id) || "")
+          });
+          flushConsecutive(items);
+          return;
+        }
+        if (!verbose && pendingConsecutive && pendingConsecutive.name === name && GROUPABLE_TOOLS.has(name)) {
+          pendingConsecutive.contents.push(content);
+          return;
+        }
+        flushConsecutive(items);
+        pendingConsecutive = { name, contents: [content] };
+      },
+      flush(items) {
+        flushConsecutive(items);
+        for (const group of openGroups) {
+          if (group.results.size === 0) {
+            continue;
+          }
+          const collected = group.calls.map((call) => group.results.get(call.id) || "");
+          if (!verbose && collected.length >= 2 && GROUPABLE_TOOLS.has(group.name)) {
+            items.push({
+              kind: "tool-result-group",
+              name: group.name,
+              results: collected
+            });
+          } else {
+            for (let index = 0; index < group.calls.length; index += 1) {
+              items.push({
+                kind: "tool-result",
+                name: group.name,
+                content: collected[index] || ""
+              });
+            }
+          }
+        }
+        openGroups.length = 0;
+      }
+    };
+  }
+  function buildThinkingSummary(thinkingMessages, options = {}) {
+    const verbose = Boolean(options.verbose);
     const items = [];
     const ids = [];
     const stats = {
@@ -106,54 +257,49 @@ var CRAgentChatUtils = (() => {
       other: 0,
       assistantText: 0
     };
+    const resultCollector = createResultCollector(verbose);
     for (const msg of thinkingMessages || []) {
       if (msg?.id) {
         ids.push(msg.id);
       }
       if (hasVisibleAssistantContent(msg) && isProcessAssistantWithTools(msg)) {
         stats.assistantText += 1;
-        pushThinkingItem(items, {
+        items.push({
           kind: "assistant-text",
           content: msg.content || ""
         });
       }
       if (msg?.role === "tool") {
-        pushThinkingItem(items, {
-          kind: "tool-result",
-          name: msg.name || "",
-          content: msg.content || ""
-        });
+        resultCollector.addToolResult(items, msg);
         continue;
       }
-      for (const call of collectToolCallsFromMessage(msg)) {
-        const category = categorizeToolName(call.name);
-        if (category === "read") {
-          stats.read += 1;
-          const args = parseToolArguments(call.arguments);
-          const filePath = args.path || args.file_path || args.filePath;
-          if (filePath) {
-            stats.readPaths.add(String(filePath));
+      const calls = collectToolCallsFromMessage(msg);
+      if (!calls.length) {
+        continue;
+      }
+      const segments = groupCallsInAssistantMessage(calls, verbose);
+      for (const segment of segments) {
+        if (segment.type === "group") {
+          for (const call of segment.calls) {
+            recordToolCallStats(call, stats);
           }
-        } else if (category === "list") {
-          stats.list += 1;
-        } else if (category === "search") {
-          stats.search += 1;
-        } else if (category === "shell") {
-          stats.shell += 1;
-        } else if (category === "web") {
-          stats.web += 1;
-        } else if (category === "write") {
-          stats.write += 1;
+          items.push({
+            kind: "tool-call-group",
+            name: segment.name,
+            calls: segment.calls
+          });
+          resultCollector.registerOpenGroup(segment.name, segment.calls);
         } else {
-          stats.other += 1;
+          recordToolCallStats(segment.call, stats);
+          items.push({
+            kind: "tool-call",
+            name: segment.call.name,
+            arguments: segment.call.arguments
+          });
         }
-        pushThinkingItem(items, {
-          kind: "tool-call",
-          name: call.name,
-          arguments: call.arguments
-        });
       }
     }
+    resultCollector.flush(items);
     const stepCount = items.length;
     const summaryLine = formatThinkingSummaryLine(stats, stepCount);
     return { summaryLine, items, ids, stepCount };

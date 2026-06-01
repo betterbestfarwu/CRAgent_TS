@@ -678,6 +678,17 @@ html, body {
   font-size: var(--cursor-font-size-sm);
 }
 
+.thinking-group-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.bubble details.thinking-step-group > summary {
+  font-weight: 500;
+}
+
 .msg.assistant-turn .bubble,
 .msg.thinking-group-msg .bubble {
   padding: 10px var(--chat-inner-x);

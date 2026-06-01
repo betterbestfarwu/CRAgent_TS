@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+    GROUPABLE_TOOLS,
     buildThinkingSummary,
     formatThinkingSummaryLine,
     getCurrentInProgressTodo,
@@ -16,24 +17,93 @@ describe("buildThinkingSummary", () => {
                 role: "assistant",
                 tool_calls: [
                     {
+                        id: "c-read-1",
                         name: "read_file",
                         arguments: JSON.stringify({ path: "src/a.js" }),
                     },
                     {
+                        id: "c-read-2",
                         name: "read_file",
                         arguments: JSON.stringify({ path: "src/b.js" }),
                     },
-                    { name: "bash", arguments: JSON.stringify({ command: "npm test" }) },
+                    { id: "c-bash-1", name: "bash", arguments: JSON.stringify({ command: "npm test" }) },
                 ],
             },
-            { id: "t1", role: "tool", name: "read_file", content: "ok" },
+            { id: "t1", role: "tool", name: "read_file", tool_call_id: "c-read-1", content: "a" },
+            { id: "t2", role: "tool", name: "read_file", tool_call_id: "c-read-2", content: "b" },
+            { id: "t3", role: "tool", name: "bash", tool_call_id: "c-bash-1", content: "ok" },
         ]);
 
         assert.equal(result.stepCount, 4);
         assert.match(result.summaryLine, /Read 2 files/);
         assert.match(result.summaryLine, /Ran 1 command/);
         assert.match(result.summaryLine, /\(4 steps\)/);
-        assert.equal(result.items.length, 4);
+        assert.equal(
+            result.items.filter((item) => item.kind === "tool-call-group").length,
+            1,
+        );
+        assert.equal(
+            result.items.filter((item) => item.kind === "tool-result-group").length,
+            1,
+        );
+    });
+
+    it("groups consecutive same-tool calls in one assistant message", () => {
+        const result = buildThinkingSummary([
+            {
+                id: "a1",
+                role: "assistant",
+                tool_calls: [
+                    { id: "1", name: "read_file", arguments: '{"path":"a.ts"}' },
+                    { id: "2", name: "read_file", arguments: '{"path":"b.ts"}' },
+                    { id: "3", name: "read_file", arguments: '{"path":"c.ts"}' },
+                ],
+            },
+        ]);
+
+        assert.equal(result.items.length, 1);
+        assert.equal(result.items[0].kind, "tool-call-group");
+        assert.equal(result.items[0].calls.length, 3);
+    });
+
+    it("matches tool results to call groups by tool_call_id", () => {
+        const result = buildThinkingSummary([
+            {
+                id: "a1",
+                role: "assistant",
+                tool_calls: [
+                    { id: "1", name: "read_file", arguments: "{}" },
+                    { id: "2", name: "read_file", arguments: "{}" },
+                ],
+            },
+            { id: "t1", role: "tool", name: "read_file", tool_call_id: "1", content: "one" },
+            { id: "t2", role: "tool", name: "read_file", tool_call_id: "2", content: "two" },
+        ]);
+
+        assert.equal(result.items.length, 2);
+        assert.equal(result.items[0].kind, "tool-call-group");
+        assert.equal(result.items[1].kind, "tool-result-group");
+        assert.deepEqual(result.items[1].results, ["one", "two"]);
+    });
+
+    it("verbose mode keeps separate tool-call steps", () => {
+        const result = buildThinkingSummary(
+            [
+                {
+                    id: "a1",
+                    role: "assistant",
+                    tool_calls: [
+                        { id: "1", name: "read_file", arguments: "{}" },
+                        { id: "2", name: "read_file", arguments: "{}" },
+                    ],
+                },
+            ],
+            { verbose: true },
+        );
+
+        assert.equal(result.items.length, 2);
+        assert.equal(result.items[0].kind, "tool-call");
+        assert.equal(result.items[1].kind, "tool-call");
     });
 
     it("falls back to step count when no collapsible tools", () => {
@@ -45,6 +115,7 @@ describe("buildThinkingSummary", () => {
             },
         ]);
         assert.equal(result.summaryLine, "Thinking · 1 other step (1 step)");
+        assert.ok(!GROUPABLE_TOOLS.has("TodoWrite"));
     });
 });
 
