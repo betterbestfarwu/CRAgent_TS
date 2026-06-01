@@ -87,6 +87,10 @@ export class ConfigStore {
                     models,
                 },
             },
+            mcp: {
+                enabled: true,
+                servers: [],
+            },
             agents: {
                 default: {
                     model: { primary: "openai/gpt-4o-mini", fallbacks: [] },
@@ -103,6 +107,7 @@ export class ConfigStore {
                             enable_tools: true,
                             enable_file_tools: true,
                             enable_skills: true,
+                            enable_mcp: true,
                             allow_sub_agents: false,
                         },
                     },

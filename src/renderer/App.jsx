@@ -4,6 +4,7 @@ import { ComposerAuthMenu, ComposerMenuCheckIcon } from "./ComposerAuthMenu.jsx"
 import { ComposerContextRing } from "./ComposerContextRing.jsx";
 import { ComposerContextPopup } from "./ComposerContextPopup.jsx";
 import { ComposerQueuePanel } from "./ComposerQueuePanel.jsx";
+import { ComposerTaskStatus } from "./ComposerTaskStatus.jsx";
 import {
   buildSlashMenuNavItems,
   ComposerSlashMenu,
@@ -31,6 +32,10 @@ import { isDefaultSessionTitle, titleFromFirstUserMessage } from "@shared/sessio
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
 import { estimateSessionContextBreakdown } from "@shared/tokenEstimator";
+import {
+    estimateMcpToolDefinitionTokens,
+    getEnabledMcpServers,
+} from "@shared/mcpConfig.js";
 import { formatModelRef, modelRefLabel } from "@shared/modelRef.js";
 
 const SUGGESTIONS = [
@@ -368,10 +373,16 @@ export function App() {
     const skillsCatalogText = skills
       .map((skill) => `- ${skill.name}: ${skill.description || ""}`)
       .join("\n");
+    const mcpServers = getEnabledMcpServers(config);
+    const mcpTokens =
+      agentTools.enable_mcp !== false
+        ? estimateMcpToolDefinitionTokens(mcpServers.length > 0 ? mcpServers.length * 2 : 0)
+        : 0;
     const estimated = estimateSessionContextBreakdown(currentSession, model, {
       compactBufferTokens: compactBuffer,
       agentTools,
       skillsCatalogText,
+      mcpTokens,
     });
     if (
       !runtimeContextState ||
@@ -1053,6 +1064,11 @@ export function App() {
               setConfig(result.config);
               return result;
             }}
+            onProbeMcp={
+              window.cragent?.probeMcp
+                ? (mcp) => window.cragent.probeMcp(mcp)
+                : undefined
+            }
           />
         ) : (
           <div className="chat-layout">
@@ -1191,6 +1207,7 @@ export function App() {
                     ))}
                   </div>
                 ) : null}
+                <ComposerTaskStatus todos={currentSession?.meta?.todos} busy={busy} />
                 <div className="composer-input-row">
                   <ComposerAtChips
                     mentions={pendingAtMentions}

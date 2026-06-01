@@ -13,6 +13,9 @@ import { SkillLoader } from "./skillLoader.js";
 import { resolveSessionWorkspace, resolveWorkspace } from "./workspacePaths.js";
 import { createBuiltinTools } from "./tools/builtinTools.js";
 import { createMetaTools } from "./tools/metaTools.js";
+import { McpManager } from "./mcp/mcpManager.js";
+import { createMcpTools } from "./mcp/mcpTools.js";
+import { mcpToolRegistryName } from "@shared/mcpConfig.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
 import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
 import { normalizeAuthMode } from "@shared/authMode.js";
@@ -26,6 +29,7 @@ let configStore;
 let sessionStore;
 let runtime;
 let skillLoader;
+let mcpManager;
 
 function windowChromeOptions() {
     if (process.platform === "darwin") {
@@ -217,7 +221,46 @@ function registerIpc() {
         const session = sessionStore.updateModel(args.sessionId, args.providerKey, args.modelId);
         mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
     });
-    ipcMain.handle(IPC_CHANNELS.updateConfig, (_event, next) => configStore.update(next));
+    ipcMain.handle(IPC_CHANNELS.updateConfig, async (_event, next) => {
+        const updated = configStore.update(next);
+        if (mcpManager) {
+            try {
+                await mcpManager.refresh();
+            } catch (error) {
+                console.error("[CRAgent] MCP refresh after config save failed:", error);
+            }
+        }
+        return updated;
+    });
+    ipcMain.handle(IPC_CHANNELS.getMcpStatus, () => ({
+        toolCount: mcpManager?.getToolCount() ?? 0,
+        errors: mcpManager?.getServerErrors() ?? {},
+    }));
+    ipcMain.handle(IPC_CHANNELS.probeMcp, async (_event, mcpSlice) => {
+        const probeManager = new McpManager(() => ({
+            mcp: { ...mcpSlice, enabled: true },
+        }));
+        try {
+            const entries = await probeManager.refresh();
+            return {
+                ok: true,
+                toolCount: entries.length,
+                tools: entries.map(({ serverId, tool }) => ({
+                    serverId,
+                    name: tool.name,
+                    registryName: mcpToolRegistryName(serverId, tool.name),
+                })),
+                errors: probeManager.getServerErrors(),
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        } finally {
+            await probeManager.closeAll();
+        }
+    });
     ipcMain.handle(IPC_CHANNELS.syncProviderModels, async (_event, args) => {
         const providerKey = args?.providerKey;
         const connection = args?.connection;
@@ -290,6 +333,16 @@ function bootstrap() {
 
     const baseConfirm = createToolConfirmFn(() => mainWindow);
 
+    mcpManager = new McpManager(() => configStore.get());
+    const buildMcpTools = createMcpTools({
+        mcpManager,
+        getAgentTools,
+        getConfig: () => configStore.get(),
+    });
+    void mcpManager.refresh().catch((error) => {
+        console.error("[CRAgent] MCP refresh failed:", error);
+    });
+
     const toolRegistry = new ToolRegistry(
         () => {
             const builtin = createBuiltinTools({
@@ -307,7 +360,7 @@ function bootstrap() {
                     runtime.updateTodos(sessionId, todos, merge, runId),
                 runSubAgent: (args) => runtime.runSubAgent(args),
             });
-            return [...builtin, ...meta];
+            return [...builtin, ...buildMcpTools(), ...meta];
         },
         baseConfirm,
         getAuthMode,
@@ -342,4 +395,8 @@ app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {
         app.quit();
     }
+});
+
+app.on("will-quit", () => {
+    void mcpManager?.closeAll();
 });

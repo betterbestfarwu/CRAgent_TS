@@ -285,6 +285,102 @@ test("runSubAgent returns isolated result without polluting main session history
     assert.equal(after.messages.length, beforeCount);
 });
 
+test("runSubAgent compacts local transcript and retries after context overflow", async () => {
+    let chatCount = 0;
+    const { session, runtime } = makeRuntimeHarness({
+        chatImpl: () => {
+            chatCount += 1;
+            if (chatCount === 1) {
+                const error = new Error("模型请求失败: 413 payload too large");
+                error.status = 413;
+                throw error;
+            }
+            return {
+                message: {
+                    id: "sub-assistant-2",
+                    role: "assistant",
+                    content: "sub-agent recovered",
+                    createdAt: new Date().toISOString(),
+                },
+            };
+        },
+    });
+
+    const messages = [];
+    for (let i = 0; i < 6; i += 1) {
+        messages.push({
+            id: `sub-round-${i}`,
+            role: i % 2 === 0 ? "user" : "assistant",
+            content: `sub round ${i} ${"q".repeat(4000)}`,
+            createdAt: new Date().toISOString(),
+            ...(i % 2 === 1
+                ? {
+                      toolCalls: [
+                          {
+                              id: `call-${i}`,
+                              function: { name: "read_file", arguments: "{}" },
+                          },
+                      ],
+                  }
+                : {}),
+        });
+        if (i % 2 === 1) {
+            messages.push({
+                id: `sub-tool-${i}`,
+                role: "tool",
+                name: "read_file",
+                toolCallId: `call-${i}`,
+                content: "file body ".repeat(2000),
+                createdAt: new Date().toISOString(),
+            });
+        }
+    }
+
+    runtime.messagesForLLM = () => messages;
+
+    const result = await runtime.runSubAgent({
+        sessionId: session.meta.id,
+        parentRunId: "parent-run",
+        description: "heavy explore",
+        prompt: "Inspect many files",
+        subagentType: "explore",
+    });
+
+    assert.equal(chatCount, 2);
+    assert.match(result, /sub-agent recovered/);
+});
+
+test("runSubAgent stops when local context remains blocked", async () => {
+    const { session, runtime, configStore, llmCalls } = makeRuntimeHarness();
+    const config = configStore.get();
+    configStore.update({
+        ...config,
+        models: {
+            ...config.models,
+            openai: {
+                ...config.models.openai,
+                models: config.models.openai.models.map((model) =>
+                    model.id === "gpt-4o-mini"
+                        ? { ...model, contextWindow: 12_000 }
+                        : model,
+                ),
+            },
+        },
+    });
+
+    const result = await runtime.runSubAgent({
+        sessionId: session.meta.id,
+        parentRunId: "parent-run",
+        description: "blocked explore",
+        prompt: "z".repeat(120_000),
+        subagentType: "explore",
+    });
+
+    assert.equal(llmCalls.length, 0);
+    assert.match(result, /context limit reached/i);
+    assert.match(result, /blocked explore/);
+});
+
 test("runLoop annotates assistant message when fallback model is used", async () => {
     const { session, runtime, events } = makeRuntimeHarness({
         chatImpl: () => ({

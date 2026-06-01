@@ -16,6 +16,8 @@ export const IPC_CHANNELS = {
     updateModel: "session:updateModel",
     updateConfig: "config:update",
     syncProviderModels: "config:syncProviderModels",
+    probeMcp: "mcp:probe",
+    getMcpStatus: "mcp:getStatus",
     onMessageAppended: "events:messageAppended",
     onSessionChanged: "events:sessionChanged",
     onBusyChanged: "events:busyChanged",

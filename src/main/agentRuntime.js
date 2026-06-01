@@ -22,7 +22,9 @@ import {
     buildCompactTranscript,
     buildPostCompactContext,
     calculateContextWarningState,
+    calculateMessagesContextWarningState,
     COMPACT_SUMMARIZE_SYSTEM,
+    shrinkSubAgentMessages,
     formatCompactSummary,
     getContextConfig,
     microCompactMessages,
@@ -320,12 +322,14 @@ export class AgentRuntime {
     }) {
         const session = this.sessionStore.get(sessionId);
         const override = modelOverride ? parseModelRef(modelOverride) : null;
-        const model = override || {
-            providerKey: session.meta.providerKey,
-            modelId: session.meta.modelId,
+        const providerKey = override?.providerKey ?? session.meta.providerKey;
+        const modelId = override?.modelId ?? session.meta.modelId;
+        const model = this.configStore.model(providerKey, modelId) || {
+            providerKey,
+            modelId,
         };
         const modelChain = override
-            ? [model]
+            ? [{ providerKey, modelId }]
             : this.modelChainForSession(session);
         const agent = this.defaultAgent();
         const toolsEnabled = agent?.tools?.enable_tools !== false;
@@ -333,9 +337,7 @@ export class AgentRuntime {
         const subTools = filterToolsForSubAgent(allTools, subagentType).filter((tool) =>
             tool.enabled(),
         );
-        const schemas = subTools
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((tool) => tool.schema);
+        const unlockedToolNames = new Set();
         const subRunId = randomUUID();
         const messages = this.messagesForLLM(session, {
             subAgentPrompt: prompt,
@@ -346,12 +348,23 @@ export class AgentRuntime {
         let round = 0;
 
         while (round < maxRounds) {
-            const choice = await this.llmClient.chat({
-                messages,
-                model,
-                modelChain,
-                tools: toolsEnabled ? schemas : [],
-            });
+            const chatResult = await this.requestSubAgentLlm(sessionId, messages, model, () =>
+                this.llmClient.chat({
+                    messages,
+                    model,
+                    modelChain,
+                    tools: toolsEnabled
+                        ? this.toolRegistry.schemas({
+                              tools: subTools,
+                              unlockedToolNames,
+                          })
+                        : [],
+                }),
+            );
+            if (chatResult.blocked) {
+                return this.subAgentBlockedMessage(description, chatResult.state);
+            }
+            const choice = chatResult.choice;
             const assistant = choice.message;
             const calls = assistant.toolCalls || [];
             if (!calls.length) {
@@ -381,6 +394,7 @@ export class AgentRuntime {
                     runId: subRunId,
                     parentRunId,
                     isSubAgent: true,
+                    unlockedToolNames,
                 });
                 if (
                     call.function.name === "download_skill" ||
@@ -643,6 +657,14 @@ export class AgentRuntime {
         );
     }
 
+    subAgentBlockedMessage(description, state) {
+        const percent = state?.percent ?? 0;
+        return (
+            `Sub-agent "${description}" stopped: context limit reached (about ${percent}%). ` +
+            "Try a shorter task prompt, fewer tool rounds, or a model with a larger context window."
+        );
+    }
+
     async prepareContextForLlm(sessionId) {
         const contextConfig = getContextConfig(this.configStore);
         let session = this.sessionStore.get(sessionId);
@@ -703,6 +725,77 @@ export class AgentRuntime {
 
     requestAgentChat(sessionId, chatArgs) {
         return this.requestAgentLlm(sessionId, () => this.llmClient.chat(chatArgs));
+    }
+
+    async prepareSubAgentContext(sessionId, messages, model) {
+        const contextConfig = getContextConfig(this.configStore);
+        let state = calculateMessagesContextWarningState(messages, model, contextConfig);
+        this.emitContextWarning(this.sessionStore.get(sessionId));
+
+        if (!state.isAtBlockingLimit) {
+            return { blocked: false, state };
+        }
+
+        if (shrinkSubAgentMessages(messages, contextConfig)) {
+            state = calculateMessagesContextWarningState(messages, model, contextConfig);
+            if (!state.isAtBlockingLimit) {
+                return { blocked: false, state };
+            }
+        }
+
+        await this.compactLlmContext(sessionId, {
+            auto: true,
+            preserveBusy: Boolean(this.busyBySession.get(sessionId)),
+            silent: true,
+        });
+
+        while (shrinkSubAgentMessages(messages, contextConfig)) {
+            state = calculateMessagesContextWarningState(messages, model, contextConfig);
+            if (!state.isAtBlockingLimit) {
+                return { blocked: false, state };
+            }
+        }
+
+        if (state.isAtBlockingLimit) {
+            return { blocked: true, state };
+        }
+        return { blocked: false, state };
+    }
+
+    async requestSubAgentLlm(sessionId, messages, model, invoke) {
+        const contextConfig = getContextConfig(this.configStore);
+        let overflowRetries = 0;
+
+        while (true) {
+            const prep = await this.prepareSubAgentContext(sessionId, messages, model);
+            if (prep.blocked) {
+                return { blocked: true, state: prep.state };
+            }
+
+            try {
+                const choice = await invoke();
+                return { blocked: false, choice };
+            } catch (error) {
+                if (error?.name === "AbortError") {
+                    throw error;
+                }
+                if (
+                    !isContextOverflowError(error) ||
+                    overflowRetries >= MAX_CONTEXT_OVERFLOW_RETRIES
+                ) {
+                    throw error;
+                }
+                overflowRetries += 1;
+                if (!shrinkSubAgentMessages(messages, contextConfig)) {
+                    await this.compactLlmContext(sessionId, {
+                        auto: true,
+                        preserveBusy: Boolean(this.busyBySession.get(sessionId)),
+                        silent: true,
+                    });
+                    shrinkSubAgentMessages(messages, contextConfig);
+                }
+            }
+        }
     }
 
     trackToolSideEffects(session, call, result) {
@@ -953,6 +1046,7 @@ export class AgentRuntime {
             const agent = this.defaultAgent();
             const maxRounds = Math.max(1, agent?.max_tool_rounds ?? 8);
             const toolsEnabled = agent?.tools?.enable_tools !== false;
+            const unlockedToolNames = new Set();
             let round = 0;
 
             while (round < maxRounds) {
@@ -971,7 +1065,9 @@ export class AgentRuntime {
                     messages: this.messagesForLLM(session),
                     model,
                     modelChain: this.modelChainForSession(session),
-                    tools: toolsEnabled ? this.toolRegistry.schemas() : [],
+                    tools: toolsEnabled
+                        ? this.toolRegistry.schemas({ unlockedToolNames })
+                        : [],
                     signal,
                 });
                 if (this.wasRunCancelled(sessionId)) {
@@ -1020,6 +1116,7 @@ export class AgentRuntime {
                     const result = await this.toolRegistry.execute(call, {
                         sessionId,
                         runId,
+                        unlockedToolNames,
                     });
                     if (call.function.name === "TodoWrite") {
                         this.emit(IPC_CHANNELS.onTodosChanged, {

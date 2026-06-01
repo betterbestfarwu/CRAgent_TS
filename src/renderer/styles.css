@@ -1012,6 +1012,29 @@ body,
   color: var(--app-fg);
 }
 
+.composer-task-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px 0;
+  font-size: var(--cursor-font-size-sm);
+  color: var(--cursor-fg-muted);
+  box-sizing: border-box;
+}
+
+.composer-task-status-mark {
+  flex-shrink: 0;
+  color: var(--cursor-accent);
+}
+
+.composer-task-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer-input-row {
   display: flex;
   flex-wrap: wrap;
@@ -2232,6 +2255,132 @@ body,
   color: var(--settings-fg);
   font-size: 13px;
   padding: 6px 8px;
+}
+
+.settings-row-field-stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.settings-row-field-stack .settings-row-text,
+.settings-row-field-stack .settings-row-textarea {
+  width: 100%;
+  max-width: none;
+}
+
+/* MCP tab: label/description above full-width inputs */
+.settings-panel-mcp.settings-panel-general {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.settings-panel-mcp .settings-mcp-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 16px 18px;
+}
+
+.settings-panel-mcp .settings-mcp-field .settings-row-copy {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-panel-mcp .settings-mcp-field .settings-row-input-wrap {
+  width: 100%;
+  max-width: none;
+  flex-shrink: 0;
+}
+
+.settings-panel-mcp .settings-mcp-field .settings-row-input-wrap-wide {
+  max-width: none;
+}
+
+.settings-panel-mcp .settings-mcp-field .settings-row-text,
+.settings-panel-mcp .settings-mcp-field .settings-row-textarea {
+  width: 100%;
+  max-width: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.settings-panel-mcp .settings-mcp-field .settings-row-description {
+  max-width: 56em;
+}
+
+.settings-panel-mcp .settings-group:not(:last-child) {
+  margin-bottom: 4px;
+}
+
+.settings-row-textarea {
+  width: 100%;
+  max-width: none;
+  min-height: 72px;
+  padding: 8px 10px;
+  border: 1px solid var(--settings-border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--settings-fg);
+  background: var(--settings-input-bg, var(--settings-surface));
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.settings-row-textarea:focus {
+  outline: none;
+  border-color: var(--settings-focus-border, #3b82f6);
+}
+
+.settings-mcp-empty-list {
+  margin: 8px 4px;
+  font-size: 12px;
+  color: var(--settings-fg-muted, var(--cursor-fg-muted));
+}
+
+.settings-mcp-server-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-mcp-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--settings-tab-bg);
+  color: var(--settings-fg-muted, var(--cursor-fg-muted));
+}
+
+.settings-mcp-probe-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 12px;
+  padding: 0 2px;
+}
+
+.settings-mcp-probe-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-mcp-probe-icon {
+  display: inline-flex;
+}
+
+.settings-mcp-probe-hint {
+  font-size: 12px;
+  color: var(--settings-fg-muted, var(--cursor-fg-muted));
+}
+
+.settings-error-inline {
+  color: var(--settings-error, #dc2626);
 }
 
 .settings-row-text:focus {

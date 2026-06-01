@@ -4,10 +4,12 @@ import {
     buildCompactTranscript,
     buildPostCompactContext,
     calculateContextWarningState,
+    calculateMessagesContextWarningState,
+    shrinkSubAgentMessages,
+    MICROCOMPACT_CLEARED_MARKER,
     formatCompactSummary,
     getAutoCompactThreshold,
     microCompactMessages,
-    MICROCOMPACT_CLEARED_MARKER,
     shouldAutoCompact,
     splitMessagesForCompact,
     trackLoadedSkill,
@@ -173,6 +175,39 @@ test("trySessionMemoryCompact uses memory when coverage is sufficient", () => {
 test("formatSessionMemory extracts memory block", () => {
     const raw = `<analysis>x</analysis><memory>stored facts</memory>`;
     assert.equal(formatSessionMemory(raw), "stored facts");
+});
+
+test("shrinkSubAgentMessages drops oldest tool rounds after micro-compact", () => {
+    const messages = [
+        { role: "system", content: "sub-agent system" },
+        { role: "user", content: "task prompt" },
+        { role: "assistant", content: "a1", toolCalls: [{ id: "c1", function: { name: "read_file", arguments: "{}" } }] },
+        { role: "tool", name: "read_file", toolCallId: "c1", content: "old-output-1".repeat(4000) },
+        { role: "assistant", content: "a2", toolCalls: [{ id: "c2", function: { name: "read_file", arguments: "{}" } }] },
+        { role: "tool", name: "read_file", toolCallId: "c2", content: "old-output-2".repeat(4000) },
+        { role: "assistant", content: "a3", toolCalls: [{ id: "c3", function: { name: "read_file", arguments: "{}" } }] },
+        { role: "tool", name: "read_file", toolCallId: "c3", content: "recent-output".repeat(4000) },
+    ];
+    const changed = shrinkSubAgentMessages(messages);
+    assert.equal(changed, true);
+    assert.equal(messages[0].role, "system");
+    assert.equal(messages[1].content, "task prompt");
+    assert.ok(
+        messages.length < 8 ||
+            messages.some((message) => message.content === MICROCOMPACT_CLEARED_MARKER),
+    );
+});
+
+test("calculateMessagesContextWarningState matches session helper for active messages", () => {
+    const model = { contextWindow: 200_000, maxTokens: 8192 };
+    const session = {
+        meta: { llmContextFromIndex: 0 },
+        messages: [{ role: "user", content: "hello" }],
+    };
+    const fromState = calculateContextWarningState(session, model);
+    const fromMessages = calculateMessagesContextWarningState(session.messages, model);
+    assert.equal(fromState.tokens, fromMessages.tokens);
+    assert.equal(fromState.isAtBlockingLimit, fromMessages.isAtBlockingLimit);
 });
 
 test("calculateContextWarningState exposes warning and auto thresholds", () => {

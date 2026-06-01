@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfig";
+import { ensureMcpConfigShape } from "@shared/mcpConfig.js";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { SingleDotIcon } from "./DotGridAnimator.jsx";
+import { McpSettingsTab } from "./McpSettingsTab.jsx";
 
 const ICON_EYE = (
   <svg
@@ -327,9 +329,9 @@ function SettingsModelRow({ title, checked, onToggle, onDelete }) {
   );
 }
 
-export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
+export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onProbeMcp }) {
   const [activeTab, setActiveTab] = useState("models");
-  const [draftConfig, setDraftConfig] = useState(() => clone(config));
+  const [draftConfig, setDraftConfig] = useState(() => ensureMcpConfigShape(clone(config)));
   const [modelSearch, setModelSearch] = useState("");
   const [modelStateFilter, setModelStateFilter] = useState("all");
   const [showApiKey, setShowApiKey] = useState(false);
@@ -347,7 +349,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
   );
 
   useEffect(() => {
-    const next = clone(config);
+    const next = ensureMcpConfigShape(clone(config));
     setDraftConfig(next);
     const keys = Object.keys(next.models || {});
     setSelectedProviderKey((prev) =>
@@ -546,7 +548,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
   }
 
   function handleSave() {
-    void onSave(draftConfig);
+    void onSave(ensureMcpConfigShape(draftConfig));
   }
 
   async function handleSyncModels() {
@@ -665,6 +667,13 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
             onClick={() => setActiveTab("agent")}
           >
             Agent
+          </button>
+          <button
+            type="button"
+            className={`settings-top-tab${activeTab === "mcp" ? " active" : ""}`}
+            onClick={() => setActiveTab("mcp")}
+          >
+            MCP
           </button>
           <button
             type="button"
@@ -841,6 +850,12 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
             )}
           </section>
         </div>
+      ) : activeTab === "mcp" ? (
+        <McpSettingsTab
+          draftConfig={draftConfig}
+          setDraftConfig={setDraftConfig}
+          onProbeMcp={onProbeMcp}
+        />
       ) : activeTab === "context" ? (
         <div className="settings-card settings-general-card">
           <div className="settings-general-scroll">
@@ -1161,6 +1176,14 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
                 }
               />
               <SettingsToggleRow
+                title="Enable MCP tools"
+                description="允许 Agent 调用设置页中配置的 MCP Server 工具。"
+                checked={defaultAgentListItem?.tools?.enable_mcp !== false}
+                onChange={(checked) =>
+                  updateDefaultAgentListItem({ tools: { enable_mcp: checked } })
+                }
+              />
+              <SettingsToggleRow
                 title="Allow sub-agents"
                 description="允许主 Agent 通过 Task 工具启动子 Agent。"
                 checked={Boolean(defaultAgentListItem?.tools?.allow_sub_agents)}
@@ -1173,7 +1196,10 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels }) {
         </div>
       )}
 
-      {activeTab === "models" || activeTab === "context" || activeTab === "agent" ? (
+      {activeTab === "models" ||
+      activeTab === "context" ||
+      activeTab === "agent" ||
+      activeTab === "mcp" ? (
         <footer className="settings-page-footer">
           <button type="button" className="settings-btn secondary" onClick={onBack}>
             取消

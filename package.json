@@ -4,7 +4,7 @@
   "description": "CRAgent Electron port (macOS 10.14+, Windows 10+)",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
+    "dev": "npm run build:chat-ui && env -u ELECTRON_RUN_AS_NODE electron-vite dev",
     "build": "env -u ELECTRON_RUN_AS_NODE electron-vite build",
     "build:web": "vite build --config vite.web.config.mjs",
     "start": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
@@ -15,6 +15,8 @@
     "pack:ipad": "bash scripts/build-ios.sh",
     "pack": "bash scripts/build-dmg.sh",
     "pack:win": "bash scripts/build-win.sh",
+    "build:chat-ui": "node scripts/build-chat-ui-utils.mjs",
+    "pretest": "npm run build:chat-ui",
     "test": "node --import ./test/register-test.mjs --test test/*.test.js"
   },
   "keywords": [],
@@ -22,6 +24,7 @@
   "license": "ISC",
   "dependencies": {
     "@capacitor/core": "^8.3.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "uuid": "^14.0.0",

@@ -19,6 +19,7 @@
   var ICON_EXPAND = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
 
   var todoRunsById = {};
+  var chatUi = window.CRAgentChatUtils || {};
 
   var MATH_DELIMITERS = [
     { left: '$$', right: '$$', display: true },
@@ -285,48 +286,64 @@
     return String(msg.content || '').trim().length > 0;
   }
 
-  function collectThinkingItems(msg) {
+  function buildRunThinking(messages) {
+    if (chatUi.buildThinkingSummary) {
+      return chatUi.buildThinkingSummary(messages);
+    }
     var items = [];
-    if (msg.role === 'tool') {
-      items.push({
-        kind: 'tool-result',
-        name: msg.name || '',
-        content: msg.content || ''
-      });
-      return items;
-    }
-    if (msg.role === 'assistant' && msg.tool_calls) {
-      msg.tool_calls.forEach(function (call) {
-        items.push({
-          kind: 'tool-call',
-          name: call.name || 'tool',
-          arguments: call.arguments || ''
+    var ids = [];
+    (messages || []).forEach(function (msg) {
+      if (msg && msg.id) ids.push(msg.id);
+      if (msg.role === 'tool') {
+        items.push({ kind: 'tool-result', name: msg.name || '', content: msg.content || '' });
+      } else if (msg.role === 'assistant' && msg.tool_calls) {
+        msg.tool_calls.forEach(function (call) {
+          items.push({
+            kind: 'tool-call',
+            name: call.name || 'tool',
+            arguments: call.arguments || ''
+          });
         });
-      });
-    }
-    return items;
+      }
+    });
+    var stepCount = items.length;
+    return {
+      summaryLine: 'Thinking · ' + stepCount + ' step' + (stepCount === 1 ? '' : 's'),
+      items: items,
+      ids: ids,
+      stepCount: stepCount
+    };
   }
 
   function renderTodoBlockHtml(runId) {
     var entry = todoRunsById[runId];
     var todos = entry && entry.todos ? entry.todos : [];
-    var active = todos.filter(function (item) {
-      return item.status !== 'cancelled';
-    });
-    if (!active.length) return '';
-    var items = active.map(function (item) {
+    var sorted = chatUi.sortTodosForDisplay
+      ? chatUi.sortTodosForDisplay(todos)
+      : todos.filter(function (item) {
+          return item.status !== 'cancelled';
+        });
+    if (!sorted.length) return '';
+    var maxDisplay = chatUi.MAX_TODO_INLINE_DISPLAY || 12;
+    var visible = sorted.slice(0, maxDisplay);
+    var hiddenCount = sorted.length - visible.length;
+    var items = visible.map(function (item) {
       var mark = item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '→' : '○';
+      var label = chatUi.todoDisplayLabel ? chatUi.todoDisplayLabel(item) : item.content;
       return (
         '<li class="todo-inline-item todo-inline-' + escapeAttr(item.status) + '">' +
           '<span class="todo-inline-mark">' + mark + '</span>' +
-          '<span class="todo-inline-content">' + escapeText(item.content) + '</span>' +
+          '<span class="todo-inline-content">' + escapeText(label) + '</span>' +
         '</li>'
       );
     }).join('');
+    var moreHtml = hiddenCount > 0
+      ? '<li class="todo-inline-more">+' + hiddenCount + ' more</li>'
+      : '';
     return (
       '<div class="todo-inline-block">' +
         '<div class="todo-inline-header">Tasks</div>' +
-        '<ul class="todo-inline-list">' + items + '</ul>' +
+        '<ul class="todo-inline-list">' + items + moreHtml + '</ul>' +
       '</div>'
     );
   }
@@ -348,22 +365,6 @@
       thinkingMessages: finalIndex >= 0 ? runMessages.slice(0, finalIndex) : runMessages,
       finalReply: finalIndex >= 0 ? runMessages[finalIndex] : null,
     };
-  }
-
-  function buildRunThinkingItems(messages) {
-    var items = [];
-    var ids = [];
-    messages.forEach(function (msg) {
-      if (hasVisibleAssistantContent(msg) && isProcessMessage(msg)) {
-        items.push({
-          kind: 'assistant-text',
-          content: msg.content || '',
-        });
-      }
-      items = items.concat(collectThinkingItems(msg));
-      ids.push(msg.id);
-    });
-    return { items: items, ids: ids };
   }
 
   function renderThinkingStep(item) {
@@ -407,15 +408,17 @@
     }
   }
 
-  function renderThinkingBlockHtml(items) {
+  function renderThinkingBlockHtml(thinking) {
+    var items = thinking && thinking.items ? thinking.items : thinking;
     if (!items || !items.length) return '';
     var summary =
-      'Thinking · ' + items.length + ' step' + (items.length === 1 ? '' : 's');
+      (thinking && thinking.summaryLine) ||
+      ('Thinking · ' + items.length + ' step' + (items.length === 1 ? '' : 's'));
     var body = items.map(renderThinkingStep).join('');
     return (
       '<div class="thinking-block">' +
         '<details class="thinking-group">' +
-          '<summary>' + summary + '</summary>' +
+          '<summary class="thinking-summary-line">' + escapeText(summary) + '</summary>' +
           '<div class="thinking-group-body">' + body + '</div>' +
         '</details>' +
       '</div>'
@@ -423,8 +426,16 @@
   }
 
   function buildAssistantTurn(options) {
-    var thinkingItems = options.thinkingItems || [];
-    var thinkingIds = options.thinkingIds || [];
+    var thinking = options.thinking;
+    if (!thinking) {
+      thinking = {
+        items: options.thinkingItems || [],
+        ids: options.thinkingIds || [],
+        summaryLine: null,
+        stepCount: (options.thinkingItems || []).length,
+      };
+    }
+    var thinkingIds = options.thinkingIds || thinking.ids || [];
     var contentMsg = options.contentMsg || null;
     var modelId = options.modelId || messageModelId(contentMsg);
     var startedAt = options.startedAt;
@@ -445,7 +456,7 @@
 
     var bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinkingItems);
+    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking);
     if (contentMsg) {
       var contentWrap = document.createElement('div');
       contentWrap.className = 'assistant-turn-content';
@@ -682,14 +693,14 @@
 
   function patchInProgressRunTurn(turn, runId, runMessages) {
     var split = splitRunMessages(runMessages);
-    var thinking = buildRunThinkingItems(split.thinkingMessages);
+    var thinking = buildRunThinking(split.thinkingMessages);
     var bubble = turn.querySelector('.bubble');
     if (!bubble) return;
 
     var thinkingGroup = bubble.querySelector('.thinking-group');
     var wasOpen = Boolean(thinkingGroup && thinkingGroup.open);
 
-    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking.items);
+    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking);
 
     thinkingGroup = bubble.querySelector('.thinking-group');
     if (thinkingGroup && wasOpen) {
@@ -754,10 +765,10 @@
 
     var split = splitRunMessages(collected.runMessages);
     if (split.finalReply) {
-      var thinking = buildRunThinkingItems(split.thinkingMessages);
+      var thinking = buildRunThinking(split.thinkingMessages);
       turn.replaceWith(
         buildAssistantTurn({
-          thinkingItems: thinking.items,
+          thinking: thinking,
           thinkingIds: thinking.ids.concat([split.finalReply.id]),
           contentMsg: split.finalReply,
           modelId: messageModelId(split.finalReply),
@@ -794,13 +805,13 @@
           index = collected.nextIndex;
           if (runMessages.length) {
             var split = splitRunMessages(runMessages);
-            var thinking = buildRunThinkingItems(split.thinkingMessages);
+            var thinking = buildRunThinking(split.thinkingMessages);
             var turnModelId = split.finalReply
               ? messageModelId(split.finalReply)
               : messageModelId(split.thinkingMessages[split.thinkingMessages.length - 1]);
             container.appendChild(
               buildAssistantTurn({
-                thinkingItems: thinking.items,
+                thinking: thinking,
                 thinkingIds: thinking.ids.concat(split.finalReply ? [split.finalReply.id] : []),
                 contentMsg: split.finalReply,
                 modelId: turnModelId,
@@ -815,21 +826,17 @@
         continue;
       }
       if (isProcessMessage(msg)) {
-        var legacyItems = [];
-        var legacyIds = [];
+        var legacyMessages = [];
         var legacyStartedAt = msg.created_at;
         var legacyEndedAt = msg.created_at;
         while (index < messages.length && isProcessMessage(messages[index])) {
           var current = messages[index];
-          if (hasVisibleAssistantContent(current)) {
-            legacyItems.push({ kind: 'assistant-text', content: current.content || '' });
-          }
-          legacyItems = legacyItems.concat(collectThinkingItems(current));
-          legacyIds.push(current.id);
+          legacyMessages.push(current);
           legacyEndedAt = current.created_at || legacyEndedAt;
           if (!legacyStartedAt) legacyStartedAt = current.created_at;
           index += 1;
         }
+        var legacyThinking = buildRunThinking(legacyMessages);
         var legacyNext = messages[index];
         var legacyFinal = null;
         if (
@@ -843,8 +850,8 @@
         }
         container.appendChild(
           buildAssistantTurn({
-            thinkingItems: legacyItems,
-            thinkingIds: legacyIds.concat(legacyFinal ? [legacyFinal.id] : []),
+            thinking: legacyThinking,
+            thinkingIds: legacyThinking.ids.concat(legacyFinal ? [legacyFinal.id] : []),
             contentMsg: legacyFinal,
             modelId: legacyFinal ? messageModelId(legacyFinal) : '',
             startedAt: legacyStartedAt,

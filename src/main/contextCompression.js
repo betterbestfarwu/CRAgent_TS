@@ -65,23 +65,13 @@ export function shouldAutoCompact(session, model, contextConfig = DEFAULT_CONTEX
     return calculateContextWarningState(session, model, contextConfig).isAboveAutoCompactThreshold;
 }
 
-export function calculateContextWarningState(session, model, contextConfig = DEFAULT_CONTEXT) {
-    const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
-    const active = session.messages
-        .slice(fromIndex)
-        .filter((message) => !isContextDividerMessage(message));
-
-    let tokens = estimateMessagesTokens(active);
-    if (session.meta.contextSummary) {
-        tokens += estimateTextTokens(session.meta.contextSummary);
-    }
-    if (session.meta.postCompactContext) {
-        tokens += estimateTextTokens(session.meta.postCompactContext);
-    }
-    if (session.meta.sessionMemory) {
-        tokens += estimateTextTokens(session.meta.sessionMemory);
-    }
-
+export function calculateMessagesContextWarningState(
+    messages,
+    model,
+    contextConfig = DEFAULT_CONTEXT,
+    extraTokens = 0,
+) {
+    const tokens = estimateMessagesTokens(messages) + extraTokens;
     const contextWindow = model?.contextWindow ?? 0;
     const maxOutput = model?.maxTokens ?? 8192;
     const reserved = Math.min(maxOutput, 20_000);
@@ -89,9 +79,6 @@ export function calculateContextWarningState(session, model, contextConfig = DEF
     const autoCompactThreshold = getAutoCompactThreshold(model, contextConfig);
     const warningThreshold = Math.max(0, autoCompactThreshold - CONTEXT_WARNING_TOKENS);
     const blockingLimit = Math.max(0, effectiveWindow - 3000);
-    const failures = session.meta.compactFailures ?? 0;
-    const autoCompactEnabled =
-        Boolean(contextConfig.auto_compact_enabled) && failures < MAX_CONSECUTIVE_COMPACT_FAILURES;
 
     return {
         tokens,
@@ -105,10 +92,77 @@ export function calculateContextWarningState(session, model, contextConfig = DEF
             ? Math.max(0, Math.round(((contextWindow - tokens) * 100) / contextWindow))
             : 100,
         isAboveWarningThreshold: tokens >= warningThreshold,
-        isAboveAutoCompactThreshold:
-            autoCompactEnabled && autoCompactThreshold > 0 && tokens >= autoCompactThreshold,
+        isAboveAutoCompactThreshold: autoCompactThreshold > 0 && tokens >= autoCompactThreshold,
         isAtBlockingLimit: blockingLimit > 0 && tokens >= blockingLimit,
     };
+}
+
+export function calculateContextWarningState(session, model, contextConfig = DEFAULT_CONTEXT) {
+    const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+    const active = session.messages
+        .slice(fromIndex)
+        .filter((message) => !isContextDividerMessage(message));
+
+    let extraTokens = 0;
+    if (session.meta.contextSummary) {
+        extraTokens += estimateTextTokens(session.meta.contextSummary);
+    }
+    if (session.meta.postCompactContext) {
+        extraTokens += estimateTextTokens(session.meta.postCompactContext);
+    }
+    if (session.meta.sessionMemory) {
+        extraTokens += estimateTextTokens(session.meta.sessionMemory);
+    }
+
+    const failures = session.meta.compactFailures ?? 0;
+    const autoCompactEnabled =
+        Boolean(contextConfig.auto_compact_enabled) && failures < MAX_CONSECUTIVE_COMPACT_FAILURES;
+    const state = calculateMessagesContextWarningState(active, model, contextConfig, extraTokens);
+
+    return {
+        ...state,
+        isAboveAutoCompactThreshold:
+            autoCompactEnabled && state.isAboveAutoCompactThreshold,
+    };
+}
+
+/** Shrink in-memory sub-agent transcript: micro-compact tool output, then drop oldest rounds. */
+export function shrinkSubAgentMessages(messages, contextConfig = DEFAULT_CONTEXT) {
+    if (messages.length < 2) {
+        return false;
+    }
+
+    let prefixLength = 0;
+    if (messages[0]?.role === "system") {
+        prefixLength = 1;
+        if (messages[1]?.role === "user") {
+            prefixLength = 2;
+        }
+    } else if (messages[0]?.role === "user") {
+        prefixLength = 1;
+    }
+
+    const tail = messages.slice(prefixLength);
+    if (!tail.length) {
+        return false;
+    }
+
+    const { cleared } = microCompactMessages(tail, contextConfig, {
+        keepRecent:
+            contextConfig.precompact_keep_recent ?? DEFAULT_CONTEXT.precompact_keep_recent,
+    });
+    if (cleared) {
+        return true;
+    }
+
+    const groups = groupMessagesByApiRound(tail);
+    if (groups.length <= 1) {
+        return false;
+    }
+
+    const trimmedTail = groups.slice(1).flat();
+    messages.splice(prefixLength, messages.length - prefixLength, ...trimmedTail);
+    return true;
 }
 
 export function trySessionMemoryCompact(session, entries, keepStartIndex) {

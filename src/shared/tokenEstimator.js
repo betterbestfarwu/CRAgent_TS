@@ -102,7 +102,7 @@ export const CONTEXT_BREAKDOWN_CATEGORIES = [
 ];
 
 const AGENTS_RULES_ESTIMATE = 3700;
-const TOKENS_PER_TOOL_SCHEMA = 620;
+export const TOKENS_PER_TOOL_SCHEMA = 620;
 
 function estimateRulesTokens(todos) {
     let tokens = AGENTS_RULES_ESTIMATE;

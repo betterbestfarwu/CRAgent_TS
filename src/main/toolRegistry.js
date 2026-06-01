@@ -1,4 +1,5 @@
 import { shouldRequireToolConfirmation } from "./authPolicy.js";
+import { executeToolSearch, schemasForToolCatalog } from "./toolSearch.js";
 
 export class ToolRegistry {
     constructor(toolFactory, confirmToolExecution, getAuthMode = () => "default") {
@@ -15,13 +16,24 @@ export class ToolRegistry {
         return this.toolFactory();
     }
 
-    schemas() {
-        return this.activeTools()
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((tool) => tool.schema);
+    schemas(options = {}) {
+        const tools = options.tools || this.activeTools();
+        const { tools: _omit, ...rest } = options;
+        return schemasForToolCatalog(tools, rest);
     }
 
     async execute(call, context = {}) {
+        if (call.function.name === "tool_search") {
+            let args = {};
+            try {
+                args = JSON.parse(call.function.arguments || "{}");
+            } catch (error) {
+                return `Error: invalid tool arguments ${error.message}`;
+            }
+            const unlocked = context.unlockedToolNames || new Set();
+            return executeToolSearch(args, this.activeTools(), unlocked);
+        }
+
         const tool = this.activeTools().find((entry) => entry.name === call.function.name);
         if (!tool) {
             return `Error: unknown tool '${call.function.name}'`;

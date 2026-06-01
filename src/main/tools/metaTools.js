@@ -25,6 +25,11 @@ export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
                 properties: {
                   id: { type: "string", description: "Unique identifier for the todo item" },
                   content: { type: "string", description: "Description of the todo" },
+                  activeForm: {
+                    type: "string",
+                    description:
+                      "Present-continuous label shown while in_progress (e.g. Running tests)",
+                  },
                   status: {
                     type: "string",
                     enum: ["pending", "in_progress", "completed", "cancelled"],
@@ -52,7 +57,7 @@ export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
         }
         const next = updateTodos(sessionId, todos, Boolean(args.merge), context?.runId);
         const autoRunHint =
-          "\n\n请立即开始执行上述 todos：将第一个 pending 项标记为 in_progress，逐步完成并在每项状态变化时调用 TodoWrite(merge=true) 更新。";
+          "\n\n请立即开始执行上述 todos：将第一个 pending 项标记为 in_progress（建议提供 activeForm 进行时文案），逐步完成并在每项状态变化时调用 TodoWrite(merge=true) 更新。";
         const summary = next.length
           ? next.map((item) => `[${item.status}] ${item.content}`).join("\n")
           : "(empty)";

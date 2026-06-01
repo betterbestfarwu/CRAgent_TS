@@ -482,6 +482,17 @@ export function installWebBridge() {
       return nextConfig;
     },
 
+    async probeMcp() {
+      return {
+        ok: false,
+        error: "MCP 连接测试仅在桌面版可用",
+      };
+    },
+
+    async getMcpStatus() {
+      return { toolCount: 0, errors: {} };
+    },
+
     async syncProviderModels({ providerKey, connection }) {
       const { config } = ensureState();
       if (!providerKey || !config.models?.[providerKey]) {
