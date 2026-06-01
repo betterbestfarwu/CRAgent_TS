@@ -10,8 +10,13 @@ DMG_PATH="release/CRAgent-${VERSION}-mac-x64.dmg"
 STAGING="release/dmg-staging"
 SIGN_IDENTITY="Sand Studio (S7VFHSY63S)"
 
-echo "==> Building application..."
+echo "==> Building application (renderer + chat iframe assets)..."
 npm run build
+
+if [[ ! -f out/renderer/index.html ]]; then
+  echo "Missing out/renderer/index.html after build" >&2
+  exit 1
+fi
 export CSC_NAME="$SIGN_IDENTITY"
 env -u ELECTRON_RUN_AS_NODE -u ELECTRON_MIRROR -u ELECTRON_BUILDER_BINARIES_MIRROR \
   npx electron-builder --mac dir --x64

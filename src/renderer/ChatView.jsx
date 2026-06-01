@@ -44,15 +44,17 @@ function toWireMessage(message) {
   };
 }
 
-export function ChatView({ messages, todoRuns, busy, onDelete, onOpenImage }) {
+export function ChatView({ messages, todoRuns, busy, verboseThinking, onDelete, onOpenImage }) {
   const iframeRef = useRef(null);
   const readyRef = useRef(false);
   const pendingRef = useRef([]);
   const messagesRef = useRef(messages);
   const todoRunsRef = useRef(todoRuns);
   const wireSnapshotRef = useRef({ ids: [], todoJson: "" });
+  const verboseThinkingRef = useRef(verboseThinking);
   messagesRef.current = messages;
   todoRunsRef.current = todoRuns;
+  verboseThinkingRef.current = verboseThinking;
 
   const syncIframeLayout = useCallback(() => {
     injectChatLayout(iframeRef.current?.contentDocument ?? null);
@@ -116,6 +118,7 @@ export function ChatView({ messages, todoRuns, busy, onDelete, onOpenImage }) {
         syncIframeLayout();
         syncMessages();
         postToChat("setBusy", busy);
+        postToChat("setVerboseThinking", verboseThinkingRef.current);
         const queue = pendingRef.current;
         pendingRef.current = [];
         queue.forEach((run) => run());
@@ -148,12 +151,17 @@ export function ChatView({ messages, todoRuns, busy, onDelete, onOpenImage }) {
     postToChat("setBusy", busy);
   }, [busy, postToChat]);
 
+  useEffect(() => {
+    if (!readyRef.current) return;
+    postToChat("setVerboseThinking", verboseThinking);
+  }, [verboseThinking, postToChat]);
+
   return (
     <iframe
       ref={iframeRef}
       className="chat-frame"
       title="CRAgent chat"
-      src="./chat/chat.html?v=18"
+      src="./chat/chat.html"
     />
   );
 }

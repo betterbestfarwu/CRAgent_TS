@@ -6,8 +6,13 @@ cd "$ROOT"
 
 VERSION="$(node -p "require('./package.json').version")"
 
-echo "==> Building application..."
+echo "==> Building application (renderer + chat iframe assets)..."
 npm run build
+
+if [[ ! -f out/renderer/index.html ]]; then
+  echo "Missing out/renderer/index.html after build" >&2
+  exit 1
+fi
 
 echo "==> Packaging Windows installer (x64)..."
 export CSC_IDENTITY_AUTO_DISCOVERY=false

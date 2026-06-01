@@ -9,7 +9,9 @@ import { ToolRegistry } from "./toolRegistry";
 import { AgentRuntime } from "./agentRuntime";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
-const isDev = Boolean(devServerUrl) || process.env.NODE_ENV === "development";
+const isDev =
+    !app.isPackaged &&
+    (Boolean(devServerUrl) || process.env.NODE_ENV === "development");
 const projectRoot = process.cwd();
 
 let mainWindow = null;

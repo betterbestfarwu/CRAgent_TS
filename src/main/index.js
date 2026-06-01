@@ -22,7 +22,10 @@ import { normalizeAuthMode } from "@shared/authMode.js";
 import { listProjectDirectory } from "./projectBrowse.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
-const isDev = Boolean(devServerUrl) || process.env.NODE_ENV === "development";
+/** Packaged builds must always load bundled renderer, even if shell env has NODE_ENV=development. */
+const isDev =
+    !app.isPackaged &&
+    (Boolean(devServerUrl) || process.env.NODE_ENV === "development");
 
 let mainWindow = null;
 let configStore;

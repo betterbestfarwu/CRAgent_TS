@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
     GROUPABLE_TOOLS,
     buildThinkingSummary,
+    collapseAdjacentThinkingItems,
     formatThinkingSummaryLine,
     getCurrentInProgressTodo,
     sortTodosForDisplay,
@@ -86,6 +87,31 @@ describe("buildThinkingSummary", () => {
         assert.deepEqual(result.items[1].results, ["one", "two"]);
     });
 
+    it("collapses same-tool groups across separate assistant messages", () => {
+        const result = buildThinkingSummary([
+            {
+                id: "a1",
+                role: "assistant",
+                tool_calls: [
+                    { id: "1", name: "read_file", arguments: "{}" },
+                    { id: "2", name: "read_file", arguments: "{}" },
+                ],
+            },
+            {
+                id: "a2",
+                role: "assistant",
+                tool_calls: [
+                    { id: "3", name: "read_file", arguments: "{}" },
+                    { id: "4", name: "read_file", arguments: "{}" },
+                ],
+            },
+        ]);
+
+        assert.equal(result.items.length, 1);
+        assert.equal(result.items[0].kind, "tool-call-group");
+        assert.equal(result.items[0].calls.length, 4);
+    });
+
     it("verbose mode keeps separate tool-call steps", () => {
         const result = buildThinkingSummary(
             [
@@ -116,6 +142,20 @@ describe("buildThinkingSummary", () => {
         ]);
         assert.equal(result.summaryLine, "Thinking · 1 other step (1 step)");
         assert.ok(!GROUPABLE_TOOLS.has("TodoWrite"));
+    });
+});
+
+describe("collapseAdjacentThinkingItems", () => {
+    it("merges neighboring tool-result groups", () => {
+        const merged = collapseAdjacentThinkingItems(
+            [
+                { kind: "tool-result-group", name: "read_file", results: ["a"] },
+                { kind: "tool-result-group", name: "read_file", results: ["b"] },
+            ],
+            false,
+        );
+        assert.equal(merged.length, 1);
+        assert.deepEqual(merged[0].results, ["a", "b"]);
     });
 });
 

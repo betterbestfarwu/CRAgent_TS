@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfig";
 import { ensureMcpConfigShape } from "@shared/mcpConfig.js";
+import { mergeUiConfig } from "@shared/uiConfig.js";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { SingleDotIcon } from "./DotGridAnimator.jsx";
 import { McpSettingsTab } from "./McpSettingsTab.jsx";
@@ -209,6 +210,13 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function ensureUiConfigShape(config) {
+  return {
+    ...config,
+    ui: mergeUiConfig(config?.ui),
+  };
+}
+
 function SettingsGroup({ label, children, footer, cardClassName = "", className = "" }) {
   return (
     <section className={`settings-group${className ? ` ${className}` : ""}`}>
@@ -331,7 +339,9 @@ function SettingsModelRow({ title, checked, onToggle, onDelete }) {
 
 export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onProbeMcp }) {
   const [activeTab, setActiveTab] = useState("models");
-  const [draftConfig, setDraftConfig] = useState(() => ensureMcpConfigShape(clone(config)));
+  const [draftConfig, setDraftConfig] = useState(() =>
+    ensureUiConfigShape(ensureMcpConfigShape(clone(config))),
+  );
   const [modelSearch, setModelSearch] = useState("");
   const [modelStateFilter, setModelStateFilter] = useState("all");
   const [showApiKey, setShowApiKey] = useState(false);
@@ -349,7 +359,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
   );
 
   useEffect(() => {
-    const next = ensureMcpConfigShape(clone(config));
+    const next = ensureUiConfigShape(ensureMcpConfigShape(clone(config)));
     setDraftConfig(next);
     const keys = Object.keys(next.models || {});
     setSelectedProviderKey((prev) =>
@@ -393,6 +403,14 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
     () => mergeContextConfig(draftConfig.context),
     [draftConfig.context],
   );
+  const uiDraft = useMemo(() => mergeUiConfig(draftConfig.ui), [draftConfig.ui]);
+
+  function updateUi(patch) {
+    setDraftConfig((prev) => ({
+      ...prev,
+      ui: mergeUiConfig({ ...prev.ui, ...patch }),
+    }));
+  }
 
   function updateContext(patch) {
     setDraftConfig((prev) => ({
@@ -681,6 +699,13 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
             onClick={() => setActiveTab("context")}
           >
             Context
+          </button>
+          <button
+            type="button"
+            className={`settings-top-tab${activeTab === "chat" ? " active" : ""}`}
+            onClick={() => setActiveTab("chat")}
+          >
+            Chat
           </button>
         </div>
       </header>
@@ -1074,6 +1099,24 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
             </SettingsGroup>
           </div>
         </div>
+      ) : activeTab === "chat" ? (
+        <div className="settings-card settings-general-card">
+          <div className="settings-general-scroll">
+            <h2 className="settings-general-title">Chat</h2>
+            <p className="settings-general-lead">
+              控制对话区里 agent 过程（Thinking）的展示方式。
+            </p>
+
+            <SettingsGroup label="Thinking">
+              <SettingsToggleRow
+                title="Verbose tool trace"
+                description="开启后逐步展示每次 tool 调用与结果，不再合并为分组摘要。"
+                checked={Boolean(uiDraft.verbose_thinking)}
+                onChange={(checked) => updateUi({ verbose_thinking: checked })}
+              />
+            </SettingsGroup>
+          </div>
+        </div>
       ) : (
         <div className="settings-card settings-general-card">
           <div className="settings-general-scroll">
@@ -1198,6 +1241,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
 
       {activeTab === "models" ||
       activeTab === "context" ||
+      activeTab === "chat" ||
       activeTab === "agent" ||
       activeTab === "mcp" ? (
         <footer className="settings-page-footer">

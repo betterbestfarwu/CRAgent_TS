@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { DEFAULT_CONTEXT_CONFIG } from "@shared/contextConfig";
+import { DEFAULT_UI_CONFIG } from "@shared/uiConfig.js";
 export class ConfigStore {
     constructor(filePath) {
         this.filePath = filePath;
@@ -78,6 +79,7 @@ export class ConfigStore {
         return {
             content_limit: 5000,
             context: { ...DEFAULT_CONTEXT_CONFIG },
+            ui: { ...DEFAULT_UI_CONFIG },
             models: {
                 openai: {
                     baseUrl: "https://api.openai.com/v1",

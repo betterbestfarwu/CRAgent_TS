@@ -23,6 +23,7 @@ var CRAgentChatUtils = (() => {
     GROUPABLE_TOOLS: () => GROUPABLE_TOOLS,
     MAX_TODO_INLINE_DISPLAY: () => MAX_TODO_INLINE_DISPLAY,
     buildThinkingSummary: () => buildThinkingSummary,
+    collapseAdjacentThinkingItems: () => collapseAdjacentThinkingItems,
     formatThinkingSummaryLine: () => formatThinkingSummaryLine,
     getCurrentInProgressTodo: () => getCurrentInProgressTodo,
     parseToolArguments: () => parseToolArguments,
@@ -148,6 +149,34 @@ var CRAgentChatUtils = (() => {
       index = end;
     }
     return segments;
+  }
+  function cloneThinkingItem(item) {
+    if (item.kind === "tool-call-group") {
+      return { kind: "tool-call-group", name: item.name, calls: [...item.calls] };
+    }
+    if (item.kind === "tool-result-group") {
+      return { kind: "tool-result-group", name: item.name, results: [...item.results] };
+    }
+    return { ...item };
+  }
+  function collapseAdjacentThinkingItems(items, verbose) {
+    if (verbose || !items?.length) {
+      return items || [];
+    }
+    const collapsed = [];
+    for (const item of items) {
+      const previous = collapsed[collapsed.length - 1];
+      if (item.kind === "tool-call-group" && previous?.kind === "tool-call-group" && previous.name === item.name) {
+        previous.calls.push(...item.calls);
+        continue;
+      }
+      if (item.kind === "tool-result-group" && previous?.kind === "tool-result-group" && previous.name === item.name) {
+        previous.results.push(...item.results);
+        continue;
+      }
+      collapsed.push(cloneThinkingItem(item));
+    }
+    return collapsed;
   }
   function createResultCollector(verbose) {
     const openGroups = [];
@@ -300,9 +329,10 @@ var CRAgentChatUtils = (() => {
       }
     }
     resultCollector.flush(items);
-    const stepCount = items.length;
+    const displayItems = collapseAdjacentThinkingItems(items, verbose);
+    const stepCount = displayItems.length;
     const summaryLine = formatThinkingSummaryLine(stats, stepCount);
-    return { summaryLine, items, ids, stepCount };
+    return { summaryLine, items: displayItems, ids, stepCount };
   }
   function formatThinkingSummaryLine(stats, stepCount) {
     const parts = [];

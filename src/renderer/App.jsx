@@ -37,6 +37,7 @@ import {
     getEnabledMcpServers,
 } from "@shared/mcpConfig.js";
 import { formatModelRef, modelRefLabel } from "@shared/modelRef.js";
+import { filterVisibleTodoRuns, msUntilTodoRunsHide } from "@shared/todoRunsDisplay.js";
 
 const SUGGESTIONS = [
   "总结当前项目结构",
@@ -90,6 +91,7 @@ export function App() {
   const [runtimeContextState, setRuntimeContextState] = useState(null);
   const [executionModeSaving, setExecutionModeSaving] = useState(false);
   const [composerQuickMenuOpen, setComposerQuickMenuOpen] = useState(false);
+  const [todoRunsHideTick, setTodoRunsHideTick] = useState(0);
   const contextRingRef = useRef(null);
   const composerQuickMenuRef = useRef(null);
   const filePickerRef = useRef(null);
@@ -104,6 +106,22 @@ export function App() {
       setConfirmRequest({ ...options, resolve });
     });
   }, []);
+
+  const visibleTodoRuns = useMemo(
+    () => filterVisibleTodoRuns(currentSession?.meta?.todoRuns),
+    [currentSession?.meta?.todoRuns, todoRunsHideTick],
+  );
+
+  const verboseThinking = Boolean(config?.ui?.verbose_thinking);
+
+  useEffect(() => {
+    const delay = msUntilTodoRunsHide(currentSession?.meta?.todoRuns);
+    if (delay === null) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setTodoRunsHideTick((value) => value + 1), delay + 50);
+    return () => clearTimeout(timer);
+  }, [currentSession?.meta?.todoRuns, todoRunsHideTick]);
 
   const clearSessionError = useCallback(() => {
     if (sessionErrorTimerRef.current) {
@@ -1088,8 +1106,9 @@ export function App() {
               ) : (
                 <ChatView
                   messages={currentSession.messages}
-                  todoRuns={currentSession.meta.todoRuns}
+                  todoRuns={visibleTodoRuns}
                   busy={busy}
+                  verboseThinking={verboseThinking}
                   onDelete={handleDeleteMessage}
                   onOpenImage={(image) => setViewerImage(image)}
                 />
