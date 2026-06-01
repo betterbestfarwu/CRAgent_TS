@@ -79,7 +79,7 @@ html, body {
 
 .msg.user {
   align-self: flex-end;
-  align-items: flex-end;
+  align-items: stretch;
   width: fit-content;
 }
 
@@ -195,6 +195,7 @@ html, body {
 }
 
 .msg.user .bubble {
+  align-self: flex-end;
   width: fit-content;
   max-width: 100%;
   padding: 4px var(--chat-inner-x);
@@ -536,39 +537,6 @@ html, body {
   text-align: center;
 }
 
-#busy {
-  position: fixed;
-  bottom: 32px;
-  left: 50%;
-  z-index: 11;
-  transform: translateX(-50%);
-  background: var(--bubble-bg);
-  color: var(--bubble-fg);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 6px 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--cursor-font-size-sm);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-}
-
-#busy[hidden] { display: none; }
-
-.spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--muted);
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
 @media (max-width: 834px) {
   #messages {
     padding: 12px var(--chat-gutter-x) 28px;
@@ -583,4 +551,68 @@ html, body {
   .code-block .code-copy-btn {
     opacity: 1;
   }
+}
+
+.msg.user .meta.user-actions-only {
+  align-self: stretch;
+  display: block;
+  width: auto;
+  padding-inline: 0;
+  text-align: right;
+}
+
+.todo-inline-block {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bubble-bg);
+}
+
+.todo-inline-header {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+
+.todo-inline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.todo-inline-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.todo-inline-mark {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.todo-inline-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-inline-in_progress .todo-inline-mark {
+  color: var(--link);
+}
+
+.todo-inline-completed .todo-inline-content {
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+
+.thinking-assistant-text {
+  padding: 8px 10px;
+  font-size: 13px;
 }

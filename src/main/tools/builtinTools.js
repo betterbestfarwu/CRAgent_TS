@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { classifyBashCommand } from "../bashSafety.js";
+import { shouldRequireBashConfirmation, shouldRequireNetworkConfirmation } from "../authPolicy.js";
 import { assertWritableTarget } from "@shared/memoryPaths.js";
 import { resolveCwd, resolvePathInWorkspace } from "../workspacePaths.js";
 import { resolveSkillName } from "../skillLoader.js";
@@ -55,6 +56,7 @@ export function createBuiltinTools({
     skillLoader,
     getAgentTools,
     confirmToolExecution,
+    getAuthMode = () => "default",
 }) {
     const tools = [
         {
@@ -152,7 +154,7 @@ export function createBuiltinTools({
                 if (safety.kind === "blocked") {
                     throw new Error(safety.reason);
                 }
-                if (safety.kind === "needsConfirmation") {
+                if (shouldRequireBashConfirmation(safety, () => getAuthMode(context?.sessionId))) {
                     const approved = await confirmToolExecution(
                         "bash",
                         `$ ${command}\n(cwd: ${cwd})\n\n${safety.reason}`,
@@ -173,8 +175,18 @@ export function createBuiltinTools({
                 properties: { url: { type: "string" } },
                 required: ["url"],
             }),
-            async execute(args) {
-                const response = await fetch(String(args.url || ""));
+            async execute(args, context) {
+                const url = String(args.url || "");
+                if (shouldRequireNetworkConfirmation(() => getAuthMode(context?.sessionId))) {
+                    const approved = await confirmToolExecution(
+                        "web_fetch",
+                        `访问网络 URL:\n${url}`,
+                    );
+                    if (!approved) {
+                        throw new Error("user declined: web_fetch");
+                    }
+                }
+                const response = await fetch(url);
                 const text = await response.text();
                 return text.slice(0, 8000);
             },

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "./ChatView.jsx";
-import { TodoPanel } from "./TodoPanel.jsx";
+import { ComposerAuthMenu } from "./ComposerAuthMenu.jsx";
+import { ComposerContextRing } from "./ComposerContextRing.jsx";
+import { ComposerContextPopup } from "./ComposerContextPopup.jsx";
+import { ComposerQueuePanel } from "./ComposerQueuePanel.jsx";
 import {
   buildSlashMenuNavItems,
   ComposerSlashMenu,
@@ -16,7 +19,7 @@ import { displayTitle } from "./sidebarUtils.js";
 import { isDefaultSessionTitle, titleFromFirstUserMessage } from "@shared/sessionTitle";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
-import { estimateSessionContextUsage, formatTokens } from "@shared/tokenEstimator";
+import { estimateSessionContextBreakdown } from "@shared/tokenEstimator";
 
 const SUGGESTIONS = [
   "总结当前项目结构",
@@ -60,6 +63,10 @@ export function App() {
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [confirmRequest, setConfirmRequest] = useState(null);
   const [viewerImage, setViewerImage] = useState(null);
+  const [messageQueue, setMessageQueue] = useState([]);
+  const [queuePanelOpen, setQueuePanelOpen] = useState(false);
+  const [contextPopupOpen, setContextPopupOpen] = useState(false);
+  const contextRingRef = useRef(null);
   const sessionIdRef = useRef(null);
   const sessionErrorTimerRef = useRef(null);
   const textareaRef = useRef(null);
@@ -221,10 +228,38 @@ export function App() {
       }
     });
 
-    const offTodos = window.cragent.onTodosChanged?.(({ sessionId, todos }) => {
+    const offTodos = window.cragent.onTodosChanged?.(({ sessionId, todoRuns }) => {
       setCurrentSession((prev) => {
         if (!prev || prev.meta.id !== sessionId) return prev;
-        return { ...prev, meta: { ...prev.meta, todos } };
+        return {
+          ...prev,
+          meta: {
+            ...prev.meta,
+            todoRuns: todoRuns || prev.meta.todoRuns,
+          },
+        };
+      });
+    });
+
+    const offQueue = window.cragent.onQueueChanged?.(({ sessionId, queue }) => {
+      if (sessionIdRef.current !== sessionId) return;
+      setMessageQueue(Array.isArray(queue) ? queue : []);
+      if (!queue?.length) {
+        setQueuePanelOpen(false);
+      }
+    });
+
+    const offConfirm = window.cragent.onConfirmRequest?.((payload) => {
+      setConfirmRequest({
+        title: payload.title,
+        message: payload.message,
+        detail: payload.detail,
+        confirmLabel: payload.confirmLabel || "允许",
+        cancelLabel: payload.cancelLabel || "拒绝",
+        destructive: payload.destructive,
+        resolve: (confirmed) => {
+          window.cragent.respondConfirm?.({ id: payload.id, confirmed });
+        },
       });
     });
 
@@ -252,6 +287,8 @@ export function App() {
       offSession();
       offBusy();
       offTodos?.();
+      offQueue?.();
+      offConfirm?.();
       offError();
       offSettings();
     };
@@ -280,34 +317,18 @@ export function App() {
       (m) => m.id === currentSession.meta.modelId,
     );
     const compactBuffer = config.context?.compact_buffer_tokens;
-    return estimateSessionContextUsage(currentSession, model, {
+    const defaultAgent =
+      config.agents?.list?.find((agent) => agent.is_default) || config.agents?.list?.[0];
+    const agentTools = defaultAgent?.tools || {};
+    const skillsCatalogText = skills
+      .map((skill) => `- ${skill.name}: ${skill.description || ""}`)
+      .join("\n");
+    return estimateSessionContextBreakdown(currentSession, model, {
       compactBufferTokens: compactBuffer,
+      agentTools,
+      skillsCatalogText,
     });
-  }, [currentSession, config]);
-
-  const contextText = useMemo(() => {
-    if (!contextUsage) return "";
-    const cap = contextUsage.contextWindow;
-    if (!cap) return `Context ${formatTokens(contextUsage.tokens)} tok`;
-    let text = `Context ${contextUsage.percent}% · ${formatTokens(contextUsage.tokens)} / ${formatTokens(cap)}`;
-    if (contextUsage.isAboveAutoCompactThreshold) {
-      text += " · 即将自动压缩";
-    } else if (contextUsage.isAboveWarningThreshold) {
-      text += " · 接近上限";
-    }
-    return text;
-  }, [contextUsage]);
-
-  const contextClassName = useMemo(() => {
-    if (!contextUsage) return "composer-context";
-    if (contextUsage.isAboveAutoCompactThreshold) {
-      return "composer-context composer-context-critical";
-    }
-    if (contextUsage.isAboveWarningThreshold) {
-      return "composer-context composer-context-warning";
-    }
-    return "composer-context";
-  }, [contextUsage]);
+  }, [currentSession, config, skills]);
 
   const slashQuery = useMemo(() => {
     const match = input.match(/^\/([^\s]*)$/);
@@ -351,7 +372,7 @@ export function App() {
     }
   }, [slashNavItems, slashMenuIndex]);
 
-  const showSlashMenu = page === "chat" && !busy && slashQuery !== null;
+  const showSlashMenu = page === "chat" && slashQuery !== null;
 
   function applySlashPick(name) {
     const next = `/${name} `;
@@ -391,10 +412,28 @@ export function App() {
   async function handleSend(text = input) {
     if (!currentSession || page !== "chat") return;
     const trimmed = text.trim();
-    if ((!trimmed && !pendingImages.length) || busy) return;
+    if (!trimmed && !pendingImages.length) return;
 
     const sessionId = currentSession.meta.id;
     const images = toStoredImages(pendingImages);
+
+    if (busy) {
+      setInput("");
+      setPendingImages([]);
+      setComposerDragOver(false);
+      try {
+        await window.cragent.sendChat({
+          sessionId,
+          userInput: trimmed,
+          images,
+        });
+        setQueuePanelOpen(true);
+      } catch (err) {
+        showSessionError(err instanceof Error ? err.message : String(err), sessionId);
+      }
+      return;
+    }
+
     setInput("");
     setPendingImages([]);
     setComposerDragOver(false);
@@ -407,13 +446,32 @@ export function App() {
       });
     } catch (err) {
       showSessionError(err instanceof Error ? err.message : String(err), sessionId);
-    } finally {
-      busyBySessionRef.current.set(sessionId, false);
-      setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
-      if (sessionIdRef.current === sessionId) {
-        setBusy(false);
-      }
     }
+  }
+
+  async function handleCancelRun() {
+    if (!currentSession || !busy) return;
+    await window.cragent.cancelRun?.(currentSession.meta.id);
+  }
+
+  async function handleAuthModeChange(nextMode) {
+    if (!currentSession) return;
+    const session = await window.cragent.updateAuthMode?.({
+      sessionId: currentSession.meta.id,
+      authMode: nextMode,
+    });
+    if (session) {
+      setCurrentSession(session);
+    }
+  }
+
+  function removeQueuedMessage(messageId) {
+    if (!currentSession) return;
+    setMessageQueue((prev) => prev.filter((item) => item.id !== messageId));
+    void window.cragent.removeQueuedMessage?.({
+      sessionId: currentSession.meta.id,
+      messageId,
+    });
   }
 
   async function handleNewChat() {
@@ -621,6 +679,7 @@ export function App() {
               ) : (
                 <ChatView
                   messages={currentSession.messages}
+                  todoRuns={currentSession.meta.todoRuns}
                   busy={busy}
                   onDelete={handleDeleteMessage}
                   onOpenImage={(image) => setViewerImage(image)}
@@ -637,8 +696,6 @@ export function App() {
               ) : null}
             </div>
 
-            <TodoPanel todos={currentSession?.meta?.todos} />
-
             <div className="composer">
               <div className="composer-shell">
                 {showSlashMenu ? (
@@ -653,14 +710,13 @@ export function App() {
                   />
                 ) : null}
                 <div
-                  className={`composer-box${composerDragOver ? " composer-drag-over" : ""}`}
+                  className={`composer-box${composerDragOver ? " composer-drag-over" : ""}${messageQueue.length ? " has-queue-toggle" : ""}`}
                   onDragEnter={(e) => {
-                    if (busy || !Array.from(e.dataTransfer?.types || []).includes("Files")) return;
+                    if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return;
                     e.preventDefault();
                     setComposerDragOver(true);
                   }}
                   onDragOver={(e) => {
-                    if (busy) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "copy";
                     setComposerDragOver(true);
@@ -672,10 +728,17 @@ export function App() {
                   onDrop={(e) => {
                     e.preventDefault();
                     setComposerDragOver(false);
-                    if (busy) return;
                     void addImagesFromFiles(e.dataTransfer?.files);
                   }}
                 >
+                {messageQueue.length > 0 ? (
+                  <ComposerQueuePanel
+                    queue={messageQueue}
+                    open={queuePanelOpen}
+                    onToggle={() => setQueuePanelOpen((prev) => !prev)}
+                    onRemove={removeQueuedMessage}
+                  />
+                ) : null}
                 {pendingImages.length ? (
                   <div className="composer-attachments" aria-label="待发送图片">
                     {pendingImages.map((image) => (
@@ -738,10 +801,14 @@ export function App() {
                       void handleSend();
                     }
                   }}
-                  disabled={busy}
                 />
                 <div className="composer-toolbar-spacer" aria-hidden="true" />
                 <div className="composer-toolbar">
+                  <ComposerAuthMenu
+                    authMode={currentSession?.meta?.authMode}
+                    onChange={(mode) => void handleAuthModeChange(mode)}
+                  />
+                  <div className="composer-toolbar-right">
                   <label className="composer-model-wrap">
                     <span className="composer-model-content">
                       <span className="composer-model-sizer" aria-hidden="true">
@@ -790,17 +857,68 @@ export function App() {
                       )}
                     </select>
                   </label>
-                  <span className={contextClassName}>{contextText}</span>
+                  <div className="composer-context-wrap">
+                    <ComposerContextRing
+                      buttonRef={contextRingRef}
+                      percent={contextUsage?.percent ?? 0}
+                      className={
+                        contextUsage?.isAboveAutoCompactThreshold
+                          ? "composer-context-ring-critical"
+                          : contextUsage?.isAboveWarningThreshold
+                            ? "composer-context-ring-warning"
+                            : ""
+                      }
+                      onClick={() => setContextPopupOpen((prev) => !prev)}
+                    />
+                    <ComposerContextPopup
+                      open={contextPopupOpen}
+                      usage={contextUsage}
+                      anchorRef={contextRingRef}
+                      onClose={() => setContextPopupOpen(false)}
+                    />
+                  </div>
                   <button
                     type="button"
-                    className={`composer-send${canSend ? " composer-send-ready" : ""}`}
-                    onClick={() => void handleSend()}
-                    disabled={busy}
-                    title={busy ? "正在发送" : "发送"}
-                    aria-label={busy ? "正在发送" : "发送"}
+                    className={`composer-send${
+                      busy
+                        ? " composer-send-stop"
+                        : canSend
+                          ? " composer-send-ready"
+                          : ""
+                    }`}
+                    onClick={() => (busy ? void handleCancelRun() : void handleSend())}
+                    disabled={!busy && !canSend}
+                    title={busy ? "中断当前任务" : "发送"}
+                    aria-label={busy ? "中断当前任务" : "发送"}
                   >
-                    {busy ? "…" : "↑"}
+                    {busy ? (
+                      <span className="composer-send-stop-icon" aria-hidden="true" />
+                    ) : (
+                      <svg
+                        className="composer-send-arrow"
+                        viewBox="0 0 24 24"
+                        width="16"
+                        height="16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M12 19V5"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d="m7 10 5-5 5 5"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    )}
                   </button>
+                  </div>
                 </div>
                 </div>
               </div>

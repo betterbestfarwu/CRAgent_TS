@@ -3,6 +3,8 @@ export {
     estimateMessageTokens,
     estimateMessagesTokens,
     estimateSessionContextUsage,
+    estimateSessionContextBreakdown,
     formatTokens,
     estimateTokens,
+    CONTEXT_BREAKDOWN_CATEGORIES,
 } from "@shared/tokenEstimator";

@@ -6,6 +6,9 @@ export const IPC_CHANNELS = {
     deleteSession: "session:delete",
     deleteMessages: "session:deleteMessages",
     sendChat: "chat:send",
+    cancelRun: "chat:cancelRun",
+    removeQueuedMessage: "chat:removeQueuedMessage",
+    updateAuthMode: "session:updateAuthMode",
     updateModel: "session:updateModel",
     updateConfig: "config:update",
     syncProviderModels: "config:syncProviderModels",
@@ -14,5 +17,8 @@ export const IPC_CHANNELS = {
     onBusyChanged: "events:busyChanged",
     onError: "events:error",
     onTodosChanged: "events:todosChanged",
+    onQueueChanged: "events:queueChanged",
     onContextWarningChanged: "events:contextWarningChanged",
+    onConfirmRequest: "ui:confirmRequest",
+    confirmResponse: "ui:confirmResponse",
 };

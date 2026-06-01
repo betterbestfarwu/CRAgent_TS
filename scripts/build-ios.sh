@@ -13,6 +13,38 @@ EXPORT_PLIST="$IOS_DIR/ExportOptions.plist"
 TEAM_ID="${DEVELOPMENT_TEAM:-S7VFHSY63S}"
 METHOD="${EXPORT_METHOD:-development}"
 
+preflight_signing() {
+  if ! xcodebuild -checkFirstLaunchStatus 2>/dev/null; then
+    echo "==> Xcode first-launch setup is incomplete. Open Xcode once, then retry."
+    exit 1
+  fi
+
+  local has_ios_cert=0
+  if security find-identity -v -p codesigning 2>/dev/null | grep -qE 'Apple Development|iPhone Developer|iPhone Distribution|Apple Distribution'; then
+    has_ios_cert=1
+  fi
+
+  if [[ "$has_ios_cert" -eq 0 ]]; then
+    cat <<EOF
+==> iOS code signing is not configured on this Mac.
+
+To install CRAgent on a physical iPad you need an Apple Developer account in Xcode:
+  1. Open Xcode -> Settings (Cmd+,) -> Accounts
+  2. Click "+" and sign in with your Apple ID (team: ${TEAM_ID})
+  3. Select the team and click "Manage Certificates..." -> "+" -> Apple Development
+  4. Connect your iPad via USB (or register its UDID for ad-hoc builds)
+  5. Re-run: npm run pack:ipad
+
+Optional export methods:
+  EXPORT_METHOD=development   install on registered devices via Xcode/ios-deploy (default)
+  EXPORT_METHOD=ad-hoc        install on specific device UDIDs
+  EXPORT_METHOD=app-store     upload to TestFlight / App Store
+
+EOF
+    exit 1
+  fi
+}
+
 seed_spm_cache() {
   local cache_dir="$HOME/Library/Caches/org.swift.swiftpm/artifacts"
   local base="https://github.com/ionic-team/capacitor-swift-pm/releases/download/8.3.4"
@@ -61,6 +93,7 @@ EOF
 echo "==> Building web assets and syncing Capacitor iOS..."
 npm run cap:sync:ios
 
+preflight_signing
 seed_spm_cache
 ensure_ios_platform
 

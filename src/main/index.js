@@ -14,6 +14,8 @@ import { resolveWorkspace } from "./workspacePaths.js";
 import { createBuiltinTools } from "./tools/builtinTools.js";
 import { createMetaTools } from "./tools/metaTools.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
+import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
+import { normalizeAuthMode } from "@shared/authMode.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(devServerUrl) || process.env.NODE_ENV === "development";
@@ -166,6 +168,15 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.sendChat, (_event, request) =>
         runtime.sendUserMessage(request.sessionId, request.userInput, request.images),
     );
+    ipcMain.handle(IPC_CHANNELS.cancelRun, (_event, sessionId) => runtime.cancelRun(sessionId));
+    ipcMain.handle(IPC_CHANNELS.removeQueuedMessage, (_event, args) =>
+        runtime.removeQueuedMessage(args.sessionId, args.messageId),
+    );
+    ipcMain.handle(IPC_CHANNELS.updateAuthMode, (_event, args) => {
+        const session = sessionStore.updateAuthMode(args.sessionId, args.authMode);
+        mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
+        return session;
+    });
     ipcMain.handle(IPC_CHANNELS.updateModel, (_event, args) => {
         const session = sessionStore.updateModel(args.sessionId, args.providerKey, args.modelId);
         mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
@@ -210,6 +221,7 @@ function registerIpc() {
 }
 
 function bootstrap() {
+    registerConfirmBridge();
     const appPaths = getAppPaths();
     configStore = new ConfigStore(appPaths.configFile);
     const getWorkspace = () => resolveWorkspace(configStore);
@@ -226,23 +238,42 @@ function bootstrap() {
         return agent?.tools || { enable_tools: true, enable_file_tools: true, enable_skills: true };
     };
 
-    const toolRegistry = new ToolRegistry(() => {
-        const builtin = createBuiltinTools({
-            getWorkspace,
-            workspaceMemory,
-            skillLoader,
-            getAgentTools,
-        });
-        const meta = createMetaTools({
-            getAgentTools,
-            updateTodos: (sessionId, todos, merge) => runtime.updateTodos(sessionId, todos, merge),
-            runSubAgent: (args) => runtime.runSubAgent(args),
-        });
-        return [...builtin, ...meta];
-    });
-
     const primary = configStore.resolvePrimaryRef();
     sessionStore = new SessionStore(appPaths.sessionsDir, primary);
+
+    const getAuthMode = (sessionId) => {
+        try {
+            const session = sessionStore.get(sessionId);
+            return normalizeAuthMode(session.meta.authMode);
+        } catch {
+            return "default";
+        }
+    };
+
+    const baseConfirm = createToolConfirmFn(() => mainWindow);
+
+    const toolRegistry = new ToolRegistry(
+        () => {
+            const builtin = createBuiltinTools({
+                getWorkspace,
+                workspaceMemory,
+                skillLoader,
+                getAgentTools,
+                confirmToolExecution: baseConfirm,
+                getAuthMode,
+            });
+            const meta = createMetaTools({
+                getAgentTools,
+                updateTodos: (sessionId, todos, merge, runId) =>
+                    runtime.updateTodos(sessionId, todos, merge, runId),
+                runSubAgent: (args) => runtime.runSubAgent(args),
+            });
+            return [...builtin, ...meta];
+        },
+        baseConfirm,
+        getAuthMode,
+    );
+
     const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey]);
     runtime = new AgentRuntime(
         sessionStore,

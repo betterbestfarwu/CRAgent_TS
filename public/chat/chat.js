@@ -1,6 +1,5 @@
 (function () {
   var container = document.getElementById('messages');
-  var busyEl = document.getElementById('busy');
 
   function escapeAttr(s) {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -16,7 +15,8 @@
   // Feather-style icons; stroke inherits color so they pick up text color.
   var ICON_COPY = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
   var ICON_CHECK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-  var ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+
+  var todoRunsById = {};
 
   var MATH_DELIMITERS = [
     { left: '$$', right: '$$', display: true },
@@ -157,7 +157,74 @@
     return items;
   }
 
+  function renderTodoBlockHtml(runId) {
+    var entry = todoRunsById[runId];
+    var todos = entry && entry.todos ? entry.todos : [];
+    var active = todos.filter(function (item) {
+      return item.status !== 'cancelled';
+    });
+    if (!active.length) return '';
+    var items = active.map(function (item) {
+      var mark = item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '→' : '○';
+      return (
+        '<li class="todo-inline-item todo-inline-' + escapeAttr(item.status) + '">' +
+          '<span class="todo-inline-mark">' + mark + '</span>' +
+          '<span class="todo-inline-content">' + escapeText(item.content) + '</span>' +
+        '</li>'
+      );
+    }).join('');
+    return (
+      '<div class="todo-inline-block">' +
+        '<div class="todo-inline-header">Tasks</div>' +
+        '<ul class="todo-inline-list">' + items + '</ul>' +
+      '</div>'
+    );
+  }
+
+  function splitRunMessages(runMessages) {
+    var finalIndex = -1;
+    for (var j = runMessages.length - 1; j >= 0; j -= 1) {
+      var candidate = runMessages[j];
+      if (
+        candidate.role === 'assistant' &&
+        !isProcessMessage(candidate) &&
+        hasVisibleAssistantContent(candidate)
+      ) {
+        finalIndex = j;
+        break;
+      }
+    }
+    return {
+      thinkingMessages: finalIndex >= 0 ? runMessages.slice(0, finalIndex) : runMessages,
+      finalReply: finalIndex >= 0 ? runMessages[finalIndex] : null,
+    };
+  }
+
+  function buildRunThinkingItems(messages) {
+    var items = [];
+    var ids = [];
+    messages.forEach(function (msg) {
+      if (hasVisibleAssistantContent(msg) && isProcessMessage(msg)) {
+        items.push({
+          kind: 'assistant-text',
+          content: msg.content || '',
+        });
+      }
+      items = items.concat(collectThinkingItems(msg));
+      ids.push(msg.id);
+    });
+    return { items: items, ids: ids };
+  }
+
   function renderThinkingStep(item) {
+    if (item.kind === 'assistant-text') {
+      return (
+        '<details class="thinking thinking-step">' +
+          '<summary>Thinking · assistant</summary>' +
+          '<div class="thinking-assistant-text">' + window.MD.render(item.content || '') + '</div>' +
+        '</details>'
+      );
+    }
     if (item.kind === 'tool-call') {
       var args = item.arguments || '';
       try { args = JSON.stringify(JSON.parse(args), null, 2); } catch (_) {}
@@ -212,9 +279,13 @@
     var modelId = options.modelId || messageModelId(contentMsg);
     var startedAt = options.startedAt;
     var endedAt = options.endedAt;
+    var runId = options.runId || '';
 
     var wrap = document.createElement('div');
     wrap.className = 'msg assistant assistant-turn';
+    if (runId) {
+      wrap.dataset.runId = runId;
+    }
     if (contentMsg && contentMsg.id) {
       wrap.dataset.id = contentMsg.id;
     }
@@ -224,7 +295,7 @@
 
     var bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.innerHTML = renderThinkingBlockHtml(thinkingItems);
+    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinkingItems);
     if (contentMsg) {
       var contentWrap = document.createElement('div');
       contentWrap.className = 'assistant-turn-content';
@@ -249,11 +320,6 @@
         escapeAttr(contentMsg.id) +
         '" title="复制" aria-label="复制">' +
         ICON_COPY +
-        '</button>' +
-        '<button class="icon-btn" data-action="delete" data-id="' +
-        escapeAttr(contentMsg.id) +
-        '" title="删除" aria-label="删除">' +
-        ICON_TRASH +
         '</button>'
       : '<button class="icon-btn" data-action="copy-thinking" data-thinking-ids="' +
         escapeAttr(thinkingIds.join(',')) +
@@ -375,6 +441,17 @@
     }
     wrap.appendChild(bubble);
 
+    if (msg.role === 'user') {
+      var userActions = document.createElement('div');
+      userActions.className = 'meta user-actions-only';
+      userActions.innerHTML =
+        '<span class="actions">' +
+          '<button class="icon-btn" data-action="copy" data-id="' + escapeAttr(msg.id) + '" title="复制" aria-label="复制">' + ICON_COPY + '</button>' +
+        '</span>';
+      wrap.appendChild(userActions);
+      return wrap;
+    }
+
     var meta = document.createElement('div');
     meta.className = 'meta';
     var time = '';
@@ -382,7 +459,6 @@
     meta.innerHTML = '<span>' + roleLabel(msg.role, msg) + (time ? ' · ' + time : '') + '</span>' +
                      '<span class="actions">' +
                        '<button class="icon-btn" data-action="copy" data-id="' + escapeAttr(msg.id) + '" title="复制" aria-label="复制">' + ICON_COPY + '</button>' +
-                       '<button class="icon-btn" data-action="delete" data-id="' + escapeAttr(msg.id) + '" title="删除" aria-label="删除">' + ICON_TRASH + '</button>' +
                      '</span>';
     wrap.appendChild(meta);
     return wrap;
@@ -422,9 +498,10 @@
     };
   }
 
-  function renderMessageList(list) {
+  function renderMessageList(payload) {
     container.innerHTML = '';
-    var messages = list || [];
+    var messages = Array.isArray(payload) ? payload : (payload && payload.messages) || [];
+    todoRunsById = (!Array.isArray(payload) && payload && payload.todoRuns) || {};
     var index = 0;
     while (index < messages.length) {
       var msg = messages[index];
@@ -433,70 +510,76 @@
         index += 1;
         continue;
       }
+      if (msg.role === 'user') {
+        container.appendChild(buildBubble(msg));
+        var runId = msg.run_id;
+        if (runId) {
+          var runMessages = [];
+          index += 1;
+          while (index < messages.length && messages[index].run_id === runId) {
+            runMessages.push(messages[index]);
+            index += 1;
+          }
+          if (runMessages.length) {
+            var split = splitRunMessages(runMessages);
+            var thinking = buildRunThinkingItems(split.thinkingMessages);
+            var turnModelId = split.finalReply
+              ? messageModelId(split.finalReply)
+              : messageModelId(split.thinkingMessages[split.thinkingMessages.length - 1]);
+            container.appendChild(
+              buildAssistantTurn({
+                thinkingItems: thinking.items,
+                thinkingIds: thinking.ids.concat(split.finalReply ? [split.finalReply.id] : []),
+                contentMsg: split.finalReply,
+                modelId: turnModelId,
+                startedAt: runMessages[0] && runMessages[0].created_at,
+                endedAt: (split.finalReply && split.finalReply.created_at) || (runMessages[runMessages.length - 1] && runMessages[runMessages.length - 1].created_at),
+                runId: runId,
+              }),
+            );
+          }
+          continue;
+        }
+        continue;
+      }
       if (isProcessMessage(msg)) {
-        var items = [];
-        var ids = [];
-        var contentMessages = [];
-        var startedAt = msg.created_at;
-        var endedAt = msg.created_at;
+        var legacyItems = [];
+        var legacyIds = [];
+        var legacyStartedAt = msg.created_at;
+        var legacyEndedAt = msg.created_at;
         while (index < messages.length && isProcessMessage(messages[index])) {
           var current = messages[index];
           if (hasVisibleAssistantContent(current)) {
-            contentMessages.push(Object.assign({}, current, { tool_calls: [] }));
+            legacyItems.push({ kind: 'assistant-text', content: current.content || '' });
           }
-          items = items.concat(collectThinkingItems(current));
-          ids.push(current.id);
-          endedAt = current.created_at || endedAt;
-          if (!startedAt) startedAt = current.created_at;
+          legacyItems = legacyItems.concat(collectThinkingItems(current));
+          legacyIds.push(current.id);
+          legacyEndedAt = current.created_at || legacyEndedAt;
+          if (!legacyStartedAt) legacyStartedAt = current.created_at;
           index += 1;
         }
-
-        var next = messages[index];
-        var finalReply = null;
+        var legacyNext = messages[index];
+        var legacyFinal = null;
         if (
-          next &&
-          next.role === 'assistant' &&
-          !isProcessMessage(next) &&
-          hasVisibleAssistantContent(next)
+          legacyNext &&
+          legacyNext.role === 'assistant' &&
+          !isProcessMessage(legacyNext) &&
+          hasVisibleAssistantContent(legacyNext)
         ) {
-          finalReply = next;
+          legacyFinal = legacyNext;
           index += 1;
         }
-
-        var turnModelId = '';
-        if (finalReply) {
-          turnModelId = messageModelId(finalReply);
-        } else if (contentMessages.length) {
-          turnModelId = messageModelId(contentMessages[contentMessages.length - 1]);
-        }
-
-        if (finalReply) {
-          var turnIds = ids.concat([finalReply.id]);
-          container.appendChild(
-            buildAssistantTurn({
-              thinkingItems: items,
-              thinkingIds: turnIds,
-              contentMsg: finalReply,
-              modelId: turnModelId,
-              startedAt: startedAt,
-              endedAt: finalReply.created_at || endedAt,
-            }),
-          );
-        } else if (items.length) {
-          container.appendChild(
-            buildAssistantTurn({
-              thinkingItems: items,
-              thinkingIds: ids,
-              contentMsg: null,
-              modelId: turnModelId,
-              startedAt: startedAt,
-              endedAt: endedAt,
-            }),
-          );
-        }
-        contentMessages.forEach(function (contentMsg) {
-          container.appendChild(buildBubble(contentMsg));
-        });
+        container.appendChild(
+          buildAssistantTurn({
+            thinkingItems: legacyItems,
+            thinkingIds: legacyIds.concat(legacyFinal ? [legacyFinal.id] : []),
+            contentMsg: legacyFinal,
+            modelId: legacyFinal ? messageModelId(legacyFinal) : '',
+            startedAt: legacyStartedAt,
+            endedAt: legacyFinal ? legacyFinal.created_at : legacyEndedAt,
+            runId: legacyFinal && legacyFinal.run_id ? legacyFinal.run_id : '',
+          }),
+        );
         continue;
       }
       container.appendChild(buildBubble(msg));
@@ -526,9 +609,7 @@
         if (ids.indexOf(id) >= 0) group.remove();
       });
     },
-    setBusy: function (b) {
-      busyEl.hidden = !b;
-    }
+    setBusy: function () {}
   };
 
   function copyToClipboard(text) {

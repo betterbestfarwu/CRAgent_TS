@@ -63,6 +63,9 @@ export class AgentRuntime {
         this.mainWindowGetter = mainWindowGetter;
         this.busyBySession = new Map();
         this.compactingSessions = new Set();
+        this.pendingQueues = new Map();
+        this.abortControllers = new Map();
+        this.cancelledRuns = new Set();
         this.chatCommands = createChatCommandHandlers({
             sessionStore: this.sessionStore,
             emit: (channel, payload) => this.emit(channel, payload),
@@ -169,13 +172,107 @@ export class AgentRuntime {
         );
     }
 
-    updateTodos(sessionId, incoming, merge) {
+    updateTodos(sessionId, incoming, merge, runId) {
         const session = this.sessionStore.get(sessionId);
-        const next = mergeTodos(session.meta.todos || [], incoming, merge);
-        const updated = this.sessionStore.updateTodos(sessionId, next);
-        this.emit(IPC_CHANNELS.onTodosChanged, { sessionId, todos: next });
+        const existingRun =
+            runId && session.meta.todoRuns?.[runId]?.todos
+                ? session.meta.todoRuns[runId].todos
+                : session.meta.todos || [];
+        const next = mergeTodos(existingRun, incoming, merge);
+        const updated = runId
+            ? this.sessionStore.updateTodoRun(sessionId, runId, next)
+            : this.sessionStore.updateTodos(sessionId, next);
+        this.emit(IPC_CHANNELS.onTodosChanged, {
+            sessionId,
+            runId: runId || null,
+            todos: next,
+            todoRuns: updated.meta.todoRuns || {},
+        });
         this.emit(IPC_CHANNELS.onSessionChanged, updated);
         return next;
+    }
+
+    parseSkillInvocation(input) {
+        const match = String(input || "")
+            .trim()
+            .match(/^\/([^\s/]+)(?:\s+([\s\S]*))?$/);
+        if (!match) {
+            return null;
+        }
+        const skillName = match[1];
+        const rest = (match[2] || "").trim();
+        const loaded = this.skillLoader.loadFullText(skillName);
+        if (loaded.startsWith("Error:")) {
+            return null;
+        }
+        return { skillName, rest, loaded };
+    }
+
+    enqueueMessage(sessionId, rawInput, images = []) {
+        const queue = this.pendingQueues.get(sessionId) || [];
+        queue.push({
+            id: randomUUID(),
+            input: rawInput,
+            images,
+            createdAt: new Date().toISOString(),
+        });
+        this.pendingQueues.set(sessionId, queue);
+        this.emit(IPC_CHANNELS.onQueueChanged, { sessionId, queue: [...queue] });
+    }
+
+    dequeueNextMessage(sessionId) {
+        const queue = this.pendingQueues.get(sessionId) || [];
+        if (!queue.length) {
+            return null;
+        }
+        const next = queue.shift();
+        this.pendingQueues.set(sessionId, queue);
+        this.emit(IPC_CHANNELS.onQueueChanged, { sessionId, queue: [...queue] });
+        return next;
+    }
+
+    removeQueuedMessage(sessionId, messageId) {
+        const queue = (this.pendingQueues.get(sessionId) || []).filter(
+            (item) => item.id !== messageId,
+        );
+        this.pendingQueues.set(sessionId, queue);
+        this.emit(IPC_CHANNELS.onQueueChanged, { sessionId, queue: [...queue] });
+    }
+
+    cancelRun(sessionId) {
+        this.cancelledRuns.add(sessionId);
+        this.abortControllers.get(sessionId)?.abort();
+        this.pendingQueues.set(sessionId, []);
+        this.emit(IPC_CHANNELS.onQueueChanged, { sessionId, queue: [] });
+    }
+
+    async processQueue(sessionId) {
+        if (this.busyBySession.get(sessionId)) {
+            return;
+        }
+        const next = this.dequeueNextMessage(sessionId);
+        if (!next) {
+            return;
+        }
+        await this.dispatchUserMessage(sessionId, next.input, next.images);
+    }
+
+    createAbortSignal(sessionId) {
+        const controller = new AbortController();
+        this.abortControllers.set(sessionId, controller);
+        return controller.signal;
+    }
+
+    clearAbortSignal(sessionId) {
+        this.abortControllers.delete(sessionId);
+    }
+
+    wasRunCancelled(sessionId) {
+        if (!this.cancelledRuns.has(sessionId)) {
+            return false;
+        }
+        this.cancelledRuns.delete(sessionId);
+        return true;
     }
 
     async runSubAgent({
@@ -286,6 +383,15 @@ export class AgentRuntime {
             return;
         }
         if (this.busyBySession.get(sessionId)) {
+            this.enqueueMessage(sessionId, rawInput, storedImages);
+            return { queued: true };
+        }
+        await this.dispatchUserMessage(sessionId, rawInput, storedImages);
+    }
+
+    async dispatchUserMessage(sessionId, rawInput, storedImages = []) {
+        const input = rawInput.trim();
+        if (!input && !storedImages.length) {
             return;
         }
 
@@ -306,23 +412,49 @@ export class AgentRuntime {
                 this.emit(IPC_CHANNELS.onSessionChanged, session);
             }
             await this.chatCommands.execute(commandId, sessionId, helpRunId);
+            await this.processQueue(sessionId);
             return;
         }
 
+        const skillInvoke = this.parseSkillInvocation(input);
         const runId = randomUUID();
+        let messageContent = input;
+        if (skillInvoke) {
+            messageContent =
+                skillInvoke.rest ||
+                `请按照已加载的 skill「${skillInvoke.skillName}」执行任务。`;
+        }
+
         const userMessage = {
             id: randomUUID(),
             role: "user",
-            content: input,
+            content: messageContent,
             createdAt: new Date().toISOString(),
             runId,
+            ...(skillInvoke
+                ? { skillName: skillInvoke.skillName, skillLoaded: true }
+                : {}),
             ...(storedImages.length ? { images: storedImages } : {}),
         };
         let session = this.sessionStore.appendMessage(sessionId, userMessage);
+        if (skillInvoke) {
+            session = this.trackToolSideEffects(
+                session,
+                {
+                    function: {
+                        name: "load_skill",
+                        arguments: JSON.stringify({ name: skillInvoke.skillName }),
+                    },
+                },
+                skillInvoke.loaded,
+            );
+            this.sessionStore.save(session);
+        }
         this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: userMessage });
         this.emit(IPC_CHANNELS.onSessionChanged, session);
 
         await this.runLoop(session, runId);
+        await this.processQueue(sessionId);
     }
 
     clearLlmContext(sessionId) {
@@ -618,6 +750,7 @@ export class AgentRuntime {
     async runLoop(session, runId) {
         const sessionId = session.meta.id;
         this.setBusy(sessionId, true);
+        const signal = this.createAbortSignal(sessionId);
         try {
             const agent = this.defaultAgent();
             const maxRounds = Math.max(1, agent?.max_tool_rounds ?? 8);
@@ -625,6 +758,9 @@ export class AgentRuntime {
             let round = 0;
 
             while (round < maxRounds) {
+                if (this.wasRunCancelled(sessionId)) {
+                    return;
+                }
                 session = this.sessionStore.get(sessionId);
                 session = this.applyMicroCompact(session);
                 await this.maybeAutoCompact(sessionId);
@@ -638,7 +774,11 @@ export class AgentRuntime {
                     model,
                     modelChain: this.modelChainForSession(session),
                     tools: toolsEnabled ? this.toolRegistry.schemas() : [],
+                    signal,
                 });
+                if (this.wasRunCancelled(sessionId)) {
+                    return;
+                }
                 const usedModel = choice.usedModel || model;
                 let assistant = withAssistantModel({ ...choice.message, runId }, usedModel);
                 if (choice.usedFallback && choice.usedModel) {
@@ -656,10 +796,21 @@ export class AgentRuntime {
                 }
 
                 for (const call of calls) {
+                    if (this.wasRunCancelled(sessionId)) {
+                        return;
+                    }
                     const result = await this.toolRegistry.execute(call, {
                         sessionId,
                         runId,
                     });
+                    if (call.function.name === "TodoWrite") {
+                        this.emit(IPC_CHANNELS.onTodosChanged, {
+                            sessionId,
+                            runId,
+                            todos: this.sessionStore.get(sessionId).meta.todoRuns?.[runId]?.todos || [],
+                            todoRuns: this.sessionStore.get(sessionId).meta.todoRuns || {},
+                        });
+                    }
                     if (
                         call.function.name === "download_skill" ||
                         call.function.name === "delete_skill"
@@ -697,11 +848,16 @@ export class AgentRuntime {
             this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: limitMessage });
             this.emit(IPC_CHANNELS.onSessionChanged, session);
         } catch (error) {
+            if (error?.name === "AbortError" || this.cancelledRuns.has(sessionId)) {
+                this.cancelledRuns.delete(sessionId);
+                return;
+            }
             this.emit(IPC_CHANNELS.onError, {
                 sessionId,
                 message: error instanceof Error ? error.message : String(error),
             });
         } finally {
+            this.clearAbortSignal(sessionId);
             this.setBusy(sessionId, false);
         }
     }

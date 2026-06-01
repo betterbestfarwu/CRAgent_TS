@@ -6,7 +6,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export async function resolve(specifier, context, nextResolve) {
     if (specifier.startsWith("@shared/")) {
         const subpath = specifier.slice("@shared/".length);
-        const target = path.join(root, "src/shared", `${subpath}.js`);
+        const file = subpath.endsWith(".js") ? subpath : `${subpath}.js`;
+        const target = path.join(root, "src/shared", file);
         return nextResolve(pathToFileURL(target).href, context);
     }
     return nextResolve(specifier, context);

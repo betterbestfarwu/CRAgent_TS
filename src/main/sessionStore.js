@@ -107,6 +107,23 @@ export class SessionStore {
         this.save(session);
         return session;
     }
+    updateTodoRun(sessionId, runId, todos) {
+        const session = this.get(sessionId);
+        session.meta.todoRuns = session.meta.todoRuns || {};
+        session.meta.todoRuns[runId] = {
+            todos,
+            updatedAt: new Date().toISOString(),
+        };
+        session.meta.todos = todos;
+        this.save(session);
+        return session;
+    }
+    updateAuthMode(sessionId, authMode) {
+        const session = this.get(sessionId);
+        session.meta.authMode = authMode;
+        this.save(session);
+        return session;
+    }
     persist(session) {
         fs.writeFileSync(path.join(this.sessionsDir, `${session.meta.id}.json`), JSON.stringify(session, null, 2), "utf-8");
     }

@@ -50,11 +50,13 @@ export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
         if (!todos.length && args.merge !== false) {
           throw new Error("todos must contain at least one item");
         }
-        const next = updateTodos(sessionId, todos, Boolean(args.merge));
+        const next = updateTodos(sessionId, todos, Boolean(args.merge), context?.runId);
+        const autoRunHint =
+          "\n\n请立即开始执行上述 todos：将第一个 pending 项标记为 in_progress，逐步完成并在每项状态变化时调用 TodoWrite(merge=true) 更新。";
         const summary = next.length
           ? next.map((item) => `[${item.status}] ${item.content}`).join("\n")
           : "(empty)";
-        return `Updated todo list (${next.length} items):\n${summary}`;
+        return `Updated todo list (${next.length} items):\n${summary}${autoRunHint}`;
       },
     },
     {

@@ -31,12 +31,14 @@ function toWireMessage(message) {
   };
 }
 
-export function ChatView({ messages, busy, onDelete, onOpenImage }) {
+export function ChatView({ messages, todoRuns, busy, onDelete, onOpenImage }) {
   const iframeRef = useRef(null);
   const readyRef = useRef(false);
   const pendingRef = useRef([]);
   const messagesRef = useRef(messages);
+  const todoRunsRef = useRef(todoRuns);
   messagesRef.current = messages;
+  todoRunsRef.current = todoRuns;
 
   const syncIframeLayout = useCallback(() => {
     injectChatLayout(iframeRef.current?.contentDocument ?? null);
@@ -52,10 +54,10 @@ export function ChatView({ messages, busy, onDelete, onOpenImage }) {
   }, []);
 
   const syncMessages = useCallback(() => {
-    postToChat(
-      "renderAll",
-      (messagesRef.current || []).map(toWireMessage),
-    );
+    postToChat("renderAll", {
+      messages: (messagesRef.current || []).map(toWireMessage),
+      todoRuns: todoRunsRef.current || {},
+    });
   }, [postToChat]);
 
   useEffect(() => {
@@ -102,7 +104,7 @@ export function ChatView({ messages, busy, onDelete, onOpenImage }) {
   useEffect(() => {
     if (!readyRef.current) return;
     syncMessages();
-  }, [messages, syncMessages]);
+  }, [messages, todoRuns, syncMessages]);
 
   useEffect(() => {
     if (!readyRef.current) return;
@@ -114,7 +116,7 @@ export function ChatView({ messages, busy, onDelete, onOpenImage }) {
       ref={iframeRef}
       className="chat-frame"
       title="CRAgent chat"
-      src="./chat/chat.html?v=8"
+      src="./chat/chat.html?v=11"
     />
   );
 }

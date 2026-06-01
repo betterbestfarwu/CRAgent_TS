@@ -83,9 +83,111 @@ export function formatTokens(n) {
         return `${(n / 1_000_000).toFixed(1)}M`;
     }
     if (n >= 1000) {
-        return `${(n / 1000).toFixed(1)}k`;
+        return `${(n / 1000).toFixed(1)}K`;
     }
     return `${n}`;
+}
+
+export const CONTEXT_BREAKDOWN_CATEGORIES = [
+    { id: "systemPrompt", label: "System prompt", color: "#9ca3af" },
+    { id: "toolDefinitions", label: "Tool definitions", color: "#a855f7" },
+    { id: "rules", label: "Rules", color: "#22c55e" },
+    { id: "skills", label: "Skills", color: "#eab308" },
+    { id: "mcp", label: "MCP", color: "#ec4899" },
+    { id: "subagentDefinitions", label: "Subagent definitions", color: "#3b82f6" },
+    { id: "conversation", label: "Conversation", color: "#ea580c" },
+];
+
+const AGENTS_RULES_ESTIMATE = 3700;
+const TOKENS_PER_TOOL_SCHEMA = 620;
+
+function estimateRulesTokens(todos) {
+    let tokens = AGENTS_RULES_ESTIMATE;
+    if (todos?.length) {
+        const lines = todos.map((item) => `- [${item.status}] ${item.id}: ${item.content}`);
+        tokens += estimateTextTokens(`<active_todos>\n${lines.join("\n")}\n</active_todos>`);
+    }
+    return tokens;
+}
+
+function estimateToolDefinitionsTokens(agentTools = {}) {
+    if (agentTools.enable_tools === false) {
+        return 0;
+    }
+    let count = 1;
+    if (agentTools.enable_file_tools !== false) {
+        count += 3;
+    }
+    count += 4;
+    if (agentTools.enable_skills !== false) {
+        count += 3;
+    }
+    if (agentTools.allow_sub_agents) {
+        count += 1;
+    }
+    return count * TOKENS_PER_TOOL_SCHEMA;
+}
+
+export function estimateSessionContextBreakdown(session, model, options = {}) {
+    const usage = estimateSessionContextUsage(session, model, options);
+    const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+    const active = session.messages
+        .slice(fromIndex)
+        .filter((message) => !isContextDividerMessage(message));
+
+    let conversationTokens = estimateMessagesTokens(active);
+    if (session.meta.contextSummary) {
+        conversationTokens += estimateTextTokens(session.meta.contextSummary);
+    }
+    if (session.meta.postCompactContext) {
+        conversationTokens += estimateTextTokens(session.meta.postCompactContext);
+    }
+    if (session.meta.sessionMemory) {
+        conversationTokens += estimateTextTokens(session.meta.sessionMemory);
+    }
+
+    const agentTools = options.agentTools || {};
+    const toolDefinitions = estimateToolDefinitionsTokens(agentTools);
+    const skills =
+        options.skillsCatalogText && agentTools.enable_skills !== false
+            ? estimateTextTokens(options.skillsCatalogText)
+            : agentTools.enable_skills !== false
+              ? 1200
+              : 0;
+    const rules = estimateRulesTokens(session.meta.todos);
+    const mcp = options.mcpTokens ?? 0;
+    const subagentDefinitions = agentTools.allow_sub_agents ? 406 : 0;
+
+    let systemPrompt = usage.tokens - conversationTokens - toolDefinitions - skills - rules - mcp - subagentDefinitions;
+    systemPrompt = Math.max(487, systemPrompt);
+
+    const byId = {
+        systemPrompt,
+        toolDefinitions,
+        rules,
+        skills,
+        mcp,
+        subagentDefinitions,
+        conversation: conversationTokens,
+    };
+
+    const categories = CONTEXT_BREAKDOWN_CATEGORIES.map((category) => ({
+        ...category,
+        tokens: byId[category.id] ?? 0,
+    })).filter((category) => category.tokens > 0);
+
+    const categorizedTotal = categories.reduce((sum, category) => sum + category.tokens, 0);
+    if (categorizedTotal !== usage.tokens && categories.length) {
+        const systemCategory = categories.find((category) => category.id === "systemPrompt");
+        if (systemCategory) {
+            systemCategory.tokens += usage.tokens - categorizedTotal;
+        }
+    }
+
+    return {
+        ...usage,
+        categories,
+    };
 }
 
 /** @deprecated Use estimateSessionContextUsage or estimateMessagesTokens */

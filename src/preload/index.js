@@ -15,6 +15,9 @@ const api = {
     deleteSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.deleteSession, sessionId),
     deleteMessages: (args) => ipcRenderer.invoke(IPC_CHANNELS.deleteMessages, args),
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),
+    cancelRun: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.cancelRun, sessionId),
+    removeQueuedMessage: (args) => ipcRenderer.invoke(IPC_CHANNELS.removeQueuedMessage, args),
+    updateAuthMode: (args) => ipcRenderer.invoke(IPC_CHANNELS.updateAuthMode, args),
     updateModel: (args) => ipcRenderer.invoke(IPC_CHANNELS.updateModel, args),
     updateConfig: (next) => ipcRenderer.invoke(IPC_CHANNELS.updateConfig, next),
     syncProviderModels: (args) => ipcRenderer.invoke(IPC_CHANNELS.syncProviderModels, args),
@@ -23,7 +26,10 @@ const api = {
     onBusyChanged: (callback) => subscribe(IPC_CHANNELS.onBusyChanged, callback),
     onError: (callback) => subscribe(IPC_CHANNELS.onError, callback),
     onTodosChanged: (callback) => subscribe(IPC_CHANNELS.onTodosChanged, callback),
+    onQueueChanged: (callback) => subscribe(IPC_CHANNELS.onQueueChanged, callback),
     onContextWarningChanged: (callback) => subscribe(IPC_CHANNELS.onContextWarningChanged, callback),
+    onConfirmRequest: (callback) => subscribe(IPC_CHANNELS.onConfirmRequest, callback),
+    respondConfirm: (payload) => ipcRenderer.send(IPC_CHANNELS.confirmResponse, payload),
     onOpenSettings: (callback) => subscribe("ui:openSettings", callback),
 };
 contextBridge.exposeInMainWorld("cragent", api);

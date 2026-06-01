@@ -100,7 +100,8 @@ function makeRuntimeHarness(options = {}) {
     const toolRegistry = new ToolRegistry(() => {
         const meta = createMetaTools({
             getAgentTools: () => configStore.get().agents.list[0].tools,
-            updateTodos: (sessionId, todos, merge) => runtime.updateTodos(sessionId, todos, merge),
+            updateTodos: (sessionId, todos, merge, runId) =>
+                runtime.updateTodos(sessionId, todos, merge, runId),
             runSubAgent: (args) => runtime.runSubAgent(args),
         });
         return meta;
@@ -288,6 +289,108 @@ test("runLoop annotates assistant message when fallback model is used", async ()
     assert.ok(assistant);
     assert.match(assistant.content, /已自动切换至备用模型 openai\/gpt-5/);
     assert.match(assistant.content, /main reply/);
+});
+
+test("runLoop auto-progresses todos across TodoWrite rounds", async () => {
+    let llmRound = 0;
+    const { session, runtime, events, sessionStore } = makeRuntimeHarness({
+        chatImpl: () => {
+            llmRound += 1;
+            if (llmRound === 1) {
+                return {
+                    message: {
+                        id: "assistant-todo-create",
+                        role: "assistant",
+                        content: "",
+                        toolCalls: [
+                            {
+                                id: "call-create",
+                                function: {
+                                    name: "TodoWrite",
+                                    arguments: JSON.stringify({
+                                        merge: false,
+                                        todos: [
+                                            { id: "s1", content: "Step one", status: "pending" },
+                                            { id: "s2", content: "Step two", status: "pending" },
+                                        ],
+                                    }),
+                                },
+                            },
+                        ],
+                        createdAt: new Date().toISOString(),
+                    },
+                };
+            }
+            if (llmRound === 2) {
+                return {
+                    message: {
+                        id: "assistant-todo-progress",
+                        role: "assistant",
+                        content: "",
+                        toolCalls: [
+                            {
+                                id: "call-progress",
+                                function: {
+                                    name: "TodoWrite",
+                                    arguments: JSON.stringify({
+                                        merge: true,
+                                        todos: [
+                                            { id: "s1", content: "Step one", status: "completed" },
+                                            { id: "s2", content: "Step two", status: "in_progress" },
+                                        ],
+                                    }),
+                                },
+                            },
+                        ],
+                        createdAt: new Date().toISOString(),
+                    },
+                };
+            }
+            if (llmRound === 3) {
+                return {
+                    message: {
+                        id: "assistant-todo-finish",
+                        role: "assistant",
+                        content: "",
+                        toolCalls: [
+                            {
+                                id: "call-finish",
+                                function: {
+                                    name: "TodoWrite",
+                                    arguments: JSON.stringify({
+                                        merge: true,
+                                        todos: [
+                                            { id: "s2", content: "Step two", status: "completed" },
+                                        ],
+                                    }),
+                                },
+                            },
+                        ],
+                        createdAt: new Date().toISOString(),
+                    },
+                };
+            }
+            return {
+                message: {
+                    id: "assistant-done",
+                    role: "assistant",
+                    content: "All todos completed.",
+                    createdAt: new Date().toISOString(),
+                },
+            };
+        },
+    });
+
+    await runtime.runLoop(session, "run-todo-auto");
+
+    const updated = sessionStore.get(session.meta.id);
+    const byId = Object.fromEntries(updated.meta.todoRuns["run-todo-auto"].todos.map((t) => [t.id, t]));
+    assert.equal(byId.s1.status, "completed");
+    assert.equal(byId.s2.status, "completed");
+    assert.ok(events.todosChanged.length >= 3);
+    const toolMessages = updated.messages.filter((m) => m.role === "tool" && m.name === "TodoWrite");
+    assert.equal(toolMessages.length, 3);
+    assert.match(toolMessages[0].content, /请立即开始执行上述 todos/);
 });
 
 test("messagesForLLM injects active todos into system prompt", () => {

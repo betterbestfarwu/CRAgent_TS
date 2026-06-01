@@ -136,15 +136,8 @@ export class LlmClient {
         };
     }
 
-    async chatOnce({ messages, model, tools = [] }) {
+    async chatOnce({ messages, model, tools = [], signal }) {
         const provider = this.resolveProviderOrThrow(model);
-
-        const last = messages[messages.length - 1];
-        if (last?.role === "user" && last.content.startsWith("/")) {
-            return {
-                message: this.assistantMessage("已识别 slash 指令。", undefined, model.modelId),
-            };
-        }
 
         const body = {
             model: model.modelId,
@@ -166,6 +159,7 @@ export class LlmClient {
                 Authorization: `Bearer ${provider.apiKey}`,
             },
             body: JSON.stringify(body),
+            ...(signal ? { signal } : {}),
         });
 
         if (!response.ok) {
@@ -189,18 +183,21 @@ export class LlmClient {
         };
     }
 
-    async chat({ messages, model, modelChain = [], tools = [] }) {
+    async chat({ messages, model, modelChain = [], tools = [], signal }) {
         const chain = modelChain.length ? modelChain : [model];
         let lastError = null;
         for (const currentModel of chain) {
             try {
-                const result = await this.chatOnce({ messages, model: currentModel, tools });
+                const result = await this.chatOnce({ messages, model: currentModel, tools, signal });
                 return {
                     ...result,
                     usedModel: currentModel,
                     usedFallback: chain.indexOf(currentModel) > 0,
                 };
             } catch (error) {
+                if (error?.name === "AbortError") {
+                    throw error;
+                }
                 lastError = error;
                 if (!isRetryableLlmError(error)) {
                     return {

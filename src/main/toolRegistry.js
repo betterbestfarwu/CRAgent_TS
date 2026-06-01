@@ -1,7 +1,10 @@
+import { shouldRequireToolConfirmation } from "./authPolicy.js";
+
 export class ToolRegistry {
-    constructor(toolFactory, confirmToolExecution) {
+    constructor(toolFactory, confirmToolExecution, getAuthMode = () => "default") {
         this.toolFactory = toolFactory;
         this.confirmToolExecution = confirmToolExecution;
+        this.getAuthMode = getAuthMode;
     }
 
     activeTools() {
@@ -31,7 +34,7 @@ export class ToolRegistry {
             return `Error: invalid tool arguments ${error.message}`;
         }
 
-        if (tool.requiresConfirmation) {
+        if (shouldRequireToolConfirmation(tool, () => this.getAuthMode(context.sessionId))) {
             const approved = await this.confirmToolExecution(
                 tool.name,
                 JSON.stringify(args, null, 2),
