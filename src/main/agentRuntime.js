@@ -10,6 +10,10 @@ import {
     withAssistantModel,
 } from "@shared/chatMessages";
 import { IPC_CHANNELS } from "@shared/ipc";
+import {
+    buildComputerUsePrompt,
+    parseComputerUseInvocation,
+} from "@shared/chatCommands.js";
 import { expandAtMentionsToAbsolute } from "./atMentionExpand.js";
 import { normalizeAtMentions } from "@shared/atMention.js";
 import {
@@ -79,6 +83,8 @@ import {
     estimateTextTokens,
 } from "@shared/tokenEstimator.js";
 import { ipcPayloadForRenderer } from "./rendererSession.js";
+import { normalizeToolResult, toolResultContent } from "@shared/toolResult.js";
+import { computerUseSystemPromptSection } from "./tools/computerUseTools.js";
 
 const HOOK_LOG_LIMIT = 80;
 
@@ -208,6 +214,9 @@ export class AgentRuntime {
         const agent = this.defaultAgent();
         if (agent?.tools?.enable_skills !== false) {
             parts.push(this.skillLoader.systemPromptSection());
+        }
+        if (agent?.tools?.enable_computer_use === true) {
+            parts.push(computerUseSystemPromptSection());
         }
         if (this.executionMode() === "plan") {
             const workspace = resolveSessionWorkspace(
@@ -590,7 +599,8 @@ export class AgentRuntime {
         }
 
         let result = await this.toolRegistry.execute(call, context);
-        const failed = String(result).startsWith("Error:");
+        let normalized = normalizeToolResult(result);
+        const failed = normalized.content.startsWith("Error:");
 
         if (failed) {
             const failHook = await this.hookRunner.run(
@@ -599,15 +609,17 @@ export class AgentRuntime {
                     tool_name: toolName,
                     tool_input: toolInput,
                     tool_use_id: call.id,
-                    error: String(result),
+                    error: normalized.content,
                     ...hookExtras,
                 }),
                 { matchQuery: toolName, signal },
             );
             if (failHook.additionalContext) {
-                result = `${result}\n\n${failHook.additionalContext}`;
+                normalized = normalizeToolResult(
+                    `${normalized.content}\n\n${failHook.additionalContext}`,
+                );
             }
-            return result;
+            return normalized;
         }
 
         const postHook = await this.hookRunner.run(
@@ -615,20 +627,20 @@ export class AgentRuntime {
             this.hookRunner.buildBaseInput(sessionId, "PostToolUse", {
                 tool_name: toolName,
                 tool_input: toolInput,
-                tool_response: result,
+                tool_response: normalized.content,
                 tool_use_id: call.id,
                 ...hookExtras,
             }),
             { matchQuery: toolName, signal },
         );
         if (postHook.updatedToolOutput !== undefined) {
-            result =
-                typeof postHook.updatedToolOutput === "string"
-                    ? postHook.updatedToolOutput
-                    : JSON.stringify(postHook.updatedToolOutput, null, 2);
+            normalized = normalizeToolResult(postHook.updatedToolOutput);
         }
         if (postHook.additionalContext) {
-            result = `${result}\n\n${postHook.additionalContext}`;
+            normalized = {
+                ...normalized,
+                content: `${normalized.content}\n\n${postHook.additionalContext}`,
+            };
         }
 
         if (toolName === "bash" && toolInput.command) {
@@ -636,14 +648,14 @@ export class AgentRuntime {
                 "AfterShellExecution",
                 this.hookRunner.buildBaseInput(sessionId, "AfterShellExecution", {
                     command: String(toolInput.command),
-                    output: result,
+                    output: normalized.content,
                     ...hookExtras,
                 }),
                 { matchQuery: String(toolInput.command), signal },
             );
         }
 
-        return result;
+        return normalized;
     }
 
     async runSubAgent({
@@ -755,12 +767,14 @@ export class AgentRuntime {
                 ) {
                     this.skillLoader.reload();
                 }
+                const normalized = normalizeToolResult(result);
                 messages.push({
                     id: randomUUID(),
                     role: "tool",
                     name: call.function.name,
                     toolCallId: call.id,
-                    content: result,
+                    content: normalized.content,
+                    ...(normalized.images ? { images: normalized.images } : {}),
                     createdAt: new Date().toISOString(),
                     runId: subRunId,
                 });
@@ -831,11 +845,17 @@ export class AgentRuntime {
         }
 
         const skillInvoke = this.parseSkillInvocation(input);
+        const computerUseInvoke = parseComputerUseInvocation(input);
         const runId = randomUUID();
         await this.ensureSessionStartHook(sessionId);
         const projectRoot = this.sessionStore.getProjectDirectory(sessionId);
         let messageContent = expandAtMentionsToAbsolute(input, projectRoot);
-        if (skillInvoke) {
+        if (computerUseInvoke) {
+            const agent = this.defaultAgent();
+            messageContent = buildComputerUsePrompt(computerUseInvoke.rest, {
+                enabled: agent?.tools?.enable_computer_use === true,
+            });
+        } else if (skillInvoke) {
             messageContent = skillInvoke.rest
                 ? expandAtMentionsToAbsolute(skillInvoke.rest, projectRoot)
                 : `请按照已加载的 skill「${skillInvoke.skillName}」执行任务。`;
@@ -1172,7 +1192,7 @@ export class AgentRuntime {
             } catch {
                 args = {};
             }
-            const parsed = parseReadFileResult(result, args);
+            const parsed = parseReadFileResult(toolResultContent(result), args);
             if (parsed) {
                 trackReadFile(session, parsed.path, parsed.content, contextConfig);
                 this.sessionStore.save(session);
@@ -1559,19 +1579,21 @@ export class AgentRuntime {
                     ) {
                         this.skillLoader.reload();
                     }
+                    const normalized = normalizeToolResult(result);
                     const toolMessage = {
                         id: randomUUID(),
                         role: "tool",
                         name: call.function.name,
                         toolCallId: call.id,
-                        content: result,
+                        content: normalized.content,
+                        ...(normalized.images ? { images: normalized.images } : {}),
                         createdAt: new Date().toISOString(),
                         runId,
                     };
                     session = this.sessionStore.appendMessage(sessionId, toolMessage);
                     this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: toolMessage });
                     this.emit(IPC_CHANNELS.onSessionChanged, session);
-                    session = this.trackToolSideEffects(session, call, result);
+                    session = this.trackToolSideEffects(session, call, normalized);
                 }
                 round += 1;
             }

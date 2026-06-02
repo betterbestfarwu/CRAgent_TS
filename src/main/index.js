@@ -23,6 +23,7 @@ import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
 import { registerPlanApprovalBridge, requestPlanApproval } from "./planApprovalBridge.js";
 import { readPlanApprovalDraft, ensurePlansDirectory, getPlanFilePath, writePlanFile } from "./planMode.js";
 import { createPlanModeTools } from "./tools/planModeTools.js";
+import { createComputerUseTools } from "./tools/computerUseTools.js";
 import fs from "node:fs";
 import { normalizeAuthMode } from "@shared/authMode.js";
 import { listProjectDirectory } from "./projectBrowse.js";
@@ -438,7 +439,11 @@ function bootstrap() {
                 getAgentWorkspace,
                 configStore,
             });
-            return [...builtin, ...buildMcpTools(), ...meta, ...planTools];
+            const computerTools = createComputerUseTools({
+                getAgentTools,
+                confirmToolExecution: baseConfirm,
+            });
+            return [...builtin, ...buildMcpTools(), ...meta, ...planTools, ...computerTools];
         },
         baseConfirm,
         getAuthMode,

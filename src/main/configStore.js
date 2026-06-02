@@ -110,6 +110,7 @@ export class ConfigStore {
                             enable_file_tools: true,
                             enable_skills: true,
                             enable_mcp: true,
+                            enable_computer_use: false,
                             allow_sub_agents: false,
                         },
                     },

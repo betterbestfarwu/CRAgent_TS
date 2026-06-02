@@ -7,6 +7,29 @@ function createLlmHttpError(status, bodyText) {
     return error;
 }
 
+export function messagesToApiPayloads(messages) {
+    const payloads = [];
+    for (const message of messages) {
+        payloads.push(messageToApiPayload(message));
+        if (message.role === "tool" && message.images?.length) {
+            const parts = [
+                {
+                    type: "text",
+                    text: `[Visual output from tool ${message.name || "tool"}]`,
+                },
+            ];
+            for (const image of message.images) {
+                parts.push({
+                    type: "image_url",
+                    image_url: { url: image.dataUrl },
+                });
+            }
+            payloads.push({ role: "user", content: parts });
+        }
+    }
+    return payloads;
+}
+
 function messageToApiPayload(message) {
     const payload = { role: message.role };
     if (message.role === "assistant") {
@@ -79,7 +102,7 @@ export class LlmClient {
         const provider = this.resolveProviderOrThrow(model);
         const body = {
             model: model.modelId,
-            messages: messages.map(messageToApiPayload),
+            messages: messagesToApiPayloads(messages),
         };
 
         logOutgoingMessages("complete", model, body.messages);
@@ -158,7 +181,7 @@ export class LlmClient {
 
         const body = {
             model: model.modelId,
-            messages: messages.map(messageToApiPayload),
+            messages: messagesToApiPayloads(messages),
         };
         if (tools.length) {
             body.tools = tools;

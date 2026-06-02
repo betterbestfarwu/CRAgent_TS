@@ -3,7 +3,15 @@ export const SUB_AGENT_TYPES = {
         label: "generalPurpose",
         description:
             "General-purpose agent for researching questions, searching code, and executing multi-step tasks.",
-        excludeTools: ["Task"],
+        excludeTools: [
+            "Task",
+            "computer_screenshot",
+            "computer_move",
+            "computer_click",
+            "computer_type",
+            "computer_key",
+            "computer_scroll",
+        ],
     },
     explore: {
         label: "explore",

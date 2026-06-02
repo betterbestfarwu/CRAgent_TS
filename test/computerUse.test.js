@@ -1,0 +1,156 @@
+import assert from "node:assert/strict";
+import { describe, it, afterEach } from "node:test";
+import {
+    isToolErrorResult,
+    normalizeToolResult,
+    toolResultContent,
+} from "../src/shared/toolResult.js";
+import { messagesToApiPayloads } from "../src/main/llmClient.js";
+import { createComputerUseTools } from "../src/main/tools/computerUseTools.js";
+import { isComputerUseSupported } from "../src/main/computerUse.js";
+import {
+    dipPointToPlatformPoint,
+    dipRectToPlatformRect,
+    getDisplayLayout,
+    resolveDisplayTarget,
+    resolveGlobalPoint,
+    setComputerUseScreenGetter,
+} from "../src/main/computerUseDisplays.js";
+
+function mockScreen() {
+    const displays = [
+        {
+            id: 1,
+            label: "Built-in",
+            bounds: { x: 0, y: 0, width: 1440, height: 900 },
+            workArea: { x: 0, y: 25, width: 1440, height: 875 },
+            scaleFactor: 2,
+        },
+        {
+            id: 2,
+            label: "External",
+            bounds: { x: 1440, y: 0, width: 1920, height: 1080 },
+            workArea: { x: 1440, y: 0, width: 1920, height: 1080 },
+            scaleFactor: 1,
+        },
+    ];
+    return {
+        getAllDisplays: () => displays,
+        getPrimaryDisplay: () => displays[0],
+        dipToScreenPoint: (point) => ({
+            x: Math.round(point.x * 2),
+            y: Math.round(point.y * 2),
+        }),
+    };
+}
+
+describe("toolResult", () => {
+    it("normalizes string results", () => {
+        assert.deepEqual(normalizeToolResult("ok"), { content: "ok", images: undefined });
+    });
+
+    it("normalizes structured results with images", () => {
+        const image = { mimeType: "image/png", dataUrl: "data:image/png;base64,abc" };
+        assert.deepEqual(normalizeToolResult({ text: "shot", images: [image] }), {
+            content: "shot",
+            images: [image],
+        });
+    });
+
+    it("detects tool errors", () => {
+        assert.equal(isToolErrorResult("Error: nope"), true);
+        assert.equal(isToolErrorResult({ text: "Error: nope" }), true);
+    });
+
+    it("extracts text content", () => {
+        assert.equal(toolResultContent({ content: "hello" }), "hello");
+    });
+});
+
+describe("llmClient messagesToApiPayloads", () => {
+    it("expands tool images into a follow-up user message for the API", () => {
+        const payloads = messagesToApiPayloads([
+            {
+                role: "tool",
+                name: "computer_screenshot",
+                toolCallId: "call_1",
+                content: "Desktop screenshot captured.",
+                images: [{ mimeType: "image/png", dataUrl: "data:image/png;base64,abc" }],
+            },
+        ]);
+
+        assert.equal(payloads.length, 2);
+        assert.equal(payloads[0].role, "tool");
+        assert.equal(payloads[0].content, "Desktop screenshot captured.");
+        assert.equal(payloads[1].role, "user");
+        assert.equal(Array.isArray(payloads[1].content), true);
+        assert.equal(payloads[1].content[1].type, "image_url");
+    });
+});
+
+describe("computer use displays", () => {
+    afterEach(() => {
+        setComputerUseScreenGetter(null);
+    });
+
+    it("maps global points to display indices", () => {
+        setComputerUseScreenGetter(mockScreen());
+        const layout = getDisplayLayout();
+        assert.equal(layout.displays.length, 2);
+        assert.equal(layout.virtualBounds.width, 3360);
+
+        const primaryPoint = resolveGlobalPoint(100, 100);
+        assert.equal(primaryPoint.displayIndex, 0);
+
+        const externalPoint = resolveGlobalPoint(1500, 200);
+        assert.equal(externalPoint.displayIndex, 1);
+
+        const outside = resolveGlobalPoint(4000, 200);
+        assert.equal(outside.displayIndex, null);
+    });
+
+    it("resolves display targets by index", () => {
+        setComputerUseScreenGetter(mockScreen());
+        const target = resolveDisplayTarget("1");
+        assert.equal(target.mode, "single");
+        assert.equal(target.display.index, 1);
+        assert.equal(target.display.bounds.x, 1440);
+    });
+
+    it("converts dip points and rects to platform coordinates", () => {
+        setComputerUseScreenGetter(mockScreen());
+        assert.deepEqual(dipPointToPlatformPoint(10, 20), { x: 20, y: 40 });
+        assert.deepEqual(dipRectToPlatformRect({ x: 0, y: 0, width: 100, height: 50 }), {
+            x: 0,
+            y: 0,
+            width: 200,
+            height: 100,
+        });
+    });
+});
+
+describe("computer use tools", () => {
+    it("registers tools only when enable_computer_use is true", () => {
+        if (!isComputerUseSupported()) {
+            return;
+        }
+        const disabled = createComputerUseTools({
+            getAgentTools: () => ({ enable_tools: true, enable_computer_use: false }),
+            confirmToolExecution: async () => true,
+        });
+        assert.equal(disabled.every((tool) => !tool.enabled()), true);
+
+        const enabled = createComputerUseTools({
+            getAgentTools: () => ({ enable_tools: true, enable_computer_use: true }),
+            confirmToolExecution: async () => true,
+        });
+        assert.equal(
+            enabled
+                .filter((tool) => tool.enabled())
+                .map((tool) => tool.name)
+                .sort()
+                .join(","),
+            "computer_click,computer_displays,computer_key,computer_move,computer_screenshot,computer_scroll,computer_type",
+        );
+    });
+});

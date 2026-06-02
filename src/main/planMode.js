@@ -26,6 +26,12 @@ const PLAN_MODE_BLOCKED_TOOLS = new Set([
     "download_skill",
     "delete_skill",
     "enter_plan_mode",
+    "computer_screenshot",
+    "computer_move",
+    "computer_click",
+    "computer_type",
+    "computer_key",
+    "computer_scroll",
 ]);
 
 const PLAN_MODE_BASH_WRITE_PATTERNS = [

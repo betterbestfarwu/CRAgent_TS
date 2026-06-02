@@ -1239,6 +1239,14 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
                 }
               />
               <SettingsToggleRow
+                title="Enable computer use"
+                description="允许 Agent 截屏并控制桌面鼠标/键盘（需 vision 模型；macOS 需辅助功能权限）。"
+                checked={Boolean(defaultAgentListItem?.tools?.enable_computer_use)}
+                onChange={(checked) =>
+                  updateDefaultAgentListItem({ tools: { enable_computer_use: checked } })
+                }
+              />
+              <SettingsToggleRow
                 title="Allow sub-agents"
                 description="允许主 Agent 通过 Task 工具启动子 Agent。"
                 checked={Boolean(defaultAgentListItem?.tools?.allow_sub_agents)}
