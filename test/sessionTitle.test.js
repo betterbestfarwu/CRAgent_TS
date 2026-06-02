@@ -34,6 +34,30 @@ test("pickPlaceholderSession ignores default-title sessions with user messages",
     assert.equal(picked, null);
 });
 
+test("pickPlaceholderSession uses meta.hasUserMessages without loading messages", () => {
+    const picked = pickPlaceholderSession([
+        {
+            meta: {
+                id: "with-user",
+                title: "新会话",
+                updatedAt: "2026-06-01T10:00:00.000Z",
+                hasUserMessages: true,
+            },
+            messages: [],
+        },
+        {
+            meta: {
+                id: "empty",
+                title: "新会话",
+                updatedAt: "2026-06-01T11:00:00.000Z",
+                hasUserMessages: false,
+            },
+            messages: [],
+        },
+    ]);
+    assert.equal(picked?.meta?.id, "empty");
+});
+
 test("pickPlaceholderSession picks newest empty default-title session", () => {
     const picked = pickPlaceholderSession([
         {

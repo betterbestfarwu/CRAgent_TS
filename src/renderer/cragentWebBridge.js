@@ -8,7 +8,9 @@ import { formatHelpText, matchChatCommand } from "@shared/chatCommands";
 import {
   CONTEXT_DIVIDER_LABEL,
   CONTEXT_DIVIDER_ROLE,
+  sessionHasActiveLlmContext,
 } from "@shared/chatMessages";
+import { stripSessionImagesForUi } from "@shared/sessionForUi.js";
 
 const CONFIG_KEY = "cragent:web:config";
 const SESSIONS_KEY = "cragent:web:sessions";
@@ -229,11 +231,45 @@ export function installWebBridge() {
       };
     },
 
-    async getSession(sessionId) {
+    async openConfigFile() {
+      return { ok: false, error: "Web 演示模式暂不支持打开本地 config.json。" };
+    },
+
+    async getSession(sessionId, options = {}) {
       const { sessions } = ensureState();
       const session = sessions.find((item) => item.meta.id === sessionId);
       if (!session) throw new Error(`Session not found: ${sessionId}`);
-      return session;
+      let messages = session.messages || [];
+      const totalCount = messages.length;
+      if (options.beforeMessageId) {
+        const beforeIndex = messages.findIndex((message) => message.id === options.beforeMessageId);
+        if (beforeIndex > 0) {
+          const limit = options.messageLimit ?? messages.length;
+          const start = Math.max(0, beforeIndex - limit);
+          messages = messages.slice(start, beforeIndex);
+        } else {
+          messages = [];
+        }
+        return stripSessionImagesForUi({
+          meta: {
+            ...session.meta,
+            messageCount: totalCount,
+            hasMoreMessages: messages.length > 0 && (messages[0]?.id !== session.messages[0]?.id),
+          },
+          messages,
+        });
+      }
+      if (options.messageLimit) {
+        messages = messages.slice(-options.messageLimit);
+      }
+      return stripSessionImagesForUi({
+        meta: {
+          ...session.meta,
+          messageCount: totalCount,
+          hasMoreMessages: totalCount > messages.length,
+        },
+        messages,
+      });
     },
 
     async listSkills() {
@@ -324,6 +360,27 @@ export function installWebBridge() {
         return;
       }
       if (commandId === "reset_context") {
+        const current = ensureState().sessions.find((item) => item.meta.id === sessionId);
+        if (!sessionHasActiveLlmContext(current)) {
+          const touchedAt = nowIso();
+          updateState((state) => {
+            const sessions = state.sessions.map((item) => {
+              if (item.meta.id !== sessionId) return item;
+              return {
+                ...item,
+                meta: {
+                  ...item.meta,
+                  updatedAt: touchedAt,
+                  llmContextFromIndex: item.messages.length,
+                },
+              };
+            });
+            return { ...state, sessions };
+          });
+          const { sessions } = ensureState();
+          emit(listeners.sessionChanged, sessions.find((item) => item.meta.id === sessionId));
+          return;
+        }
         const dividerMessage = {
           id: randomId(),
           role: CONTEXT_DIVIDER_ROLE,
@@ -333,10 +390,15 @@ export function installWebBridge() {
         updateState((state) => {
           const sessions = state.sessions.map((item) => {
             if (item.meta.id !== sessionId) return item;
+            const messages = [...item.messages, dividerMessage];
             return {
               ...item,
-              meta: { ...item.meta, updatedAt: dividerMessage.createdAt },
-              messages: [...item.messages, dividerMessage],
+              meta: {
+                ...item.meta,
+                updatedAt: dividerMessage.createdAt,
+                llmContextFromIndex: messages.length,
+              },
+              messages,
             };
           });
           return { ...state, sessions };
@@ -403,7 +465,9 @@ export function installWebBridge() {
           });
           return { ...state, sessions };
         });
-        emit(listeners.messageAppended, { sessionId, message: notice });
+        const { sessions: afterCompactSessions } = ensureState();
+        const sessionAfterCompact = afterCompactSessions.find((item) => item.meta.id === sessionId);
+        emit(listeners.sessionChanged, sessionAfterCompact);
         return;
       }
 
@@ -522,7 +586,9 @@ export function installWebBridge() {
       return subscribe(listeners.messageAppended, callback);
     },
     onSessionChanged(callback) {
-      return subscribe(listeners.sessionChanged, callback);
+      return subscribe(listeners.sessionChanged, (session) =>
+        callback(stripSessionImagesForUi(session)),
+      );
     },
     onBusyChanged(callback) {
       return subscribe(listeners.busyChanged, callback);

@@ -3,6 +3,7 @@ import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfi
 import { ensureMcpConfigShape } from "@shared/mcpConfig.js";
 import { mergeUiConfig } from "@shared/uiConfig.js";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
+import { withConfigFileLinks } from "./ConfigFileLink.jsx";
 import { SingleDotIcon } from "./DotGridAnimator.jsx";
 import { McpSettingsTab } from "./McpSettingsTab.jsx";
 
@@ -801,7 +802,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
                   />
                   <SettingsTextRow
                     title="API Key"
-                    description="写入本地 config.json，不会上传到其他地方。"
+                    description={withConfigFileLinks("写入本地 config.json，不会上传到其他地方。")}
                     type={showApiKey ? "text" : "password"}
                     value={selectedProvider.apiKey || ""}
                     onChange={(value) => updateProvider({ apiKey: value })}
@@ -1115,6 +1116,17 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
                 onChange={(checked) => updateUi({ verbose_thinking: checked })}
               />
             </SettingsGroup>
+
+            <SettingsGroup label="Hooks">
+              <SettingsToggleRow
+                title="Enable project hooks"
+                description={withConfigFileLinks(
+                  "读取当前会话工作目录下的 hooks.json；若不存在则使用 config.json 同目录下的 hooks.json。",
+                )}
+                checked={uiDraft.hooks_enabled !== false}
+                onChange={(checked) => updateUi({ hooks_enabled: checked })}
+              />
+            </SettingsGroup>
           </div>
         </div>
       ) : (
@@ -1173,7 +1185,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
             <SettingsGroup label="Execution">
               <SettingsSelectRow
                 title="Work mode"
-                description="Plan 模式只输出方案，不调用工具；Goal 模式按任务直接执行。"
+                description="Plan 模式只读探索并写入计划文件（.cragent/plans）；Goal 模式按任务直接执行。"
                 value={defaultAgentConfig.execution_mode || "goal"}
                 onChange={updateDefaultExecutionMode}
               >

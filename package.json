@@ -17,8 +17,11 @@
     "pack": "bash scripts/build-dmg.sh",
     "pack:win": "bash scripts/build-win.sh",
     "build:chat-ui": "node scripts/build-chat-ui-utils.mjs",
-    "pretest": "npm run build:chat-ui",
-    "test": "node --import ./test/register-test.mjs --test test/*.test.js"
+    "validate:imports": "node scripts/validate-imports.mjs",
+    "pretest": "npm run build:chat-ui && npm run validate:imports",
+    "test": "node --import ./test/register-test.mjs --test test/*.test.js",
+    "test:hooks": "node --import ./test/register-test.mjs scripts/test-hooks.mjs --unit",
+    "test:hooks:live": "node --import ./test/register-test.mjs scripts/test-hooks.mjs"
   },
   "keywords": [],
   "author": "",

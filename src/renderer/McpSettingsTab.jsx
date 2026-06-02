@@ -9,6 +9,7 @@ import {
     validateMcpServerDraft,
 } from "@shared/mcpConfig.js";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
+import { withConfigFileLinks } from "./ConfigFileLink.jsx";
 import { SingleDotIcon } from "./DotGridAnimator.jsx";
 
 const ICON_PLUS = (
@@ -286,7 +287,9 @@ export function McpSettingsTab({ draftConfig, setDraftConfig, onProbeMcp }) {
                 </SettingsGroup>
 
                 {!selectedServer ? (
-                    <p className="settings-empty">点击左侧 + 添加 MCP Server，或从 config.json 手动编辑。</p>
+                    <p className="settings-empty">
+                        点击左侧 + 添加 MCP Server，或从 {withConfigFileLinks("config.json")} 手动编辑。
+                    </p>
                 ) : (
                     <>
                         <SettingsGroup label="Server">
@@ -363,7 +366,9 @@ export function McpSettingsTab({ draftConfig, setDraftConfig, onProbeMcp }) {
                         {probeResult ? (
                             <SettingsGroup
                                 label="Probe result"
-                                footer="保存设置后，主进程会使用 config.json 中的配置常驻连接。"
+                                footer={withConfigFileLinks(
+                                    "保存设置后，主进程会使用 config.json 中的配置常驻连接。",
+                                )}
                             >
                                 <div className="settings-row settings-row-empty">
                                     发现 {probeResult.toolCount} 个工具
@@ -399,7 +404,7 @@ export function McpSettingsTab({ draftConfig, setDraftConfig, onProbeMcp }) {
             {deleteConfirmOpen ? (
                 <ConfirmDialog
                     message={`确定删除 MCP Server「${selectedServerId}」？`}
-                    detail="删除后需保存设置才会写入 config.json。"
+                    detail={withConfigFileLinks("删除后需保存设置才会写入 config.json。")}
                     confirmLabel="删除"
                     cancelLabel="取消"
                     destructive

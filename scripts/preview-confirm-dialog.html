@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Confirm dialog preview</title>
+    <link rel="stylesheet" href="../public/cursor-theme.css" />
+    <link rel="stylesheet" href="../src/renderer/styles.css" />
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #888;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="confirm-overlay" role="presentation" style="position: relative; inset: auto; min-height: 100vh">
+      <div
+        class="confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-message"
+        aria-describedby="confirm-dialog-detail"
+      >
+        <img
+          class="confirm-dialog-icon"
+          src="../public/icon.png"
+          alt=""
+          width="64"
+          height="64"
+        />
+        <div class="confirm-dialog-title">CRAgent</div>
+        <div class="confirm-dialog-body">
+          <p id="confirm-dialog-message" class="confirm-dialog-message">
+            允许执行工具 Shell?
+          </p>
+          <p id="confirm-dialog-detail" class="confirm-dialog-detail"></p>
+        </div>
+        <div class="confirm-dialog-actions">
+          <button type="button" class="confirm-dialog-btn">拒绝</button>
+          <button type="button" class="confirm-dialog-btn confirm-dialog-btn-primary">允许</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      const detail = document.getElementById("confirm-dialog-detail");
+      detail.textContent = Array.from({ length: 24 }, (_, i) => `${i + 1}. npm run test -- --grep hookRunner`).join(
+        "\n",
+      );
+    </script>
+  </body>
+</html>

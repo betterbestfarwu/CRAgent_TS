@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { displayTitle, filterSessions, groupSessions } from "./sidebarUtils.js";
+import {
+  displayTitle,
+  filterSessions,
+  groupSessions,
+  nextSidebarVisibleLimit,
+  SIDEBAR_INITIAL_VISIBLE,
+  sliceForSidebarDisplay,
+} from "./sidebarUtils.js";
 
 const ICON_BUBBLE = (
   <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true">
@@ -73,13 +80,13 @@ const ICON_CARET_DOWN = (
   </svg>
 );
 
-function ProjectNodeHead({ project, expanded, active, onSelect, onNewChat }) {
+function ProjectNodeHead({ project, expanded, onSelect, onNewChat }) {
   const [hovered, setHovered] = useState(false);
   const showAddBtn = hovered;
 
   return (
     <div
-      className={`project-node-head${active ? " active" : ""}${hovered && !expanded ? " hovered" : ""}`}
+      className={`project-node-head${hovered ? " hovered" : ""}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -108,6 +115,14 @@ function ProjectNodeHead({ project, expanded, active, onSelect, onNewChat }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function SeeMoreRow({ onClick }) {
+  return (
+    <button type="button" className="sidebar-see-more" onClick={onClick}>
+      See more
+    </button>
   );
 }
 
@@ -162,7 +177,7 @@ function SessionRow({ meta, active, busy, forceActionButtons, onSelect, onDelete
 export function Sidebar({
   open,
   projects = [],
-  selectedProjectId = null,
+  expandedProjectIds = [],
   sessions,
   currentSessionId,
   busyBySession = {},
@@ -178,6 +193,11 @@ export function Sidebar({
   const [search, setSearch] = useState("");
   const [forceActionButtons, setForceActionButtons] = useState(false);
   const [projectDropActive, setProjectDropActive] = useState(false);
+  const [sessionsVisibleLimit, setSessionsVisibleLimit] = useState(SIDEBAR_INITIAL_VISIBLE);
+  const [projectsVisibleLimit, setProjectsVisibleLimit] = useState(SIDEBAR_INITIAL_VISIBLE);
+  const [projectSessionsVisibleLimits, setProjectSessionsVisibleLimits] = useState(
+    () => new Map()
+  );
 
   const filteredSessions = useMemo(() => {
     const filtered = filterSessions(sessions, search);
@@ -220,6 +240,22 @@ export function Sidebar({
     return first.path || "";
   }
 
+  const sessionsDisplay = useMemo(
+    () => sliceForSidebarDisplay(fixedRows, sessionsVisibleLimit),
+    [fixedRows, sessionsVisibleLimit]
+  );
+
+  const projectsDisplay = useMemo(
+    () => sliceForSidebarDisplay(projects, projectsVisibleLimit),
+    [projects, projectsVisibleLimit]
+  );
+
+  useEffect(() => {
+    setSessionsVisibleLimit(SIDEBAR_INITIAL_VISIBLE);
+    setProjectsVisibleLimit(SIDEBAR_INITIAL_VISIBLE);
+    setProjectSessionsVisibleLimits(new Map());
+  }, [search]);
+
   useEffect(() => {
     const media = window.matchMedia("(pointer: coarse)");
     const update = () => setForceActionButtons(media.matches);
@@ -261,7 +297,7 @@ export function Sidebar({
           会话
         </button>
         <div className="session-node-content">
-          {fixedRows.map((meta) => (
+          {sessionsDisplay.visible.map((meta) => (
             <SessionRow
               key={meta.id}
               meta={meta}
@@ -272,6 +308,13 @@ export function Sidebar({
               onDelete={onDelete}
             />
           ))}
+          {sessionsDisplay.hasMore ? (
+            <SeeMoreRow
+              onClick={() =>
+                setSessionsVisibleLimit((limit) => nextSidebarVisibleLimit(limit))
+              }
+            />
+          ) : null}
         </div>
         <div
           className={`project-section${projectDropActive ? " drag-over" : ""}`}
@@ -310,23 +353,23 @@ export function Sidebar({
             </button>
           </div>
           <div className="project-node-list">
-          {projects.map((project) => {
+          {projectsDisplay.visible.map((project) => {
             const rows = projectRows.get(project.id) || [];
-            const expanded = selectedProjectId === project.id;
-            const hasActiveChild =
-              !settingsActive && rows.some((meta) => meta.id === currentSessionId);
+            const expanded = expandedProjectIds.includes(project.id);
+            const projectSessionsLimit =
+              projectSessionsVisibleLimits.get(project.id) ?? SIDEBAR_INITIAL_VISIBLE;
+            const projectSessionsDisplay = sliceForSidebarDisplay(rows, projectSessionsLimit);
             return (
               <div key={project.id} className="project-node">
                 <ProjectNodeHead
                   project={project}
                   expanded={expanded}
-                  active={expanded && !hasActiveChild}
                   onSelect={onSelectProject}
                   onNewChat={onNewProjectChat}
                 />
                 {expanded ? (
                   <div className="project-node-content">
-                    {rows.map((meta) => (
+                    {projectSessionsDisplay.visible.map((meta) => (
                       <SessionRow
                         key={meta.id}
                         meta={meta}
@@ -337,11 +380,30 @@ export function Sidebar({
                         onDelete={onDelete}
                       />
                     ))}
+                    {projectSessionsDisplay.hasMore ? (
+                      <SeeMoreRow
+                        onClick={() =>
+                          setProjectSessionsVisibleLimits((prev) => {
+                            const next = new Map(prev);
+                            const current = next.get(project.id) ?? SIDEBAR_INITIAL_VISIBLE;
+                            next.set(project.id, nextSidebarVisibleLimit(current));
+                            return next;
+                          })
+                        }
+                      />
+                    ) : null}
                   </div>
                 ) : null}
               </div>
             );
           })}
+          {projectsDisplay.hasMore ? (
+            <SeeMoreRow
+              onClick={() =>
+                setProjectsVisibleLimit((limit) => nextSidebarVisibleLimit(limit))
+              }
+            />
+          ) : null}
           </div>
         </div>
       </div>

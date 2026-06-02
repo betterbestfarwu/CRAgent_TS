@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import {
     CONTEXT_COMPACT_DIVIDER_LABEL,
     CONTEXT_DIVIDER_LABEL,
     CONTEXT_DIVIDER_ROLE,
+    getActiveLlmContextEntries,
     isContextDividerMessage,
+    sessionHasActiveLlmContext,
     withAssistantModel,
 } from "@shared/chatMessages";
 import { IPC_CHANNELS } from "@shared/ipc";
@@ -45,26 +48,39 @@ import {
     shouldRefreshSessionMemory,
     syncSessionMemoryAfterCompact,
 } from "./sessionMemory.js";
-import { resolveSessionWorkspace, resolveWorkspace } from "./workspacePaths.js";
+import {
+    resolvePathInWorkspace,
+    resolveSessionWorkspace,
+    resolveWorkspace,
+} from "./workspacePaths.js";
+import { HookRunner } from "./hooks/hookRunner.js";
+import { resolveHooksConfig } from "./hooks/hookPaths.js";
+import { attachContextCategoryPreviews } from "./contextDetailPreviews.js";
+import { mergeUiConfig } from "@shared/uiConfig.js";
+import {
+    buildExitPlanModeUserMessage,
+    buildPlanRejectionUserMessage,
+    buildPlanModeSystemPrompt,
+    ensurePlansDirectory,
+    filterToolsForPlanMode,
+    getPlanFilePath,
+    planFileExists,
+    readPlanFile,
+    validatePlanModeToolCall,
+    writePlanFile,
+} from "./planMode.js";
+import {
+    estimateMcpToolDefinitionTokens,
+    getEnabledMcpServers,
+} from "@shared/mcpConfig.js";
+import {
+    CONTEXT_BREAKDOWN_CATEGORIES,
+    estimateSessionContextBreakdown,
+    estimateTextTokens,
+} from "@shared/tokenEstimator.js";
+import { ipcPayloadForRenderer } from "./rendererSession.js";
 
-const PLAN_MODE_SYSTEM_PROMPT = [
-    "You are in Plan Mode.",
-    "Do not call tools or claim actions were executed.",
-    "Return a concise implementation plan only:",
-    "1) understanding, 2) steps, 3) risks/checks, 4) explicit handoff asking user to switch to Goal Mode for execution.",
-].join("\n");
-
-function getActiveContextEntries(session) {
-    const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
-    const entries = [];
-    for (let index = fromIndex; index < session.messages.length; index += 1) {
-        const message = session.messages[index];
-        if (!isContextDividerMessage(message)) {
-            entries.push({ message, index });
-        }
-    }
-    return entries;
-}
+const HOOK_LOG_LIMIT = 80;
 
 export class AgentRuntime {
     constructor(sessionStore, configStore, llmClient, toolRegistry, workspaceMemory, skillLoader, mainWindowGetter) {
@@ -80,6 +96,25 @@ export class AgentRuntime {
         this.pendingQueues = new Map();
         this.abortControllers = new Map();
         this.cancelledRuns = new Set();
+        this.hookLogsBySession = new Map();
+        this.hookRunner = new HookRunner({
+            getHooksConfig: (sessionId) =>
+                resolveHooksConfig({
+                    sessionStore: this.sessionStore,
+                    configStore: this.configStore,
+                    sessionId,
+                }),
+            getSessionMeta: (sessionId) => {
+                const session = this.sessionStore.get(sessionId);
+                return {
+                    transcriptPath: this.sessionStore.transcriptPath(sessionId),
+                    cwd: resolveSessionWorkspace(this.sessionStore, this.configStore, sessionId),
+                    permissionMode: session.meta.authMode || "default",
+                };
+            },
+            isEnabled: () => mergeUiConfig(this.configStore.get().ui).hooks_enabled !== false,
+            onHookEvent: (entry) => this.recordHookLog(entry),
+        });
         this.chatCommands = createChatCommandHandlers({
             sessionStore: this.sessionStore,
             emit: (channel, payload) => this.emit(channel, payload),
@@ -97,7 +132,41 @@ export class AgentRuntime {
     }
 
     emit(channel, payload) {
-        this.mainWindowGetter()?.webContents.send(channel, payload);
+        this.mainWindowGetter()?.webContents.send(channel, ipcPayloadForRenderer(channel, payload));
+    }
+
+    getHookLogs(sessionId) {
+        return [...(this.hookLogsBySession.get(sessionId) || [])];
+    }
+
+    clearHookLogs(sessionId) {
+        if (sessionId) {
+            this.hookLogsBySession.delete(sessionId);
+            this.emit(IPC_CHANNELS.onHookLog, { sessionId, logs: [] });
+            return;
+        }
+        this.hookLogsBySession.clear();
+    }
+
+    recordHookLog(entry) {
+        const sessionId = entry?.sessionId;
+        if (!sessionId) {
+            return;
+        }
+        const list = this.hookLogsBySession.get(sessionId) || [];
+        const existingIndex = entry.id ? list.findIndex((row) => row.id === entry.id) : -1;
+        if (existingIndex >= 0 && entry.status === "running") {
+            list[existingIndex] = { ...list[existingIndex], ...entry };
+        } else if (existingIndex >= 0) {
+            list[existingIndex] = { ...list[existingIndex], ...entry };
+        } else {
+            list.push(entry);
+        }
+        while (list.length > HOOK_LOG_LIMIT) {
+            list.shift();
+        }
+        this.hookLogsBySession.set(sessionId, list);
+        this.emit(IPC_CHANNELS.onHookLog, { sessionId, entry, logs: list });
     }
 
     setBusy(sessionId, busy) {
@@ -117,16 +186,8 @@ export class AgentRuntime {
         return mode === "plan" ? "plan" : "goal";
     }
 
-    messagesForLLM(session, options = {}) {
-        const {
-            subAgentPrompt = null,
-            subagentType = "generalPurpose",
-            includeSessionHistory = true,
-        } = options;
+    buildSystemPromptContent(session) {
         const parts = [];
-        if (subAgentPrompt) {
-            parts.push(subAgentSystemPrompt(subagentType));
-        }
         const sessionWorkspace = resolveSessionWorkspace(
             this.sessionStore,
             this.configStore,
@@ -149,11 +210,90 @@ export class AgentRuntime {
             parts.push(this.skillLoader.systemPromptSection());
         }
         if (this.executionMode() === "plan") {
-            parts.push(PLAN_MODE_SYSTEM_PROMPT);
+            const workspace = resolveSessionWorkspace(
+                this.sessionStore,
+                this.configStore,
+                session.meta.id,
+            );
+            ensurePlansDirectory(workspace);
+            const planFilePath = getPlanFilePath(workspace, session.meta.id);
+            parts.push(
+                buildPlanModeSystemPrompt({
+                    planFilePath,
+                    planExists: planFileExists(workspace, session.meta.id),
+                }),
+            );
         }
         const todoPrompt = formatTodosForPrompt(session.meta.todos);
         if (todoPrompt) {
             parts.push(todoPrompt);
+        }
+        return parts.join("\n\n");
+    }
+
+    getSessionContextDetail(sessionId) {
+        const session = this.sessionStore.get(sessionId, {
+            loadAllMessages: true,
+            hydrateImages: false,
+        });
+        const config = this.configStore.get();
+        const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
+        const agent = this.defaultAgent();
+        const agentTools = agent?.tools || {};
+        const skillsCatalogText = this.skillLoader
+            .listSummaries()
+            .map((skill) => `- ${skill.name}: ${skill.description || ""}`)
+            .join("\n");
+        const mcpServers = getEnabledMcpServers(config);
+        const mcpTokens =
+            agentTools.enable_mcp !== false
+                ? estimateMcpToolDefinitionTokens(
+                      mcpServers.length > 0 ? mcpServers.length * 2 : 0,
+                  )
+                : 0;
+        const breakdown = estimateSessionContextBreakdown(session, model, {
+            compactBufferTokens: config.context?.compact_buffer_tokens,
+            agentTools,
+            skillsCatalogText,
+            mcpTokens,
+        });
+        const systemPromptText = this.buildSystemPromptContent(session);
+        let categories = attachContextCategoryPreviews({
+            session,
+            config,
+            agentTools,
+            toolRegistry: this.toolRegistry,
+            skillLoader: this.skillLoader,
+            workspaceRoot: resolveWorkspace(this.configStore),
+            systemPromptText,
+            categories: breakdown.categories,
+        });
+        if (systemPromptText && !categories.some((category) => category.id === "systemPrompt")) {
+            const definition = CONTEXT_BREAKDOWN_CATEGORIES.find(
+                (category) => category.id === "systemPrompt",
+            );
+            categories.unshift({
+                ...definition,
+                tokens: estimateTextTokens(systemPromptText),
+                previewText: systemPromptText,
+            });
+        }
+        return { ...breakdown, categories, systemPromptText };
+    }
+
+    messagesForLLM(session, options = {}) {
+        const {
+            subAgentPrompt = null,
+            subagentType = "generalPurpose",
+            includeSessionHistory = true,
+        } = options;
+        const parts = [];
+        if (subAgentPrompt) {
+            parts.push(subAgentSystemPrompt(subagentType));
+        }
+        const systemContent = this.buildSystemPromptContent(session);
+        if (systemContent) {
+            parts.push(systemContent);
         }
         const messages = [];
         if (parts.length) {
@@ -312,6 +452,200 @@ export class AgentRuntime {
         return true;
     }
 
+    hookExtrasFromContext(context = {}) {
+        const extra = {};
+        if (context.isSubAgent) {
+            extra.agent_id = context.runId;
+            if (context.subagentType) {
+                extra.agent_type = context.subagentType;
+            }
+        }
+        return extra;
+    }
+
+    parseToolCallArguments(call) {
+        try {
+            return JSON.parse(call.function.arguments || "{}");
+        } catch {
+            return null;
+        }
+    }
+
+    async ensureSessionStartHook(sessionId) {
+        let session = this.sessionStore.get(sessionId);
+        if (session.meta.hooksSessionStarted) {
+            return;
+        }
+        await this.hookRunner.run(
+            "SessionStart",
+            this.hookRunner.buildBaseInput(sessionId, "SessionStart", { source: "startup" }),
+            { matchQuery: "startup" },
+        );
+        session = this.sessionStore.get(sessionId);
+        session.meta.hooksSessionStarted = true;
+        this.sessionStore.save(session);
+    }
+
+    async runUserPromptSubmitHook(sessionId, prompt) {
+        return this.hookRunner.run(
+            "UserPromptSubmit",
+            this.hookRunner.buildBaseInput(sessionId, "UserPromptSubmit", { prompt }),
+            { matchQuery: prompt },
+        );
+    }
+
+    async runStopHook(sessionId, lastAssistantMessage, signal) {
+        return this.hookRunner.run(
+            "Stop",
+            this.hookRunner.buildBaseInput(sessionId, "Stop", {
+                stop_hook_active: false,
+                last_assistant_message: lastAssistantMessage,
+            }),
+            { signal },
+        );
+    }
+
+    appendHookBlockedAssistant(sessionId, reason, runId) {
+        const session = this.sessionStore.get(sessionId);
+        const blockedMessage = withAssistantModel(
+            {
+                id: randomUUID(),
+                role: "assistant",
+                content: reason,
+                createdAt: new Date().toISOString(),
+                runId,
+            },
+            { modelId: session.meta.modelId },
+        );
+        const updated = this.sessionStore.appendMessage(sessionId, blockedMessage);
+        this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: blockedMessage });
+        this.emit(IPC_CHANNELS.onSessionChanged, updated);
+    }
+
+    async executeToolWithHooks(call, context, signal) {
+        const sessionId = context.sessionId;
+        const toolName = call.function.name;
+        let toolInput = this.parseToolCallArguments(call);
+        if (toolInput === null) {
+            return `Error: invalid tool arguments`;
+        }
+
+        if (context.planMode) {
+            const workspace = resolveSessionWorkspace(
+                this.sessionStore,
+                this.configStore,
+                sessionId,
+            );
+            const planFilePath = getPlanFilePath(workspace, sessionId);
+            const planError = validatePlanModeToolCall(
+                toolName,
+                toolInput,
+                planFilePath,
+                workspace,
+                (ws, rel) => resolvePathInWorkspace(ws, rel),
+            );
+            if (planError) {
+                return planError;
+            }
+        }
+
+        const hookExtras = this.hookExtrasFromContext(context);
+
+        if (toolName === "bash" && toolInput.command) {
+            const shellHook = await this.hookRunner.run(
+                "BeforeShellExecution",
+                this.hookRunner.buildBaseInput(sessionId, "BeforeShellExecution", {
+                    command: String(toolInput.command),
+                    ...hookExtras,
+                }),
+                { matchQuery: String(toolInput.command), signal },
+            );
+            if (shellHook.blocked) {
+                return `Error: ${shellHook.reason || "Blocked by shell hook"}`;
+            }
+        }
+
+        const preHook = await this.hookRunner.run(
+            "PreToolUse",
+            this.hookRunner.buildBaseInput(sessionId, "PreToolUse", {
+                tool_name: toolName,
+                tool_input: toolInput,
+                tool_use_id: call.id,
+                ...hookExtras,
+            }),
+            { matchQuery: toolName, signal },
+        );
+        if (preHook.blocked) {
+            return `Error: ${preHook.reason || "Blocked by hook"}`;
+        }
+        if (preHook.updatedInput) {
+            toolInput = preHook.updatedInput;
+            call = {
+                ...call,
+                function: {
+                    ...call.function,
+                    arguments: JSON.stringify(toolInput),
+                },
+            };
+        }
+
+        let result = await this.toolRegistry.execute(call, context);
+        const failed = String(result).startsWith("Error:");
+
+        if (failed) {
+            const failHook = await this.hookRunner.run(
+                "PostToolUseFailure",
+                this.hookRunner.buildBaseInput(sessionId, "PostToolUseFailure", {
+                    tool_name: toolName,
+                    tool_input: toolInput,
+                    tool_use_id: call.id,
+                    error: String(result),
+                    ...hookExtras,
+                }),
+                { matchQuery: toolName, signal },
+            );
+            if (failHook.additionalContext) {
+                result = `${result}\n\n${failHook.additionalContext}`;
+            }
+            return result;
+        }
+
+        const postHook = await this.hookRunner.run(
+            "PostToolUse",
+            this.hookRunner.buildBaseInput(sessionId, "PostToolUse", {
+                tool_name: toolName,
+                tool_input: toolInput,
+                tool_response: result,
+                tool_use_id: call.id,
+                ...hookExtras,
+            }),
+            { matchQuery: toolName, signal },
+        );
+        if (postHook.updatedToolOutput !== undefined) {
+            result =
+                typeof postHook.updatedToolOutput === "string"
+                    ? postHook.updatedToolOutput
+                    : JSON.stringify(postHook.updatedToolOutput, null, 2);
+        }
+        if (postHook.additionalContext) {
+            result = `${result}\n\n${postHook.additionalContext}`;
+        }
+
+        if (toolName === "bash" && toolInput.command) {
+            await this.hookRunner.run(
+                "AfterShellExecution",
+                this.hookRunner.buildBaseInput(sessionId, "AfterShellExecution", {
+                    command: String(toolInput.command),
+                    output: result,
+                    ...hookExtras,
+                }),
+                { matchQuery: String(toolInput.command), signal },
+            );
+        }
+
+        return result;
+    }
+
     async runSubAgent({
         sessionId,
         parentRunId,
@@ -339,6 +673,14 @@ export class AgentRuntime {
         );
         const unlockedToolNames = new Set();
         const subRunId = randomUUID();
+        await this.hookRunner.run(
+            "SubagentStart",
+            this.hookRunner.buildBaseInput(sessionId, "SubagentStart", {
+                agent_id: subRunId,
+                agent_type: subagentType,
+            }),
+            { matchQuery: subagentType },
+        );
         const messages = this.messagesForLLM(session, {
             subAgentPrompt: prompt,
             subagentType,
@@ -372,6 +714,16 @@ export class AgentRuntime {
                 const fallbackNote = choice.usedFallback
                     ? `\n\n[sub-agent used fallback model ${choice.usedModel.providerKey}/${choice.usedModel.modelId}]`
                     : "";
+                await this.hookRunner.run(
+                    "SubagentStop",
+                    this.hookRunner.buildBaseInput(sessionId, "SubagentStop", {
+                        stop_hook_active: false,
+                        agent_id: subRunId,
+                        agent_type: subagentType,
+                        last_assistant_message: body,
+                    }),
+                    { matchQuery: subagentType },
+                );
                 return `Sub-agent "${description}" completed:\n\n${body}${fallbackNote}`;
             }
 
@@ -389,11 +741,12 @@ export class AgentRuntime {
                     });
                     continue;
                 }
-                const result = await this.toolRegistry.execute(call, {
+                const result = await this.executeToolWithHooks(call, {
                     sessionId,
                     runId: subRunId,
                     parentRunId,
                     isSubAgent: true,
+                    subagentType,
                     unlockedToolNames,
                 });
                 if (
@@ -415,6 +768,15 @@ export class AgentRuntime {
             round += 1;
         }
 
+        await this.hookRunner.run(
+            "SubagentStop",
+            this.hookRunner.buildBaseInput(sessionId, "SubagentStop", {
+                stop_hook_active: false,
+                agent_id: subRunId,
+                agent_type: subagentType,
+            }),
+            { matchQuery: subagentType },
+        );
         return `Sub-agent "${description}" reached tool round limit before finishing.`;
     }
 
@@ -470,12 +832,27 @@ export class AgentRuntime {
 
         const skillInvoke = this.parseSkillInvocation(input);
         const runId = randomUUID();
+        await this.ensureSessionStartHook(sessionId);
         const projectRoot = this.sessionStore.getProjectDirectory(sessionId);
         let messageContent = expandAtMentionsToAbsolute(input, projectRoot);
         if (skillInvoke) {
             messageContent = skillInvoke.rest
                 ? expandAtMentionsToAbsolute(skillInvoke.rest, projectRoot)
                 : `请按照已加载的 skill「${skillInvoke.skillName}」执行任务。`;
+        }
+
+        const promptHook = await this.runUserPromptSubmitHook(sessionId, messageContent);
+        if (promptHook.blocked) {
+            this.appendHookBlockedAssistant(
+                sessionId,
+                promptHook.reason || "Prompt blocked by hook",
+                runId,
+            );
+            await this.processQueue(sessionId);
+            return;
+        }
+        if (promptHook.additionalContext) {
+            messageContent = `${promptHook.additionalContext}\n\n${messageContent}`;
         }
 
         const userMessage = {
@@ -509,91 +886,80 @@ export class AgentRuntime {
         this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: userMessage });
         this.emit(IPC_CHANNELS.onSessionChanged, session);
 
-        if (this.executionMode() === "plan") {
-            await this.runPlanLoop(session, runId);
-            await this.processQueue(sessionId);
-            return;
-        }
-
         await this.runLoop(session, runId);
         await this.processQueue(sessionId);
     }
 
-    async runPlanLoop(session, runId) {
-        const sessionId = session.meta.id;
-        this.setBusy(sessionId, true);
-        const signal = this.createAbortSignal(sessionId);
-        try {
-            if (this.wasRunCancelled(sessionId)) {
-                return;
-            }
-            session = this.sessionStore.get(sessionId);
-            const model = {
-                providerKey: session.meta.providerKey,
-                modelId: session.meta.modelId,
-            };
-            const llmResult = await this.requestAgentLlm(sessionId, () =>
-                this.llmClient.complete({
-                    messages: this.messagesForLLM(session),
-                    model,
-                    modelChain: this.modelChainForSession(session),
-                    signal,
-                }),
-            );
-            if (this.wasRunCancelled(sessionId)) {
-                return;
-            }
-            if (llmResult.blocked) {
-                const blockedMessage = withAssistantModel(
-                    {
-                        id: randomUUID(),
-                        role: "assistant",
-                        content: this.contextBlockedMessage(llmResult.state),
-                        createdAt: new Date().toISOString(),
-                        runId,
-                    },
-                    model,
-                );
-                session = this.sessionStore.appendMessage(session.meta.id, blockedMessage);
-                this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: blockedMessage });
-                this.emit(IPC_CHANNELS.onSessionChanged, session);
-                return;
-            }
-            const choice = llmResult.choice;
-            const usedModel = choice.usedModel || model;
-            const assistant = withAssistantModel(
-                {
-                    ...choice.message,
-                    runId,
-                },
-                usedModel,
-            );
-            session = this.sessionStore.appendMessage(session.meta.id, assistant);
-            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: assistant });
-            this.emit(IPC_CHANNELS.onSessionChanged, session);
-        } catch (error) {
-            if (error?.name === "AbortError" || this.cancelledRuns.has(sessionId)) {
-                this.cancelledRuns.delete(sessionId);
-                return;
-            }
-            this.emit(IPC_CHANNELS.onError, {
-                sessionId,
-                message: error instanceof Error ? error.message : String(error),
-            });
-        } finally {
-            this.clearAbortSignal(sessionId);
-            this.setBusy(sessionId, false);
+    async exitPlanMode(sessionId, approvedContent) {
+        const workspace = resolveSessionWorkspace(this.sessionStore, this.configStore, sessionId);
+        let { filePath, content } = readPlanFile(workspace, sessionId);
+        if (typeof approvedContent === "string") {
+            filePath = writePlanFile(workspace, sessionId, approvedContent);
+            content = approvedContent;
         }
+        const config = this.configStore.get();
+        this.configStore.update({
+            ...config,
+            agents: {
+                ...config.agents,
+                default: {
+                    ...(config.agents?.default || {}),
+                    execution_mode: "goal",
+                },
+            },
+        });
+        await this.sendUserMessage(sessionId, buildExitPlanModeUserMessage(content, filePath));
+        return {
+            config: this.configStore.get(),
+            planFilePath: filePath,
+        };
+    }
+
+    async rejectPlanMode(sessionId, { planContent, feedback } = {}) {
+        const workspace = resolveSessionWorkspace(this.sessionStore, this.configStore, sessionId);
+        if (typeof planContent === "string") {
+            writePlanFile(workspace, sessionId, planContent);
+        }
+        const { content } = readPlanFile(workspace, sessionId);
+        const rejectionMessage = {
+            id: randomUUID(),
+            role: "user",
+            content: buildPlanRejectionUserMessage(
+                typeof planContent === "string" ? planContent : content,
+                feedback,
+            ),
+            createdAt: new Date().toISOString(),
+            planRejection: true,
+        };
+        let session = this.sessionStore.appendMessage(sessionId, rejectionMessage);
+        this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: rejectionMessage });
+        this.emit(IPC_CHANNELS.onSessionChanged, session);
+
+        if (this.busyBySession.get(sessionId) || this.pendingQueues.get(sessionId)?.length) {
+            return { session, continued: false };
+        }
+
+        const runId = randomUUID();
+        await this.runLoop(session, runId);
+        await this.processQueue(sessionId);
+        return {
+            session: this.sessionStore.get(sessionId),
+            continued: true,
+        };
     }
 
     clearLlmContext(sessionId) {
-        const dividerMessage = {
-            id: randomUUID(),
-            role: CONTEXT_DIVIDER_ROLE,
-            content: CONTEXT_DIVIDER_LABEL,
-            createdAt: new Date().toISOString(),
-        };
-        let session = this.sessionStore.appendMessage(sessionId, dividerMessage);
+        let session = this.sessionStore.get(sessionId);
+        if (sessionHasActiveLlmContext(session)) {
+            const dividerMessage = {
+                id: randomUUID(),
+                role: CONTEXT_DIVIDER_ROLE,
+                content: CONTEXT_DIVIDER_LABEL,
+                createdAt: new Date().toISOString(),
+            };
+            session = this.sessionStore.appendMessage(sessionId, dividerMessage);
+            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: dividerMessage });
+        }
         session.meta.llmContextFromIndex = session.messages.length;
         delete session.meta.contextSummary;
         delete session.meta.postCompactContext;
@@ -602,7 +968,6 @@ export class AgentRuntime {
         session.meta.compactFailures = 0;
         clearSessionMemory(session);
         this.sessionStore.save(session);
-        this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: dividerMessage });
         this.emit(IPC_CHANNELS.onSessionChanged, session);
     }
 
@@ -899,9 +1264,16 @@ export class AgentRuntime {
             this.setBusy(sessionId, true);
         }
         try {
+            await this.hookRunner.run(
+                "PreCompact",
+                this.hookRunner.buildBaseInput(sessionId, "PreCompact", {
+                    trigger: auto ? "auto" : "manual",
+                }),
+                { matchQuery: auto ? "auto" : "manual" },
+            );
             const contextConfig = getContextConfig(this.configStore);
             let session = this.sessionStore.get(sessionId);
-            const entries = getActiveContextEntries(session);
+            const entries = getActiveLlmContextEntries(session);
             let activeMessages = entries.map((entry) => entry.message);
 
             preCompactMicroCompact(activeMessages, contextConfig);
@@ -995,7 +1367,8 @@ export class AgentRuntime {
             const lastSummarizedIndex = entries[keepStartIndex - 1]?.index ?? sessionKeepIndex - 1;
             syncSessionMemoryAfterCompact(session, summary, lastSummarizedIndex);
             this.sessionStore.save(session);
-            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: dividerMessage });
+            // Divider is spliced into the middle of the transcript; rely on session sync
+            // instead of onMessageAppended (which only appends to the tail in the renderer).
             this.emit(IPC_CHANNELS.onSessionChanged, session);
             this.emitContextWarning(session);
 
@@ -1022,6 +1395,14 @@ export class AgentRuntime {
                 this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: feedback });
                 this.emit(IPC_CHANNELS.onSessionChanged, session);
             }
+
+            await this.hookRunner.run(
+                "PostCompact",
+                this.hookRunner.buildBaseInput(sessionId, "PostCompact", {
+                    trigger: auto ? "auto" : "manual",
+                }),
+                { matchQuery: auto ? "auto" : "manual" },
+            );
         } catch (error) {
             const session = this.sessionStore.get(sessionId);
             session.meta.compactFailures = (session.meta.compactFailures ?? 0) + 1;
@@ -1053,6 +1434,16 @@ export class AgentRuntime {
                 if (this.wasRunCancelled(sessionId)) {
                     return;
                 }
+                const planMode = this.executionMode() === "plan";
+                const workspace = resolveSessionWorkspace(
+                    this.sessionStore,
+                    this.configStore,
+                    sessionId,
+                );
+                const planFilePath = planMode ? getPlanFilePath(workspace, sessionId) : null;
+                if (planMode) {
+                    ensurePlansDirectory(workspace);
+                }
                 session = this.sessionStore.get(sessionId);
                 session = this.applyMicroCompact(session);
                 await this.maybeAutoCompact(sessionId);
@@ -1061,13 +1452,22 @@ export class AgentRuntime {
                     providerKey: session.meta.providerKey,
                     modelId: session.meta.modelId,
                 };
+                let toolSchemas = [];
+                if (toolsEnabled) {
+                    if (planMode) {
+                        toolSchemas = this.toolRegistry.schemas({
+                            tools: filterToolsForPlanMode(this.toolRegistry.activeTools()),
+                            unlockedToolNames,
+                        });
+                    } else {
+                        toolSchemas = this.toolRegistry.schemas({ unlockedToolNames });
+                    }
+                }
                 const chatResult = await this.requestAgentChat(sessionId, {
                     messages: this.messagesForLLM(session),
                     model,
                     modelChain: this.modelChainForSession(session),
-                    tools: toolsEnabled
-                        ? this.toolRegistry.schemas({ unlockedToolNames })
-                        : [],
+                    tools: toolSchemas,
                     signal,
                 });
                 if (this.wasRunCancelled(sessionId)) {
@@ -1105,6 +1505,26 @@ export class AgentRuntime {
 
                 const calls = assistant.toolCalls || [];
                 if (!calls.length) {
+                    const stopHook = await this.runStopHook(
+                        sessionId,
+                        String(assistant.content || ""),
+                        signal,
+                    );
+                    if (stopHook.systemMessage) {
+                        const notice = withAssistantModel(
+                            {
+                                id: randomUUID(),
+                                role: "assistant",
+                                content: stopHook.systemMessage,
+                                createdAt: new Date().toISOString(),
+                                runId,
+                            },
+                            { modelId: session.meta.modelId },
+                        );
+                        session = this.sessionStore.appendMessage(sessionId, notice);
+                        this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: notice });
+                        this.emit(IPC_CHANNELS.onSessionChanged, session);
+                    }
                     void this.refreshSessionMemory(sessionId);
                     return;
                 }
@@ -1113,11 +1533,18 @@ export class AgentRuntime {
                     if (this.wasRunCancelled(sessionId)) {
                         return;
                     }
-                    const result = await this.toolRegistry.execute(call, {
-                        sessionId,
-                        runId,
-                        unlockedToolNames,
-                    });
+                    const result = await this.executeToolWithHooks(
+                        call,
+                        {
+                            sessionId,
+                            runId,
+                            unlockedToolNames,
+                            planMode,
+                            planFilePath,
+                            executionMode: planMode ? "plan" : "goal",
+                        },
+                        signal,
+                    );
                     if (call.function.name === "TodoWrite") {
                         this.emit(IPC_CHANNELS.onTodosChanged, {
                             sessionId,

@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ChatView } from "./ChatView.jsx";
 import { ComposerAuthMenu, ComposerMenuCheckIcon } from "./ComposerAuthMenu.jsx";
+import { ComposerModelMenu } from "./ComposerModelMenu.jsx";
 import { ComposerContextRing } from "./ComposerContextRing.jsx";
 import { ComposerContextPopup } from "./ComposerContextPopup.jsx";
 import { ComposerQueuePanel } from "./ComposerQueuePanel.jsx";
 import { ComposerTaskStatus } from "./ComposerTaskStatus.jsx";
+import { ComposerHookLog } from "./ComposerHookLog.jsx";
 import {
   buildSlashMenuNavItems,
   ComposerSlashMenu,
@@ -12,7 +22,7 @@ import {
   filterSlashSkills,
 } from "./ComposerSlashMenu.jsx";
 import { ComposerAtMenu } from "./ComposerAtMenu.jsx";
-import { ComposerAtChips } from "./ComposerAtChips.jsx";
+import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
 import {
   atMentionFileName,
   buildAtNavItems,
@@ -25,6 +35,7 @@ import {
 import { Sidebar } from "./Sidebar.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
+import { PlanApprovalDialog } from "./PlanApprovalDialog.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { TitleBar } from "./TitleBar.jsx";
 import { displayTitle } from "./sidebarUtils.js";
@@ -36,8 +47,9 @@ import {
     estimateMcpToolDefinitionTokens,
     getEnabledMcpServers,
 } from "@shared/mcpConfig.js";
-import { formatModelRef, modelRefLabel } from "@shared/modelRef.js";
+import { formatModelRef } from "@shared/modelRef.js";
 import { filterVisibleTodoRuns, msUntilTodoRunsHide } from "@shared/todoRunsDisplay.js";
+import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
 
 const SUGGESTIONS = [
   "总结当前项目结构",
@@ -51,6 +63,22 @@ const COMPOSER_MIN_HEIGHT = COMPOSER_LINE_HEIGHT;
 /** ~3 行可视高度，达到 2 倍后出现滚动条 */
 const COMPOSER_BASE_HEIGHT = COMPOSER_LINE_HEIGHT * 3;
 const COMPOSER_MAX_HEIGHT = COMPOSER_BASE_HEIGHT * 2;
+
+const SIDEBAR_WIDTH_STORAGE_KEY = "cragent.sidebarWidth";
+const SIDEBAR_WIDTH_MIN = 200;
+const SIDEBAR_WIDTH_MAX = 520;
+const SIDEBAR_WIDTH_DEFAULT = 260;
+
+function readStoredSidebarWidth() {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return SIDEBAR_WIDTH_DEFAULT;
+    return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, value));
+  } catch {
+    return SIDEBAR_WIDTH_DEFAULT;
+  }
+}
 
 function sortSessions(sessions) {
   return [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -66,9 +94,10 @@ function sessionMessagesEqual(left, right) {
 
 export function App() {
   const [projects, setProjects] = useState([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [expandedProjectIds, setExpandedProjectIds] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [currentSession, setCurrentSession] = useState(null);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [config, setConfig] = useState(null);
   const [skills, setSkills] = useState([]);
   const [input, setInput] = useState("");
@@ -83,23 +112,29 @@ export function App() {
   const [compactLayout, setCompactLayout] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
   const [confirmRequest, setConfirmRequest] = useState(null);
+  const [planApprovalRequest, setPlanApprovalRequest] = useState(null);
   const [viewerImage, setViewerImage] = useState(null);
   const [messageQueue, setMessageQueue] = useState([]);
   const [queuePanelOpen, setQueuePanelOpen] = useState(false);
   const [contextPopupOpen, setContextPopupOpen] = useState(false);
+  const [contextDetail, setContextDetail] = useState(null);
   const [runtimeContextState, setRuntimeContextState] = useState(null);
   const [executionModeSaving, setExecutionModeSaving] = useState(false);
   const [composerQuickMenuOpen, setComposerQuickMenuOpen] = useState(false);
   const [todoRunsHideTick, setTodoRunsHideTick] = useState(0);
   const contextRingRef = useRef(null);
+  const contextDetailRequestRef = useRef(0);
   const composerQuickMenuRef = useRef(null);
   const filePickerRef = useRef(null);
   const sessionIdRef = useRef(null);
   const sessionErrorTimerRef = useRef(null);
+  const composerInputRowRef = useRef(null);
   const textareaRef = useRef(null);
   const busyBySessionRef = useRef(new Map());
   const newChatInFlightRef = useRef(false);
+  const sidebarWidthRef = useRef(sidebarWidth);
 
   const askConfirm = useCallback((options) => {
     return new Promise((resolve) => {
@@ -107,12 +142,55 @@ export function App() {
     });
   }, []);
 
+  useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth;
+  }, [sidebarWidth]);
+
+  const handleSidebarResizePointerDown = useCallback(
+    (event) => {
+      if (compactLayout || sidebarHidden) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = sidebarWidthRef.current;
+      const target = event.currentTarget;
+
+      const onPointerMove = (moveEvent) => {
+        const next = Math.min(
+          SIDEBAR_WIDTH_MAX,
+          Math.max(SIDEBAR_WIDTH_MIN, startWidth + moveEvent.clientX - startX),
+        );
+        setSidebarWidth(next);
+      };
+
+      const onPointerUp = () => {
+        target.releasePointerCapture?.(event.pointerId);
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+        window.removeEventListener("pointercancel", onPointerUp);
+        document.body.classList.remove("app-sidebar-resizing");
+        try {
+          localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidthRef.current));
+        } catch {
+          /* ignore quota / private mode */
+        }
+      };
+
+      target.setPointerCapture?.(event.pointerId);
+      document.body.classList.add("app-sidebar-resizing");
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", onPointerUp);
+      window.addEventListener("pointercancel", onPointerUp);
+    },
+    [compactLayout, sidebarHidden],
+  );
+
   const visibleTodoRuns = useMemo(
     () => filterVisibleTodoRuns(currentSession?.meta?.todoRuns),
     [currentSession?.meta?.todoRuns, todoRunsHideTick],
   );
 
   const verboseThinking = Boolean(config?.ui?.verbose_thinking);
+  const [hookLogs, setHookLogs] = useState([]);
 
   useEffect(() => {
     const delay = msUntilTodoRunsHide(currentSession?.meta?.todoRuns);
@@ -170,12 +248,56 @@ export function App() {
         showSessionError("没有可用会话。");
         return;
       }
-      const session = await window.cragent.getSession(sessionId);
+      const session = await window.cragent.getSession(sessionId, {
+        messageLimit: DEFAULT_UI_MESSAGE_PAGE,
+      });
       setCurrentSession(session);
-      setSelectedProjectId(session?.meta?.projectId || null);
+      ensureProjectExpanded(session?.meta?.projectId);
     } catch (err) {
       showSessionError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!currentSession?.messages?.length || loadingOlderMessages) {
+      return;
+    }
+    const oldestId = currentSession.messages[0].id;
+    setLoadingOlderMessages(true);
+    try {
+      const chunk = await window.cragent.getSession(currentSession.meta.id, {
+        beforeMessageId: oldestId,
+        messageLimit: DEFAULT_UI_MESSAGE_PAGE,
+      });
+      setCurrentSession((prev) => {
+        if (!prev || prev.meta.id !== chunk.meta.id) {
+          return prev;
+        }
+        return {
+          meta: {
+            ...prev.meta,
+            hasMoreMessages: chunk.meta.hasMoreMessages,
+            messageCount: chunk.meta.messageCount ?? prev.meta.messageCount,
+          },
+          messages: [...chunk.messages, ...prev.messages],
+        };
+      });
+    } catch (err) {
+      showSessionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [currentSession, loadingOlderMessages, showSessionError]);
+
+  function ensureProjectExpanded(projectId) {
+    if (!projectId) return;
+    setExpandedProjectIds((prev) => (prev.includes(projectId) ? prev : [...prev, projectId]));
+  }
+
+  function toggleProjectExpanded(projectId) {
+    setExpandedProjectIds((prev) =>
+      prev.includes(projectId) ? prev.filter((id) => id !== projectId) : [...prev, projectId],
+    );
   }
 
   useEffect(() => {
@@ -185,13 +307,27 @@ export function App() {
   useEffect(() => () => clearSessionError(), [clearSessionError]);
 
   function resizeComposer() {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "0px";
-    const scrollHeight = el.scrollHeight;
-    const next = Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, scrollHeight));
-    el.style.height = `${next}px`;
-    el.style.overflowY = scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+    const inputs =
+      composerInputRowRef.current?.querySelectorAll(".composer-input") ??
+      (textareaRef.current ? [textareaRef.current] : []);
+    let maxScrollHeight = 0;
+    for (const el of inputs) {
+      el.style.height = "0px";
+      maxScrollHeight = Math.max(maxScrollHeight, el.scrollHeight);
+    }
+    const next = Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, maxScrollHeight));
+    const overflowY = maxScrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+    for (const el of inputs) {
+      el.style.height = `${next}px`;
+      el.style.overflowY = overflowY;
+    }
+  }
+
+  function updateComposerInput(nextInput, nextMentions = pendingAtMentions) {
+    setInput(nextInput);
+    if (nextMentions !== pendingAtMentions) {
+      setPendingAtMentions(nextMentions);
+    }
   }
 
   useLayoutEffect(() => {
@@ -255,14 +391,14 @@ export function App() {
 
     const offSession = window.cragent.onSessionChanged((session) => {
       clearSessionError();
-      setSelectedProjectId(session?.meta?.projectId || null);
+      ensureProjectExpanded(session?.meta?.projectId);
       setCurrentSession((prev) => {
         if (
-          prev &&
-          prev.meta.id === session.meta.id &&
-          sessionMessagesEqual(prev.messages, session.messages)
+          prev?.meta.id === session.meta.id &&
+          sessionMessagesEqual(prev.messages, session.messages) &&
+          prev.meta.updatedAt === session.meta.updatedAt
         ) {
-          return { ...session, messages: prev.messages };
+          return prev;
         }
         return session;
       });
@@ -285,13 +421,14 @@ export function App() {
       }
     });
 
-    const offTodos = window.cragent.onTodosChanged?.(({ sessionId, todoRuns }) => {
+    const offTodos = window.cragent.onTodosChanged?.(({ sessionId, todoRuns, todos }) => {
       setCurrentSession((prev) => {
         if (!prev || prev.meta.id !== sessionId) return prev;
         return {
           ...prev,
           meta: {
             ...prev.meta,
+            todos: todos ?? prev.meta.todos,
             todoRuns: todoRuns || prev.meta.todoRuns,
           },
         };
@@ -316,6 +453,21 @@ export function App() {
         destructive: payload.destructive,
         resolve: (confirmed) => {
           window.cragent.respondConfirm?.({ id: payload.id, confirmed });
+        },
+      });
+    });
+
+    const offPlanApproval = window.cragent.onPlanApprovalRequest?.((payload) => {
+      setPlanApprovalRequest({
+        displayPath: payload.displayPath,
+        content: payload.content,
+        resolve: (result) => {
+          window.cragent.respondPlanApproval?.({
+            id: payload.id,
+            approved: Boolean(result?.approved),
+            content: result?.content,
+            feedback: result?.feedback,
+          });
         },
       });
     });
@@ -345,6 +497,12 @@ export function App() {
       }
     });
 
+    const offHookLog = window.cragent.onHookLog?.((payload) => {
+      if (sessionIdRef.current === payload.sessionId) {
+        setHookLogs(payload.logs || []);
+      }
+    });
+
     return () => {
       offMessage();
       offSession();
@@ -352,11 +510,26 @@ export function App() {
       offTodos?.();
       offQueue?.();
       offConfirm?.();
+      offPlanApproval?.();
       offError();
       offSettings();
       offContextWarning?.();
+      offHookLog?.();
     };
   }, []);
+
+  useEffect(() => {
+    const sessionId = currentSession?.meta?.id;
+    if (!sessionId || !window.cragent.getHookLogs) {
+      setHookLogs([]);
+      return;
+    }
+    void window.cragent.getHookLogs(sessionId).then((logs) => {
+      if (sessionIdRef.current === sessionId) {
+        setHookLogs(Array.isArray(logs) ? logs : []);
+      }
+    });
+  }, [currentSession?.meta?.id]);
 
   useEffect(() => {
     if (!busy) {
@@ -369,14 +542,9 @@ export function App() {
     return formatModelRef(currentSession.meta.providerKey, currentSession.meta.modelId);
   }, [config, currentSession]);
 
-  const [modelDisplay, setModelDisplay] = useState("");
-
-  useEffect(() => {
-    setModelDisplay(currentModel);
-  }, [currentModel]);
-
   useEffect(() => {
     setRuntimeContextState(null);
+    setContextDetail(null);
   }, [currentSession?.meta?.id]);
 
   const contextUsage = useMemo(() => {
@@ -419,6 +587,65 @@ export function App() {
       isAtBlockingLimit: runtimeContextState.isAtBlockingLimit ?? estimated.isAtBlockingLimit,
     };
   }, [currentSession, config, skills, runtimeContextState]);
+
+  const refreshContextDetail = useCallback(async () => {
+    const sessionId = currentSession?.meta?.id;
+    if (!sessionId || !window.cragent?.getSessionContextDetail) {
+      return;
+    }
+    const requestId = ++contextDetailRequestRef.current;
+    try {
+      const detail = await window.cragent.getSessionContextDetail(sessionId);
+      if (
+        requestId !== contextDetailRequestRef.current ||
+        sessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
+      setContextDetail(detail);
+    } catch {
+      if (requestId === contextDetailRequestRef.current) {
+        setContextDetail(null);
+      }
+    }
+  }, [currentSession?.meta?.id]);
+
+  useEffect(() => {
+    if (!contextPopupOpen) {
+      setContextDetail(null);
+      return;
+    }
+    void refreshContextDetail();
+  }, [
+    contextPopupOpen,
+    refreshContextDetail,
+    currentSession?.messages?.length,
+    currentSession?.meta?.updatedAt,
+    currentSession?.meta?.todos,
+    currentSession?.meta?.llmContextFromIndex,
+    currentSession?.meta?.contextSummary,
+    currentSession?.meta?.postCompactContext,
+    currentSession?.meta?.sessionMemory,
+    runtimeContextState,
+    skills,
+    config?.context?.compact_buffer_tokens,
+    config?.agents,
+    config?.mcp,
+  ]);
+
+  const contextUsageForPopup = useMemo(() => {
+    if (!contextUsage) return null;
+    if (!contextDetail?.categories?.length) {
+      return contextUsage;
+    }
+    return {
+      ...contextDetail,
+      percent: contextUsage.percent,
+      isAboveWarningThreshold: contextUsage.isAboveWarningThreshold,
+      isAboveAutoCompactThreshold: contextUsage.isAboveAutoCompactThreshold,
+      isAtBlockingLimit: contextUsage.isAtBlockingLimit,
+    };
+  }, [contextUsage, contextDetail]);
 
   const slashQuery = useMemo(() => {
     const match = input.match(/^\/([^\s]*)$/);
@@ -583,7 +810,7 @@ export function App() {
       if (prev.some((mention) => mention.relativePath === cleanPath)) {
         return prev;
       }
-      return [...prev, { id: crypto.randomUUID(), name, relativePath: cleanPath }];
+      return [...prev, { id: crypto.randomUUID(), name, relativePath: cleanPath, insertAt: atMention?.mentionStart ?? input.length }];
     });
     if (atMention) {
       const prefix = input.slice(0, atMention.mentionStart);
@@ -710,7 +937,7 @@ export function App() {
         }
         return [...prev, project].sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
       });
-      setSelectedProjectId(project.id);
+      ensureProjectExpanded(project.id);
     } catch (err) {
       showSessionError(err instanceof Error ? err.message : String(err), currentSession?.meta?.id);
     }
@@ -721,14 +948,25 @@ export function App() {
   }
 
   function removeLastPendingAtMention() {
-    setPendingAtMentions((prev) => (prev.length ? prev.slice(0, -1) : prev));
+    setPendingAtMentions((prev) => {
+      if (!prev.length) return prev;
+      const sorted = [...prev].sort(
+        (a, b) => (a.insertAt ?? input.length) - (b.insertAt ?? input.length),
+      );
+      const last = sorted[sorted.length - 1];
+      return prev.filter((mention) => mention.id !== last.id);
+    });
   }
 
   const composerPlaceholder =
     pendingAtMentions.length || pendingImages.length || pendingFiles.length ? "" : "发消息...";
 
   function buildSendPayload(trimmed) {
-    const atMentions = pendingAtMentions.map(({ name, relativePath }) => ({ name, relativePath }));
+    const atMentions = pendingAtMentions.map(({ name, relativePath, insertAt }) => ({
+      name,
+      relativePath,
+      insertAt,
+    }));
     const withAtMentions = buildInputWithAtMentions(trimmed, atMentions);
     return {
       userInput: buildInputWithFiles(withAtMentions, pendingFiles),
@@ -838,14 +1076,20 @@ export function App() {
     });
   }
 
-  async function handleNewChat(projectId = selectedProjectId) {
+  async function handleNewChat(projectId) {
     if (newChatInFlightRef.current) return;
     newChatInFlightRef.current = true;
     try {
       clearSessionError();
-      const next = await window.cragent.newSession({ projectId: projectId || null });
+      const resolvedProjectId =
+        projectId !== undefined
+          ? projectId || null
+          : expandedProjectIds.length === 1
+            ? expandedProjectIds[0]
+            : null;
+      const next = await window.cragent.newSession({ projectId: resolvedProjectId });
       setCurrentSession(next);
-      setSelectedProjectId(next?.meta?.projectId || null);
+      ensureProjectExpanded(next?.meta?.projectId);
       setSessions((prev) => {
         const has = prev.some((s) => s.id === next.meta.id);
         if (has) return sortSessions(prev);
@@ -859,21 +1103,22 @@ export function App() {
   }
 
   function handleSelectProject(projectId) {
-    if (projectId === null) {
-      setSelectedProjectId(null);
-      return;
-    }
-    setSelectedProjectId((prev) => (prev === projectId ? null : projectId));
+    if (projectId === null) return;
+    toggleProjectExpanded(projectId);
   }
 
   async function handleSwitchSession(sessionId) {
     clearSessionError();
-    const session = await window.cragent.getSession(sessionId);
-    setCurrentSession(session);
-    setSelectedProjectId(session?.meta?.projectId || null);
-    setBusy(busyBySessionRef.current.get(sessionId) ?? false);
-    setPage("chat");
-    if (compactLayout) setSidebarOpen(false);
+    const session = await window.cragent.getSession(sessionId, {
+      messageLimit: DEFAULT_UI_MESSAGE_PAGE,
+    });
+    startTransition(() => {
+      setCurrentSession(session);
+      ensureProjectExpanded(session?.meta?.projectId);
+      setBusy(busyBySessionRef.current.get(sessionId) ?? false);
+      setPage("chat");
+      if (compactLayout) setSidebarOpen(false);
+    });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         textareaRef.current?.focus();
@@ -903,7 +1148,7 @@ export function App() {
     });
     if (currentSession?.meta.id === meta.id) {
       setCurrentSession(session);
-      setSelectedProjectId(session?.meta?.projectId || null);
+      ensureProjectExpanded(session?.meta?.projectId);
       setPage("chat");
     }
     if (compactLayout) setSidebarOpen(false);
@@ -921,6 +1166,34 @@ export function App() {
 
   const executionMode =
     config?.agents?.default?.execution_mode === "plan" ? "plan" : "goal";
+
+  const planContext = useMemo(() => {
+    if (executionMode !== "plan" || !currentSession?.meta?.id) {
+      return { active: false };
+    }
+    return {
+      active: true,
+      sessionId: currentSession.meta.id,
+      displayPath: `.cragent/plans/${currentSession.meta.id}.md`,
+    };
+  }, [executionMode, currentSession?.meta?.id]);
+
+  async function handleExitPlanMode() {
+    if (!currentSession || busy || executionMode !== "plan") return;
+    try {
+      const result = await window.cragent.exitPlanMode(currentSession.meta.id);
+      if (result?.cancelled) {
+        if (result.session) setCurrentSession(result.session);
+        return;
+      }
+      if (result?.config) setConfig(result.config);
+    } catch (err) {
+      showSessionError(
+        err instanceof Error ? err.message : String(err),
+        currentSession.meta.id,
+      );
+    }
+  }
 
   async function handleExecutionModeChange(nextMode) {
     if (!config || nextMode === executionMode || executionModeSaving) return;
@@ -1033,11 +1306,16 @@ export function App() {
       />
       <div
         className={`app${compactLayout ? " app-compact" : ""}${sidebarHidden ? " app-sidebar-hidden" : ""}`}
+        style={
+          !compactLayout && !sidebarHidden
+            ? { "--sidebar-width": `${sidebarWidth}px` }
+            : undefined
+        }
       >
       <Sidebar
         open={sidebarOpen}
         projects={projects}
-        selectedProjectId={selectedProjectId}
+        expandedProjectIds={expandedProjectIds}
         sessions={sessions}
         currentSessionId={currentSession?.meta.id}
         busyBySession={busyBySession}
@@ -1055,6 +1333,18 @@ export function App() {
         onDelete={(meta) => void handleDeleteSession(meta)}
         onNewChat={() => void handleNewChat()}
       />
+      {!compactLayout && !sidebarHidden ? (
+        <div
+          className="sidebar-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-valuenow={sidebarWidth}
+          aria-valuemin={SIDEBAR_WIDTH_MIN}
+          aria-valuemax={SIDEBAR_WIDTH_MAX}
+          aria-label="调整侧栏宽度"
+          onPointerDown={handleSidebarResizePointerDown}
+        />
+      ) : null}
       {compactLayout && sidebarOpen ? (
         <button
           type="button"
@@ -1104,14 +1394,31 @@ export function App() {
                   </div>
                 </div>
               ) : (
-                <ChatView
-                  messages={currentSession.messages}
-                  todoRuns={visibleTodoRuns}
-                  busy={busy}
-                  verboseThinking={verboseThinking}
-                  onDelete={handleDeleteMessage}
-                  onOpenImage={(image) => setViewerImage(image)}
-                />
+                <>
+                  {currentSession.meta.hasMoreMessages ? (
+                    <div className="chat-load-older">
+                      <button
+                        type="button"
+                        className="chat-load-older-btn"
+                        disabled={loadingOlderMessages}
+                        onClick={() => void loadOlderMessages()}
+                      >
+                        {loadingOlderMessages ? "加载中…" : "加载更早的消息"}
+                      </button>
+                    </div>
+                  ) : null}
+                  <ChatView
+                    sessionId={currentSession.meta.id}
+                    messages={currentSession.messages}
+                    todoRuns={visibleTodoRuns}
+                    busy={busy}
+                    verboseThinking={verboseThinking}
+                    planContext={planContext}
+                    onDelete={handleDeleteMessage}
+                    onOpenImage={(image) => setViewerImage(image)}
+                    onOpenPlanFile={(sessionId) => window.cragent.openPlanFile?.(sessionId)}
+                  />
+                </>
               )}
               {visibleSessionError ? (
                 <div
@@ -1227,34 +1534,49 @@ export function App() {
                   </div>
                 ) : null}
                 <ComposerTaskStatus todos={currentSession?.meta?.todos} busy={busy} />
-                <div className="composer-input-row">
-                  <ComposerAtChips
-                    mentions={pendingAtMentions}
-                    onRemove={removePendingAtMention}
-                  />
-                  <textarea
-                  ref={textareaRef}
-                  className="composer-input"
-                  value={input}
-                  rows={1}
-                  onChange={(e) => setInput(e.target.value)}
-                  onInput={resizeComposer}
-                  onPaste={(e) => {
-                    const files = Array.from(e.clipboardData?.files || []).filter((file) =>
-                      file.type.startsWith("image/"),
-                    );
-                    if (!files.length) return;
-                    e.preventDefault();
-                    void addImagesFromFiles(files);
+                <ComposerHookLog
+                  logs={hookLogs}
+                  onClear={() => {
+                    const sessionId = currentSession?.meta?.id;
+                    if (sessionId) {
+                      void window.cragent.clearHookLogs?.(sessionId);
+                      setHookLogs([]);
+                    }
                   }}
-                  placeholder={composerPlaceholder}
-                  onKeyDown={(e) => {
+                />
+                <div className="composer-input-row" ref={composerInputRowRef}>
+                  <ComposerSegmentedInput
+                    input={input}
+                    onInputChange={updateComposerInput}
+                    mentions={pendingAtMentions}
+                    onRemoveMention={removePendingAtMention}
+                    textareaRef={textareaRef}
+                    onResize={resizeComposer}
+                    placeholder={composerPlaceholder}
+                    onPaste={(e) => {
+                      const files = Array.from(e.clipboardData?.files || []).filter((file) =>
+                        file.type.startsWith("image/"),
+                      );
+                      if (!files.length) return;
+                      e.preventDefault();
+                      void addImagesFromFiles(files);
+                    }}
+                    onKeyDown={(e, segment) => {
                     if (e.key === "Backspace" && pendingAtMentions.length > 0) {
-                      const el = textareaRef.current;
+                      const el = e.currentTarget;
                       const start = el?.selectionStart ?? 0;
                       const end = el?.selectionEnd ?? 0;
                       if (start === 0 && end === 0) {
                         e.preventDefault();
+                        if (segment?.textIndex > 0) {
+                          const mentionBeforeSegment = pendingAtMentions
+                            .filter((mention) => mention.insertAt === segment.segmentStart)
+                            .at(-1);
+                          if (mentionBeforeSegment) {
+                            removePendingAtMention(mentionBeforeSegment.id);
+                            return;
+                          }
+                        }
                         removeLastPendingAtMention();
                         return;
                       }
@@ -1321,7 +1643,7 @@ export function App() {
                       void handleSend();
                     }
                   }}
-                />
+                  />
                 </div>
                 <div className="composer-toolbar-spacer" aria-hidden="true" />
                 <div className="composer-toolbar">
@@ -1383,6 +1705,20 @@ export function App() {
                             {executionMode === "plan" ? <ComposerMenuCheckIcon /> : null}
                           </span>
                         </button>
+                        {executionMode === "plan" ? (
+                          <button
+                            type="button"
+                            className="composer-quick-item composer-quick-item-exit-plan"
+                            role="menuitem"
+                            disabled={busy || !currentSession}
+                            onClick={() => {
+                              setComposerQuickMenuOpen(false);
+                              void handleExitPlanMode();
+                            }}
+                          >
+                            <span className="composer-quick-item-label">开始执行</span>
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className={`composer-quick-item${executionMode === "goal" ? " active" : ""}`}
@@ -1433,54 +1769,16 @@ export function App() {
                     onChange={(mode) => void handleAuthModeChange(mode)}
                   />
                   <div className="composer-toolbar-right">
-                  <label className="composer-model-wrap">
-                    <span className="composer-model-content">
-                      <span className="composer-model-sizer" aria-hidden="true">
-                        {modelRefLabel(modelDisplay)}
-                      </span>
-                      <span className="composer-model-label">{modelRefLabel(modelDisplay)}</span>
-                    </span>
-                    <span className="composer-model-chevron" aria-hidden="true">
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                        <path
-                          d="M3 4.5L6 7.5L9 4.5"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </span>
-                    <select
-                      className="composer-model"
-                      value={modelDisplay}
-                      onChange={(e) => {
-                        const nextModel = e.target.value;
-                        setModelDisplay(nextModel);
-                        void handleModelChange(nextModel);
-                        requestAnimationFrame(() => {
-                          textareaRef.current?.focus();
-                        });
-                      }}
-                    >
-                      {Object.entries(config?.models || {}).flatMap(([providerKey, provider]) =>
-                        provider.models
-                          .filter(
-                            (model) =>
-                              model.state ||
-                              currentModel === formatModelRef(providerKey, model.id),
-                          )
-                          .map((model) => (
-                            <option
-                              key={formatModelRef(providerKey, model.id)}
-                              value={formatModelRef(providerKey, model.id)}
-                            >
-                              {model.id}
-                            </option>
-                          )),
-                      )}
-                    </select>
-                  </label>
+                  <ComposerModelMenu
+                    config={config}
+                    currentModel={currentModel}
+                    onChange={(nextModel) => {
+                      void handleModelChange(nextModel);
+                      requestAnimationFrame(() => {
+                        textareaRef.current?.focus();
+                      });
+                    }}
+                  />
                   <div className="composer-context-wrap">
                     <ComposerContextRing
                       buttonRef={contextRingRef}
@@ -1496,7 +1794,7 @@ export function App() {
                     />
                     <ComposerContextPopup
                       open={contextPopupOpen}
-                      usage={contextUsage}
+                      usage={contextUsageForPopup}
                       anchorRef={contextRingRef}
                       onClose={() => setContextPopupOpen(false)}
                     />
@@ -1563,6 +1861,16 @@ export function App() {
           onClose={(confirmed) => {
             confirmRequest.resolve(confirmed);
             setConfirmRequest(null);
+          }}
+        />
+      ) : null}
+      {planApprovalRequest ? (
+        <PlanApprovalDialog
+          displayPath={planApprovalRequest.displayPath}
+          content={planApprovalRequest.content}
+          onClose={(result) => {
+            planApprovalRequest.resolve(result);
+            setPlanApprovalRequest(null);
           }}
         />
       ) : null}

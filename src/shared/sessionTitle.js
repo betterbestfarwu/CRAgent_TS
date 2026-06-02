@@ -14,7 +14,12 @@ export function pickPlaceholderSession(sessions) {
     const candidates = (sessions || []).filter((session) =>
         isDefaultSessionTitle(session?.meta?.title),
     );
-    const withoutUser = candidates.filter((session) => !sessionHasUserMessages(session.messages));
+    const withoutUser = candidates.filter((session) => {
+        if (typeof session.meta?.hasUserMessages === "boolean") {
+            return !session.meta.hasUserMessages;
+        }
+        return !sessionHasUserMessages(session.messages);
+    });
     if (!withoutUser.length) {
         return null;
     }

@@ -18,3 +18,24 @@ export function filterSessions(metas, query) {
   if (!q) return metas;
   return metas.filter((meta) => displayTitle(meta).toLowerCase().includes(q));
 }
+
+export const SIDEBAR_INITIAL_VISIBLE = 5;
+export const SIDEBAR_LOAD_MORE_STEP = 10;
+
+/** @param {number} currentLimit */
+export function nextSidebarVisibleLimit(currentLimit) {
+  return currentLimit + SIDEBAR_LOAD_MORE_STEP;
+}
+
+/**
+ * @template T
+ * @param {T[]} items
+ * @param {number} visibleLimit
+ */
+export function sliceForSidebarDisplay(items, visibleLimit) {
+  const limit = Math.max(0, visibleLimit);
+  return {
+    visible: items.slice(0, limit),
+    hasMore: items.length > limit,
+  };
+}

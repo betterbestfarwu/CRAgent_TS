@@ -21,6 +21,76 @@
   var todoRunsById = {};
   var chatUi = window.CRAgentChatUtils || {};
   var verboseThinking = false;
+  var planContext = { active: false };
+
+  function renderPlanFileBannerElement(msg) {
+    if (!msg || !msg.plan_file_path) {
+      return null;
+    }
+    var wrap = document.createElement('div');
+    wrap.className = 'plan-file-banner';
+    wrap.innerHTML =
+      '<span class="plan-file-banner-label">Plan</span>' +
+      '<button type="button" class="plan-file-link" data-action="open-plan" data-session-id="' +
+      escapeAttr(msg.plan_session_id || '') +
+      '" title="在编辑器中打开计划文件">' +
+      escapeText(msg.plan_file_path) +
+      '</button>';
+    return wrap;
+  }
+
+  function prependPlanBanner(bubble, msg) {
+    var banner = renderPlanFileBannerElement(msg);
+    if (banner) {
+      bubble.insertBefore(banner, bubble.firstChild);
+    }
+  }
+  var hljsLoadPromise = null;
+  var katexLoadPromise = null;
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = src;
+      script.onload = function () {
+        resolve();
+      };
+      script.onerror = function () {
+        reject(new Error('Failed to load ' + src));
+      };
+      document.body.appendChild(script);
+    });
+  }
+
+  function loadHighlightScript() {
+    if (window.hljs) {
+      return Promise.resolve();
+    }
+    if (hljsLoadPromise) {
+      return hljsLoadPromise;
+    }
+    hljsLoadPromise = loadScript('highlight/highlight.min.js').catch(function () {
+      hljsLoadPromise = null;
+    });
+    return hljsLoadPromise;
+  }
+
+  function loadKatexScripts() {
+    if (typeof renderMathInElement === 'function') {
+      return Promise.resolve();
+    }
+    if (katexLoadPromise) {
+      return katexLoadPromise;
+    }
+    katexLoadPromise = loadScript('katex/katex.min.js')
+      .then(function () {
+        return loadScript('katex/auto-render.min.js');
+      })
+      .catch(function () {
+        katexLoadPromise = null;
+      });
+    return katexLoadPromise;
+  }
 
   var MATH_DELIMITERS = [
     { left: '$$', right: '$$', display: true },
@@ -30,7 +100,16 @@
   ];
 
   function typesetMath(el) {
-    if (!el || typeof renderMathInElement !== 'function') return;
+    if (!el) return;
+    if (typeof renderMathInElement !== 'function') {
+      if (!/\$|\\\(|\\\[/.test(el.textContent || '')) return;
+      loadKatexScripts()
+        .then(function () {
+          typesetMath(el);
+        })
+        .catch(function () {});
+      return;
+    }
     renderMathInElement(el, {
       delimiters: MATH_DELIMITERS,
       throwOnError: false,
@@ -40,6 +119,29 @@
 
   var mermaidReady = false;
   var mermaidModalEl = null;
+  var mermaidLoadPromise = null;
+
+  function loadMermaidScript() {
+    if (window.mermaid) {
+      return Promise.resolve();
+    }
+    if (mermaidLoadPromise) {
+      return mermaidLoadPromise;
+    }
+    mermaidLoadPromise = new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = 'mermaid/mermaid.min.js';
+      script.onload = function () {
+        resolve();
+      };
+      script.onerror = function () {
+        mermaidLoadPromise = null;
+        reject(new Error('Failed to load mermaid'));
+      };
+      document.body.appendChild(script);
+    });
+    return mermaidLoadPromise;
+  }
 
   function mermaidIsDark() {
     return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -89,36 +191,138 @@
     mermaidReady = true;
   }
 
-  function typesetMermaid(root) {
-    if (!root || !window.mermaid) return Promise.resolve();
-    ensureMermaid();
-    var nodes = root.querySelectorAll('.mermaid:not([data-mermaid-done])');
+  var mermaidLazyObserver = null;
+  var mermaidLazyPending = new Set();
+  var mermaidLazyFlushScheduled = false;
+  var MERMAID_LAZY_ROOT_MARGIN = '240px 0px';
+  var MERMAID_LAZY_BATCH_SIZE = 2;
+
+  function markMermaidRendered(nodes) {
+    nodes.forEach(function (node) {
+      node.setAttribute('data-mermaid-done', '1');
+      node.removeAttribute('data-mermaid-lazy');
+      var card = node.closest('.mermaid-diagram-card');
+      if (card) {
+        card.classList.remove('mermaid-lazy-pending');
+      }
+    });
+  }
+
+  function typesetMermaidNodes(nodes) {
     if (!nodes.length) return Promise.resolve();
-    var result = window.mermaid.run({ nodes: nodes, suppressErrors: true });
-    if (result && typeof result.then === 'function') {
-      return result.then(function () {
-        nodes.forEach(function (node) {
-          node.setAttribute('data-mermaid-done', '1');
-        });
-        enhanceMermaidDiagrams(root);
-      }).catch(function () {
-        enhanceMermaidDiagrams(root);
-      });
+    return loadMermaidScript()
+      .then(function () {
+        if (!window.mermaid) return;
+        ensureMermaid();
+        var result = window.mermaid.run({ nodes: nodes, suppressErrors: true });
+        var finish = function () {
+          markMermaidRendered(nodes);
+          enhanceMermaidDiagrams(container);
+        };
+        if (result && typeof result.then === 'function') {
+          return result.then(finish).catch(finish);
+        }
+        finish();
+      })
+      .catch(function () {});
+  }
+
+  function disconnectLazyMermaid() {
+    if (mermaidLazyObserver) {
+      mermaidLazyObserver.disconnect();
+      mermaidLazyObserver = null;
     }
-    enhanceMermaidDiagrams(root);
-    return Promise.resolve();
+    mermaidLazyPending.clear();
+    mermaidLazyFlushScheduled = false;
+  }
+
+  function flushLazyMermaidBatch() {
+    mermaidLazyFlushScheduled = false;
+    if (!mermaidLazyPending.size) return;
+    var pending = Array.from(mermaidLazyPending);
+    mermaidLazyPending.clear();
+    var batch = pending.slice(0, MERMAID_LAZY_BATCH_SIZE);
+    var remainder = pending.slice(MERMAID_LAZY_BATCH_SIZE);
+    remainder.forEach(function (node) {
+      mermaidLazyPending.add(node);
+    });
+    typesetMermaidNodes(batch).finally(function () {
+      if (mermaidLazyPending.size) {
+        scheduleLazyMermaidFlush();
+      }
+    });
+  }
+
+  function scheduleLazyMermaidFlush() {
+    if (mermaidLazyFlushScheduled) return;
+    mermaidLazyFlushScheduled = true;
+    var run = function () {
+      flushLazyMermaidBatch();
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(run, { timeout: 120 });
+    } else {
+      setTimeout(run, 0);
+    }
+  }
+
+  function ensureLazyMermaidObserver() {
+    if (mermaidLazyObserver) return;
+    mermaidLazyObserver = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) return;
+          var node = entry.target;
+          mermaidLazyObserver.unobserve(node);
+          mermaidLazyPending.add(node);
+        });
+        if (mermaidLazyPending.size) {
+          scheduleLazyMermaidFlush();
+        }
+      },
+      { root: null, rootMargin: MERMAID_LAZY_ROOT_MARGIN, threshold: 0 },
+    );
+  }
+
+  function observeMermaidLazy(root) {
+    if (!root) return Promise.resolve();
+    if (typeof IntersectionObserver !== 'function') {
+      return typesetMermaidNodes(
+        Array.from(root.querySelectorAll('.mermaid:not([data-mermaid-done])')),
+      );
+    }
+    var nodes = root.querySelectorAll('.mermaid:not([data-mermaid-done]):not([data-mermaid-lazy])');
+    if (!nodes.length) return;
+    ensureLazyMermaidObserver();
+    nodes.forEach(function (node) {
+      node.setAttribute('data-mermaid-lazy', '1');
+      var card = node.closest('.mermaid-diagram-card');
+      if (card) {
+        card.classList.add('mermaid-lazy-pending');
+      }
+      mermaidLazyObserver.observe(node);
+    });
+  }
+
+  function typesetMermaid(root) {
+    observeMermaidLazy(root);
   }
 
   function highlightCodeBlocks(root) {
-    if (!root || !window.hljs) return;
-    root.querySelectorAll('pre code').forEach(function (block) {
-      if (block.closest('.mermaid-diagram-card')) return;
-      if (block.dataset.hljsDone === '1') return;
-      try {
-        window.hljs.highlightElement(block);
-        block.dataset.hljsDone = '1';
-      } catch (_) {}
-    });
+    if (!root || !root.querySelector('pre code')) return;
+    loadHighlightScript()
+      .then(function () {
+        if (!window.hljs) return;
+        root.querySelectorAll('pre code').forEach(function (block) {
+          if (block.closest('.mermaid-diagram-card')) return;
+          if (block.dataset.hljsDone === '1') return;
+          try {
+            window.hljs.highlightElement(block);
+            block.dataset.hljsDone = '1';
+          } catch (_) {}
+        });
+      })
+      .catch(function () {});
   }
 
   function enhanceMermaidDiagrams(root) {
@@ -176,8 +380,10 @@
     if (mermaidModalEl) mermaidModalEl.classList.remove('is-open');
   }
 
+  var batchPostProcess = false;
+
   function postProcessRenderedContent(root) {
-    if (!root) return;
+    if (!root || batchPostProcess) return;
     typesetMath(root);
     highlightCodeBlocks(root);
     enhanceCodeCopyButtons(root);
@@ -497,6 +703,7 @@
     bubble.className = 'bubble';
     bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking);
     if (contentMsg) {
+      prependPlanBanner(bubble, contentMsg);
       var contentWrap = document.createElement('div');
       contentWrap.className = 'assistant-turn-content';
       contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
@@ -548,7 +755,7 @@
 
   function assistantMetaLabel(msg) {
     var modelId = messageModelId(msg);
-    return modelId ? 'Assistant by ' + escapeText(modelId) : 'Assistant';
+    return modelId ? 'Answered by ' + escapeText(modelId) : 'Assistant';
   }
 
   function roleLabel(role, msg) {
@@ -638,12 +845,20 @@
 
     if (msg.role !== 'tool') {
       if (msg.role === 'assistant') {
+        prependPlanBanner(bubble, msg);
         var body = document.createElement('div');
         body.className = 'bubble-collapse-body';
         body.innerHTML = window.MD.render(msg.content || '');
         bubble.appendChild(body);
         postProcessRenderedContent(body);
         setupCollapsibleContent(body);
+      } else if (msg.role === 'user' && msg.plan_rejection) {
+        var rejectionBody = document.createElement('div');
+        rejectionBody.className = 'plan-rejection-body';
+        rejectionBody.innerHTML =
+          '<div class="plan-rejection-title">计划未批准 · 继续规划</div>' +
+          '<pre class="plan-rejection-plan">' + escapeText(msg.content || '') + '</pre>';
+        bubble.appendChild(rejectionBody);
       } else if (msg.role === 'user') {
         appendUserBubbleContent(bubble, msg);
       } else {
@@ -824,10 +1039,13 @@
   }
 
   function renderMessageList(payload) {
+    disconnectLazyMermaid();
+    batchPostProcess = true;
     container.innerHTML = '';
     var messages = Array.isArray(payload) ? payload : (payload && payload.messages) || [];
     todoRunsById = (!Array.isArray(payload) && payload && payload.todoRuns) || {};
     var index = 0;
+    try {
     while (index < messages.length) {
       var msg = messages[index];
       if (isContextDivider(msg)) {
@@ -903,6 +1121,12 @@
       container.appendChild(buildBubble(msg));
       index += 1;
     }
+    } finally {
+      batchPostProcess = false;
+      requestAnimationFrame(function () {
+        postProcessRenderedContent(container);
+      });
+    }
   }
 
   var app = {
@@ -933,6 +1157,9 @@
     setVerboseThinking: function (value) {
       verboseThinking = Boolean(value);
     },
+    setPlanContext: function (value) {
+      planContext = value && typeof value === 'object' ? value : { active: false };
+    },
   };
 
   function copyToClipboard(text) {
@@ -952,6 +1179,14 @@
     var btn = e.target.closest && e.target.closest('button[data-action]');
     if (!btn) return;
     var action = btn.dataset.action;
+
+    if (action === 'open-plan') {
+      var planSessionId = btn.dataset.sessionId;
+      if (planSessionId) {
+        window.parent.postMessage({ action: 'openPlan', sessionId: planSessionId }, '*');
+      }
+      return;
+    }
 
     if (action === 'copy-code') {
       var block = btn.closest('.code-block');
@@ -974,7 +1209,19 @@
 
     if (action === 'expand-mermaid') {
       var expandCard = btn.closest('.mermaid-diagram-card');
-      if (expandCard) openMermaidModal(expandCard);
+      if (!expandCard) return;
+      var mermaidEl = expandCard.querySelector('.mermaid');
+      if (mermaidEl && !mermaidEl.getAttribute('data-mermaid-done')) {
+        if (mermaidLazyObserver) {
+          mermaidLazyObserver.unobserve(mermaidEl);
+        }
+        mermaidLazyPending.delete(mermaidEl);
+        typesetMermaidNodes([mermaidEl]).then(function () {
+          openMermaidModal(expandCard);
+        });
+        return;
+      }
+      openMermaidModal(expandCard);
       return;
     }
 

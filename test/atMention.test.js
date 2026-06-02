@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
     buildAtNavItems,
+    buildComposerSegments,
     buildPathTreeSegments,
     filterDirectoryEntries,
     formatAtMentionsForDisplay,
@@ -96,7 +97,7 @@ describe("formatAtMentionsForDisplay", () => {
 });
 
 describe("buildInputWithAtMentions", () => {
-    it("appends @ relative paths after user text", () => {
+    it("appends @ relative paths after user text when insertAt is omitted", () => {
         assert.equal(
             buildInputWithAtMentions("fix styles", [
                 { name: "styles.css", relativePath: "src/renderer/styles.css" },
@@ -105,10 +106,59 @@ describe("buildInputWithAtMentions", () => {
         );
     });
 
+    it("inserts @ relative paths at the recorded position", () => {
+        assert.equal(
+            buildInputWithAtMentions("cat", [
+                { name: "README.md", relativePath: "README.md", insertAt: 3 },
+            ]),
+            "cat @README.md",
+        );
+        assert.equal(
+            buildInputWithAtMentions("hello world", [
+                { name: "App.jsx", relativePath: "src/App.jsx", insertAt: 6 },
+            ]),
+            "hello @src/App.jsx world",
+        );
+    });
+
     it("returns mention-only input when text is empty", () => {
         assert.equal(
             buildInputWithAtMentions("", [{ name: "App.jsx", relativePath: "src/App.jsx" }]),
             "@src/App.jsx",
+        );
+    });
+});
+
+describe("buildComposerSegments", () => {
+    it("places trailing mentions after typed text", () => {
+        assert.deepEqual(
+            buildComposerSegments("cat", [{ id: "m1", insertAt: 3 }]),
+            [
+                { kind: "text", content: "cat" },
+                { kind: "mention", mentionId: "m1" },
+                { kind: "text", content: "" },
+            ],
+        );
+    });
+
+    it("places leading mentions before typed text", () => {
+        assert.deepEqual(
+            buildComposerSegments(" cat", [{ id: "m1", insertAt: 0 }]),
+            [
+                { kind: "mention", mentionId: "m1" },
+                { kind: "text", content: " cat" },
+            ],
+        );
+    });
+
+    it("splits text around middle mentions", () => {
+        assert.deepEqual(
+            buildComposerSegments("hello world", [{ id: "m1", insertAt: 6 }]),
+            [
+                { kind: "text", content: "hello " },
+                { kind: "mention", mentionId: "m1" },
+                { kind: "text", content: "world" },
+            ],
         );
     });
 });

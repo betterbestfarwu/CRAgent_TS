@@ -11,6 +11,24 @@ export function isContextDividerMessage(message) {
     return message?.role === CONTEXT_DIVIDER_ROLE;
 }
 
+/** Messages currently sent to the LLM (after the last context reset, excluding dividers). */
+export function getActiveLlmContextEntries(session) {
+    const messages = session?.messages || [];
+    const fromIndex = Math.max(0, session?.meta?.llmContextFromIndex ?? 0);
+    const entries = [];
+    for (let index = fromIndex; index < messages.length; index += 1) {
+        const message = messages[index];
+        if (!isContextDividerMessage(message)) {
+            entries.push({ message, index });
+        }
+    }
+    return entries;
+}
+
+export function sessionHasActiveLlmContext(session) {
+    return getActiveLlmContextEntries(session).length > 0;
+}
+
 /** Collapse back-to-back context dividers with the same label for chat UI. */
 export function dedupeConsecutiveContextDividers(messages) {
     if (!messages?.length) {
@@ -31,6 +49,33 @@ export function dedupeConsecutiveContextDividers(messages) {
 
 export function getMessageRunId(message) {
     return message?.runId ?? message?.run_id ?? null;
+}
+
+/**
+ * True when chat iframe should renderAll instead of patchActiveRun for new tail
+ * messages (context dividers; assistant-only hook blocks without a user turn).
+ */
+export function appendedMessagesNeedFullRender(allMessages, previousCount) {
+    const appended = (allMessages || []).slice(previousCount);
+    if (!appended.length) {
+        return false;
+    }
+    if (appended.some(isContextDividerMessage)) {
+        return true;
+    }
+    return appended.some((message) => {
+        if (message?.role !== "assistant") {
+            return false;
+        }
+        const runId = getMessageRunId(message);
+        if (!runId) {
+            // Standalone notices (/compact feedback, "context too short", etc.)
+            return true;
+        }
+        return !(allMessages || []).some(
+            (candidate) => candidate?.role === "user" && getMessageRunId(candidate) === runId,
+        );
+    });
 }
 
 export function getMessageModelId(message) {

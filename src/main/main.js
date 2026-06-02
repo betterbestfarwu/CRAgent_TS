@@ -7,6 +7,8 @@ import { SessionStore } from "./sessionStore";
 import { LlmClient } from "./llmClient";
 import { ToolRegistry } from "./toolRegistry";
 import { AgentRuntime } from "./agentRuntime";
+import { sessionForRenderer } from "./rendererSession.js";
+import { resolveSessionWorkspace } from "./workspacePaths.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
 const isDev =
@@ -52,7 +54,7 @@ function createWindow() {
             preload: path.join(__dirname, "../preload/index.js"),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: true,
+            sandbox: false,
         },
     });
     if (isDev && devServerUrl) {
@@ -82,7 +84,10 @@ function buildMenu() {
                     accelerator: "CmdOrCtrl+N",
                     click: () => {
                         const session = sessionStore.openNewSession();
-                        mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
+                        mainWindow?.webContents.send(
+                            IPC_CHANNELS.onSessionChanged,
+                            sessionForRenderer(session),
+                        );
                     },
                 },
             ],
@@ -126,9 +131,13 @@ function registerIpc() {
         }
         return result.filePaths[0];
     });
-    ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId) => sessionStore.get(sessionId));
+    ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId, options = {}) =>
+        sessionForRenderer(
+            sessionStore.get(sessionId, { hydrateImages: false, ...options }),
+        ),
+    );
     ipcMain.handle(IPC_CHANNELS.newSession, (_event, args = {}) =>
-        sessionStore.openNewSession(args),
+        sessionForRenderer(sessionStore.openNewSession(args)),
     );
     ipcMain.handle(IPC_CHANNELS.sendChat, (_event, request) =>
         runtime.sendUserMessage(
@@ -139,9 +148,27 @@ function registerIpc() {
             request.userText,
         ),
     );
+    ipcMain.handle(IPC_CHANNELS.exitPlanMode, async (_event, sessionId) => {
+        const { readPlanApprovalDraft } = await import("./planMode.js");
+        const { requestPlanApproval } = await import("./planApprovalBridge.js");
+        const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
+        const draft = readPlanApprovalDraft(workspace, sessionId);
+        const approval = await requestPlanApproval(mainWindow, draft);
+        if (!approval.approved) {
+            const rejected = await runtime.rejectPlanMode(sessionId, {
+                planContent: approval.content ?? draft.content,
+                feedback: approval.feedback,
+            });
+            return { cancelled: true, session: sessionForRenderer(rejected.session) };
+        }
+        return runtime.exitPlanMode(sessionId, approval.content);
+    });
     ipcMain.handle(IPC_CHANNELS.updateModel, (_event, args) => {
         const session = sessionStore.updateModel(args.sessionId, args.providerKey, args.modelId);
-        mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
+        mainWindow?.webContents.send(
+            IPC_CHANNELS.onSessionChanged,
+            sessionForRenderer(session),
+        );
     });
     ipcMain.handle(IPC_CHANNELS.updateConfig, (_event, next) => configStore.update(next));
 }

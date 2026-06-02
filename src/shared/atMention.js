@@ -116,7 +116,88 @@ export function formatAtMentionsForDisplay(text) {
     });
 }
 
-/** @typedef {{ name: string, relativePath: string }} AtMentionRef */
+/** @typedef {{ name: string, relativePath: string, insertAt?: number }} AtMentionRef */
+
+/** @typedef {{ kind: "text", content: string } | { kind: "mention", mentionId: string }} ComposerSegment */
+
+/**
+ * @param {string} text
+ * @param {Array<{ id: string, insertAt?: number }>} mentions
+ * @returns {ComposerSegment[]}
+ */
+export function buildComposerSegments(text, mentions) {
+    const value = String(text ?? "");
+    const sorted = [...(mentions || [])].sort(
+        (a, b) => resolveMentionInsertAt(a, value.length) - resolveMentionInsertAt(b, value.length),
+    );
+    const segments = [];
+    let cursor = 0;
+    let index = 0;
+
+    while (index < sorted.length) {
+        const insertAt = resolveMentionInsertAt(sorted[index], value.length);
+        if (insertAt > cursor) {
+            segments.push({ kind: "text", content: value.slice(cursor, insertAt) });
+            cursor = insertAt;
+        }
+        const groupAt = insertAt;
+        while (
+            index < sorted.length &&
+            resolveMentionInsertAt(sorted[index], value.length) === groupAt
+        ) {
+            segments.push({ kind: "mention", mentionId: sorted[index].id });
+            index += 1;
+        }
+    }
+
+    if (cursor < value.length) {
+        segments.push({ kind: "text", content: value.slice(cursor) });
+    }
+
+    if (!segments.length) {
+        segments.push({ kind: "text", content: "" });
+    } else if (segments[segments.length - 1].kind === "mention") {
+        segments.push({ kind: "text", content: "" });
+    }
+
+    return segments;
+}
+
+/**
+ * @param {{ insertAt?: number }} mention
+ * @param {number} textLength
+ * @returns {number}
+ */
+export function resolveMentionInsertAt(mention, textLength) {
+    const raw = mention?.insertAt;
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+        return Math.max(0, Math.min(raw, textLength));
+    }
+    return textLength;
+}
+
+/**
+ * @param {string} text
+ * @param {number} segmentStart
+ * @param {number} segmentEnd
+ * @param {string} nextSegmentText
+ * @param {Array<{ id: string, insertAt?: number }>} mentions
+ * @returns {{ text: string, mentions: Array<{ id: string, insertAt?: number }> }}
+ */
+export function applyComposerTextSegmentEdit(text, segmentStart, segmentEnd, nextSegmentText, mentions) {
+    const value = String(text ?? "");
+    const start = Math.max(0, Math.min(segmentStart, value.length));
+    const end = Math.max(start, Math.min(segmentEnd, value.length));
+    const nextText = String(nextSegmentText ?? "");
+    const delta = nextText.length - (end - start);
+    const updatedText = value.slice(0, start) + nextText + value.slice(end);
+    const updatedMentions = (mentions || []).map((mention) => {
+        const insertAt = resolveMentionInsertAt(mention, value.length);
+        if (insertAt <= start) return mention;
+        return { ...mention, insertAt: insertAt + delta };
+    });
+    return { text: updatedText, mentions: updatedMentions };
+}
 
 /**
  * @param {string} relativePath
@@ -135,13 +216,45 @@ export function atMentionFileName(relativePath) {
  * @returns {string}
  */
 export function buildInputWithAtMentions(text, mentions) {
-    const mentionPart = (mentions || [])
-        .map((mention) => `@${mention.relativePath}`)
-        .filter(Boolean)
-        .join(" ");
-    const trimmed = String(text ?? "").trim();
-    if (!mentionPart) return trimmed;
-    return trimmed ? `${trimmed} ${mentionPart}` : mentionPart;
+    const value = String(text ?? "");
+    const list = [...(mentions || [])].sort(
+        (a, b) => resolveMentionInsertAt(a, value.length) - resolveMentionInsertAt(b, value.length),
+    );
+    if (!list.length) return value.trim();
+
+    let result = "";
+    let cursor = 0;
+    let index = 0;
+
+    while (index < list.length) {
+        const insertAt = resolveMentionInsertAt(list[index], value.length);
+        if (insertAt > cursor) {
+            result += value.slice(cursor, insertAt);
+            cursor = insertAt;
+        }
+        const groupAt = insertAt;
+        while (
+            index < list.length &&
+            resolveMentionInsertAt(list[index], value.length) === groupAt
+        ) {
+            const path = String(list[index].relativePath ?? "").trim();
+            if (path) {
+                if (result && !/\s$/.test(result)) result += " ";
+                result += `@${path}`;
+            }
+            index += 1;
+        }
+    }
+
+    if (cursor < value.length) {
+        const suffix = value.slice(cursor);
+        if (result && suffix && !/^\s/.test(suffix) && !/\s$/.test(result)) {
+            result += " ";
+        }
+        result += suffix;
+    }
+
+    return result.trim();
 }
 
 /**

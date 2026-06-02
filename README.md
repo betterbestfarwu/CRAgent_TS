@@ -86,7 +86,7 @@ npm test
 | `read_file` | 读取工作区内文件 |
 | `write_file` | 写入工作区内文件 |
 | `list_dir` | 列出目录内容 |
-| `bash` | 在工作区执行 shell 命令（需用户确认） |
+| `bash` | 在工作区执行 shell 命令（macOS/Linux: Zsh/Bash；Windows: PowerShell；各平台 20 项安全检查 + 危险/写操作确认） |
 | `web_fetch` | 抓取网页内容 |
 | `memory_get` / `memory_search` | 读写与搜索 Agent 记忆 |
 | `load_skill` / `download_skill` / `delete_skill` | 管理 Skills |

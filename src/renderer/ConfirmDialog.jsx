@@ -33,14 +33,16 @@ export function ConfirmDialog({
       >
         <img className="confirm-dialog-icon" src={APP_ICON_SRC} alt="" width={64} height={64} />
         {title ? <div className="confirm-dialog-title">{title}</div> : null}
-        <p id="confirm-dialog-message" className="confirm-dialog-message">
-          {message}
-        </p>
-        {detail ? (
-          <p id="confirm-dialog-detail" className="confirm-dialog-detail">
-            {detail}
+        <div className="confirm-dialog-body">
+          <p id="confirm-dialog-message" className="confirm-dialog-message">
+            {message}
           </p>
-        ) : null}
+          {detail ? (
+            <p id="confirm-dialog-detail" className="confirm-dialog-detail">
+              {detail}
+            </p>
+          ) : null}
+        </div>
         <div className="confirm-dialog-actions">
           <button type="button" className="confirm-dialog-btn" onClick={() => onClose(false)}>
             {cancelLabel}

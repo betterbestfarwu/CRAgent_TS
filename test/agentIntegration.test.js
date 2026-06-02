@@ -120,7 +120,7 @@ function makeRuntimeHarness(options = {}) {
         llmClient,
         toolRegistry,
         { bootstrapSystemContent: () => "" },
-        { systemPromptSection: () => "", reload: () => {} },
+        { systemPromptSection: () => "", listSummaries: () => [], reload: () => {} },
         () => null,
     );
 
@@ -783,14 +783,14 @@ test("runLoop stops with guidance when context remains blocked", async () => {
     assert.match(assistant.content, /compact_context/);
 });
 
-test("plan execution mode returns plan without entering tool loop", async () => {
+test("plan execution mode uses chat loop with read-only tool policy", async () => {
     const { session, runtime, configStore, llmCalls, llmCompleteCalls, events } = makeRuntimeHarness({
-        completeImpl: () => ({
+        chatImpl: () => ({
             message: {
                 id: "assistant-plan",
                 role: "assistant",
                 content:
-                    "计划如下：\n1. 先定位入口\n2. 再拆解改动\n3. 最后验证\n\n若确认执行，请切换到 Goal 模式。",
+                    "计划已写入计划文件。\n1. 先定位入口\n2. 再拆解改动\n3. 最后验证\n\n请点击「开始执行」或切换到 Goal 模式。",
                 createdAt: new Date().toISOString(),
             },
         }),
@@ -808,12 +808,106 @@ test("plan execution mode returns plan without entering tool loop", async () => 
 
     await runtime.sendUserMessage(session.meta.id, "帮我改这个项目的会话标题策略");
 
-    assert.equal(llmCalls.length, 0);
-    assert.equal(llmCompleteCalls.length, 1);
+    assert.equal(llmCompleteCalls.length, 0);
+    assert.equal(llmCalls.length, 1);
+    assert.equal(llmCalls[0].tools?.length ?? 0, 0);
     const assistant = events.messageAppended.find(
         (entry) => entry.message.role === "assistant",
     )?.message;
     assert.ok(assistant);
-    assert.match(assistant.content, /计划如下/);
-    assert.match(assistant.content, /切换到 Goal 模式/);
+    assert.match(assistant.content, /计划/);
+});
+
+test("rejectPlanMode appends rejection user message and stays in plan", async () => {
+    const { session, runtime, configStore, sessionStore } = makeRuntimeHarness({
+        chatImpl: () => ({
+            message: {
+                id: "assistant-after-reject",
+                role: "assistant",
+                content: "已根据反馈更新计划。",
+                createdAt: new Date().toISOString(),
+            },
+        }),
+    });
+    configStore.update({
+        ...configStore.get(),
+        agents: {
+            ...configStore.get().agents,
+            default: {
+                ...configStore.get().agents.default,
+                execution_mode: "plan",
+            },
+        },
+    });
+    await runtime.rejectPlanMode(session.meta.id, {
+        planContent: "# Rejected plan\n\n- fix tests",
+        feedback: "补充端到端验证步骤",
+    });
+    assert.equal(configStore.get().agents.default.execution_mode, "plan");
+    const updated = sessionStore.get(session.meta.id);
+    const rejection = updated.messages.find((m) => m.planRejection);
+    assert.ok(rejection);
+    assert.match(rejection.content, /rejected by the user/i);
+    assert.match(rejection.content, /Rejected plan/);
+    assert.match(rejection.content, /补充端到端验证步骤/);
+});
+
+test("exitPlanMode switches to goal and queues implementation prompt", async () => {
+    const { session, runtime, configStore } = makeRuntimeHarness({
+        chatImpl: () => ({
+            message: {
+                id: "assistant-plan",
+                role: "assistant",
+                content: "done planning",
+                createdAt: new Date().toISOString(),
+            },
+        }),
+    });
+    configStore.update({
+        ...configStore.get(),
+        agents: {
+            ...configStore.get().agents,
+            default: {
+                ...configStore.get().agents.default,
+                execution_mode: "plan",
+            },
+        },
+    });
+    const result = await runtime.exitPlanMode(session.meta.id, "# Approved plan\n\nDo it.");
+    assert.equal(result.config.agents.default.execution_mode, "goal");
+    assert.equal(configStore.get().agents.default.execution_mode, "goal");
+});
+
+test("getSessionContextDetail exposes system prompt preview and full-session breakdown", () => {
+    const { runtime, session, sessionStore } = makeRuntimeHarness();
+    sessionStore.appendMessage(session.meta.id, {
+        id: "user-1",
+        role: "user",
+        content: "hello",
+        createdAt: new Date().toISOString(),
+    });
+    sessionStore.updateTodos(session.meta.id, [
+        { id: "1", status: "pending", content: "ship feature" },
+    ]);
+
+    const detail = runtime.getSessionContextDetail(session.meta.id);
+
+    assert.ok(detail.systemPromptText);
+    assert.match(detail.systemPromptText, /active_todos/);
+    assert.match(detail.systemPromptText, /ship feature/);
+    const systemCategory = detail.categories.find((category) => category.id === "systemPrompt");
+    assert.ok(systemCategory);
+    assert.equal(systemCategory.previewText, detail.systemPromptText);
+    assert.ok(systemCategory.tokens > 0);
+
+    for (const category of detail.categories) {
+        assert.ok(
+            typeof category.previewText === "string" && category.previewText.length > 0,
+            `${category.id} should include preview text`,
+        );
+    }
+
+    const conversation = detail.categories.find((category) => category.id === "conversation");
+    assert.ok(conversation);
+    assert.match(conversation.previewText, /hello/);
 });

@@ -14,10 +14,12 @@ async function bootstrap() {
     installWebBridge();
   }
 
+  const Root = window.cragent?.isDesktop ? React.Fragment : React.StrictMode;
+
   createRoot(rootEl).render(
-    <React.StrictMode>
+    <Root>
       <App />
-    </React.StrictMode>,
+    </Root>,
   );
 }
 

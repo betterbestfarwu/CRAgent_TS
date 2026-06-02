@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "command": "hooks/example-prompt-guard.sh",
+        "matcher": "SECRET|password\\s*="
+      }
+    ],
+    "PreToolUse": [
+      {
+        "command": "hooks/example-pre-tool.sh",
+        "matcher": "bash"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "command": "hooks/example-post-tool.sh"
+      }
+    ]
+  }
+}

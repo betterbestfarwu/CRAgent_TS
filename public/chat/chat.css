@@ -417,6 +417,17 @@ html, body {
   min-height: 1px;
 }
 
+.bubble .mermaid-diagram-card.mermaid-lazy-pending .mermaid-diagram-body {
+  min-height: 140px;
+}
+
+.bubble .mermaid-diagram-card.mermaid-lazy-pending .mermaid-diagram-body .mermaid {
+  width: 100%;
+  min-height: 120px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--cursor-bg-input) 88%, var(--border));
+}
+
 .bubble .mermaid-diagram-body svg {
   max-width: 100%;
   height: auto;
@@ -692,6 +703,70 @@ html, body {
 .msg.assistant-turn .bubble,
 .msg.thinking-group-msg .bubble {
   padding: 10px var(--chat-inner-x);
+}
+
+.plan-file-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  font-size: 12px;
+}
+
+.plan-file-banner-label {
+  flex-shrink: 0;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #2563eb;
+}
+
+.plan-file-link {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 12px;
+  color: #1d4ed8;
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: left;
+  word-break: break-all;
+}
+
+.plan-file-link:hover {
+  color: #1e3a8a;
+}
+
+.msg.user .plan-rejection-body {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.plan-rejection-title {
+  font-weight: 600;
+  color: #b45309;
+  margin-bottom: 8px;
+}
+
+.plan-rejection-plan {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(180, 83, 9, 0.06);
+  border: 1px solid rgba(180, 83, 9, 0.2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  max-height: 280px;
+  overflow: auto;
 }
 
 .msg.context_divider {

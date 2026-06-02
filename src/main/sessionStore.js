@@ -1,14 +1,39 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
 import {
     isDefaultSessionTitle,
     pickPlaceholderSession,
     titleFromFirstUserMessage,
 } from "@shared/sessionTitle";
+import {
+    appendMessageLine,
+    deleteSessionFiles,
+    enrichMeta,
+    isSplitSession,
+    listSessionEntries,
+    messagesFile,
+    metaFile,
+    migrateLegacySessionIfNeeded,
+    readLegacyMeta,
+    readMessages,
+    readMeta,
+    rewriteMessages,
+    writeMeta,
+    writeSplitSession,
+} from "./sessionStorage.js";
+import {
+    deleteSessionImages,
+    externalizeSessionImages,
+    hydrateSessionImages,
+    sessionHasInlineImages,
+} from "./sessionImageStorage.js";
+
 function nowIso() {
     return new Date().toISOString();
 }
+
 function normalizeProjectId(projectId) {
     if (typeof projectId !== "string") {
         return null;
@@ -16,12 +41,28 @@ function normalizeProjectId(projectId) {
     const trimmed = projectId.trim();
     return trimmed ? trimmed : null;
 }
+
+function normalizeGetOptions(options = {}) {
+    const paginated =
+        options.messageLimit !== undefined || options.beforeMessageId !== undefined;
+    return {
+        hydrateImages: options.hydrateImages !== false,
+        messageLimit: paginated
+            ? options.messageLimit ?? DEFAULT_UI_MESSAGE_PAGE
+            : undefined,
+        beforeMessageId: options.beforeMessageId,
+        loadAllMessages: !paginated,
+    };
+}
+
 export class SessionStore {
     constructor(sessionsDir, defaultModel, projectsFile) {
         this.sessionsDir = sessionsDir;
         this.defaultModel = defaultModel;
         this.projectsFile = projectsFile;
+        fs.mkdirSync(this.sessionsDir, { recursive: true });
     }
+
     listProjects() {
         if (!this.projectsFile || !fs.existsSync(this.projectsFile)) {
             return [];
@@ -46,6 +87,7 @@ export class SessionStore {
             return [];
         }
     }
+
     persistProjects(projects) {
         if (!this.projectsFile) {
             return;
@@ -55,6 +97,7 @@ export class SessionStore {
         fs.writeFileSync(tmp, payload, { encoding: "utf-8", mode: 0o644 });
         fs.renameSync(tmp, this.projectsFile);
     }
+
     addProject(directoryPath) {
         const cleanPath = String(directoryPath || "").trim();
         if (!cleanPath) {
@@ -78,17 +121,22 @@ export class SessionStore {
         this.persistProjects([...projects, project]);
         return project;
     }
+
     listMetas() {
         const metas = [];
-        const files = fs
-            .readdirSync(this.sessionsDir)
-            .filter((f) => f.endsWith(".json"))
-            .sort((a, b) => fs.statSync(path.join(this.sessionsDir, b)).mtimeMs - fs.statSync(path.join(this.sessionsDir, a)).mtimeMs);
-        for (const file of files) {
-            const session = JSON.parse(fs.readFileSync(path.join(this.sessionsDir, file), "utf-8"));
+        for (const entry of listSessionEntries(this.sessionsDir)) {
+            let meta;
+            if (entry.kind === "split") {
+                meta = readMeta(this.sessionsDir, entry.id);
+            } else {
+                meta = readLegacyMeta(this.sessionsDir, entry.id);
+                if (!meta) {
+                    continue;
+                }
+            }
             metas.push({
-                ...session.meta,
-                projectId: normalizeProjectId(session.meta.projectId),
+                ...meta,
+                projectId: normalizeProjectId(meta.projectId),
             });
         }
         if (metas.length === 0) {
@@ -96,6 +144,11 @@ export class SessionStore {
         }
         return metas;
     }
+
+    ensureMigrated(sessionId) {
+        migrateLegacySessionIfNeeded(this.sessionsDir, sessionId);
+    }
+
     findPlaceholderSession(projectId = null) {
         const normalizedProjectId = normalizeProjectId(projectId);
         const candidates = [];
@@ -106,10 +159,14 @@ export class SessionStore {
             if (!isDefaultSessionTitle(meta.title)) {
                 continue;
             }
-            candidates.push(this.get(meta.id));
+            if (meta.hasUserMessages) {
+                continue;
+            }
+            candidates.push({ meta, messages: [] });
         }
         return pickPlaceholderSession(candidates);
     }
+
     openNewSession(options = {}) {
         const normalizedProjectId = normalizeProjectId(options.projectId);
         const existing = this.findPlaceholderSession(normalizedProjectId);
@@ -118,12 +175,13 @@ export class SessionStore {
         }
         return this.newSession({ projectId: normalizedProjectId });
     }
+
     newSession(options = {}) {
         const id = randomUUID();
         const timestamp = nowIso();
         const projectId = normalizeProjectId(options.projectId);
-        const session = {
-            meta: {
+        const meta = enrichMeta(
+            {
                 id,
                 title: "新会话",
                 providerKey: this.defaultModel.providerKey,
@@ -133,22 +191,68 @@ export class SessionStore {
                 updatedAt: timestamp,
                 todos: [],
             },
-            messages: [],
-        };
-        this.persist(session);
-        return session;
+            [],
+        );
+        writeMeta(this.sessionsDir, meta);
+        return { meta, messages: [] };
     }
-    get(sessionId) {
-        const file = path.join(this.sessionsDir, `${sessionId}.json`);
-        if (!fs.existsSync(file)) {
+
+    get(sessionId, options = {}) {
+        const normalized = normalizeGetOptions(options);
+        this.ensureMigrated(sessionId);
+
+        if (!isSplitSession(this.sessionsDir, sessionId)) {
             throw new Error(`Session not found: ${sessionId}`);
         }
-        const session = JSON.parse(fs.readFileSync(file, "utf-8"));
-        session.meta.projectId = normalizeProjectId(session.meta.projectId);
-        return session;
+
+        let meta = readMeta(this.sessionsDir, sessionId);
+        const paging = {};
+        if (!normalized.loadAllMessages) {
+            if (normalized.beforeMessageId) {
+                paging.beforeMessageId = normalized.beforeMessageId;
+                paging.limit = normalized.messageLimit;
+            } else if (normalized.messageLimit) {
+                paging.limit = normalized.messageLimit;
+            }
+        }
+
+        let { messages, totalCount, hasMoreBefore } = readMessages(
+            this.sessionsDir,
+            sessionId,
+            paging,
+        );
+
+        let session = { meta, messages };
+
+        if (sessionHasInlineImages(session)) {
+            session = externalizeSessionImages(session, this.sessionsDir);
+            this.persist(session);
+            meta = session.meta;
+            ({ messages, totalCount, hasMoreBefore } = readMessages(
+                this.sessionsDir,
+                sessionId,
+                paging,
+            ));
+            session = { meta, messages };
+        }
+
+        if (normalized.hydrateImages) {
+            session = hydrateSessionImages(session, this.sessionsDir);
+            messages = session.messages;
+        }
+
+        meta = {
+            ...session.meta,
+            messageCount: totalCount,
+            hasMoreMessages: hasMoreBefore,
+            projectId: normalizeProjectId(session.meta.projectId),
+        };
+
+        return { meta, messages };
     }
+
     getProjectDirectory(sessionId) {
-        const session = this.get(sessionId);
+        const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
         const projectId = normalizeProjectId(session.meta.projectId);
         if (!projectId) {
             return null;
@@ -157,93 +261,110 @@ export class SessionStore {
         const directoryPath = String(project?.directoryPath || "").trim();
         return directoryPath || null;
     }
+
     save(session) {
         session.meta.updatedAt = nowIso();
         this.persist(session);
     }
+
     appendMessage(sessionId, message) {
-        const session = this.get(sessionId);
-        session.messages.push(message);
-        if (message.role === "user" && isDefaultSessionTitle(session.meta.title)) {
+        this.ensureMigrated(sessionId);
+        let meta = readMeta(this.sessionsDir, sessionId);
+        const prepared = externalizeSessionImages(
+            { meta, messages: [message] },
+            this.sessionsDir,
+        ).messages[0];
+
+        appendMessageLine(this.sessionsDir, sessionId, prepared);
+
+        meta = {
+            ...meta,
+            updatedAt: nowIso(),
+            messageCount: (meta.messageCount ?? 0) + 1,
+            hasUserMessages: meta.hasUserMessages || message.role === "user",
+        };
+        if (message.role === "user" && isDefaultSessionTitle(meta.title)) {
             const derived = titleFromFirstUserMessage(message.content);
             if (derived) {
-                session.meta.title = derived;
+                meta.title = derived;
             }
         }
-        this.save(session);
-        return session;
+        writeMeta(this.sessionsDir, meta);
+        return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
+
     removeMessages(sessionId, messageIds) {
         const idSet = new Set(messageIds);
-        const session = this.get(sessionId);
+        const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
         session.messages = session.messages.filter((message) => !idSet.has(message.id));
         this.save(session);
         return session;
     }
+
     updateModel(sessionId, providerKey, modelId) {
-        const session = this.get(sessionId);
+        const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
         session.meta.providerKey = providerKey;
         session.meta.modelId = modelId;
         this.save(session);
         return session;
     }
+
     updateTodos(sessionId, todos) {
-        const session = this.get(sessionId);
-        session.meta.todos = todos;
-        this.save(session);
-        return session;
+        this.ensureMigrated(sessionId);
+        const meta = readMeta(this.sessionsDir, sessionId);
+        meta.todos = todos;
+        meta.updatedAt = nowIso();
+        writeMeta(this.sessionsDir, meta);
+        return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
+
     updateTodoRun(sessionId, runId, todos) {
-        const session = this.get(sessionId);
-        session.meta.todoRuns = session.meta.todoRuns || {};
-        session.meta.todoRuns[runId] = {
+        this.ensureMigrated(sessionId);
+        const meta = readMeta(this.sessionsDir, sessionId);
+        meta.todoRuns = meta.todoRuns || {};
+        meta.todoRuns[runId] = {
             todos,
             updatedAt: new Date().toISOString(),
         };
-        session.meta.todos = todos;
-        this.save(session);
-        return session;
+        meta.todos = todos;
+        meta.updatedAt = nowIso();
+        writeMeta(this.sessionsDir, meta);
+        return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
+
     updateAuthMode(sessionId, authMode) {
-        const session = this.get(sessionId);
-        session.meta.authMode = authMode;
-        this.save(session);
-        return session;
+        this.ensureMigrated(sessionId);
+        const meta = readMeta(this.sessionsDir, sessionId);
+        meta.authMode = authMode;
+        meta.updatedAt = nowIso();
+        writeMeta(this.sessionsDir, meta);
+        return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
+
     persist(session) {
-        const file = path.join(this.sessionsDir, `${session.meta.id}.json`);
-        const payload = JSON.stringify(session, null, 2);
-        const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-        try {
-            fs.writeFileSync(tmp, payload, { encoding: "utf-8", mode: 0o644 });
-            fs.renameSync(tmp, file);
-        } catch (error) {
-            if (error?.code === "EACCES" && fs.existsSync(file)) {
-                fs.chmodSync(file, 0o644);
-                fs.writeFileSync(tmp, payload, { encoding: "utf-8", mode: 0o644 });
-                fs.renameSync(tmp, file);
-            } else {
-                throw error;
-            }
-        } finally {
-            if (fs.existsSync(tmp)) {
-                try {
-                    fs.unlinkSync(tmp);
-                } catch {
-                    /* ignore stale tmp */
-                }
-            }
-        }
+        this.ensureMigrated(session.meta.id);
+        const payload = externalizeSessionImages(session, this.sessionsDir);
+        const meta = enrichMeta(
+            { ...payload.meta, updatedAt: payload.meta.updatedAt || nowIso() },
+            payload.messages,
+        );
+        writeMeta(this.sessionsDir, meta);
+        rewriteMessages(this.sessionsDir, payload.meta.id, payload.messages);
     }
+
     delete(sessionId) {
-        const file = path.join(this.sessionsDir, `${sessionId}.json`);
-        if (fs.existsSync(file)) {
-            fs.unlinkSync(file);
-        }
+        deleteSessionFiles(this.sessionsDir, sessionId);
+        deleteSessionImages(sessionId, this.sessionsDir);
         const remaining = this.listMetas();
         if (remaining.length) {
             return remaining[0];
         }
         return this.newSession().meta;
+    }
+
+    /** Path to append-only message log (hooks / tooling). */
+    transcriptPath(sessionId) {
+        this.ensureMigrated(sessionId);
+        return messagesFile(this.sessionsDir, sessionId);
     }
 }

@@ -1,7 +1,8 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import { applyAppIcon } from "./appIcon.js";
 import { IPC_CHANNELS } from "@shared/ipc";
+import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
 import { getAppPaths } from "./appPaths";
 import { ConfigStore } from "./configStore";
 import { SessionStore } from "./sessionStore";
@@ -11,6 +12,7 @@ import { AgentRuntime } from "./agentRuntime";
 import { WorkspaceMemory } from "./workspaceMemory.js";
 import { SkillLoader } from "./skillLoader.js";
 import { resolveSessionWorkspace, resolveWorkspace } from "./workspacePaths.js";
+import { sessionForRenderer } from "./rendererSession.js";
 import { createBuiltinTools } from "./tools/builtinTools.js";
 import { createMetaTools } from "./tools/metaTools.js";
 import { McpManager } from "./mcp/mcpManager.js";
@@ -18,6 +20,10 @@ import { createMcpTools } from "./mcp/mcpTools.js";
 import { mcpToolRegistryName } from "@shared/mcpConfig.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
 import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
+import { registerPlanApprovalBridge, requestPlanApproval } from "./planApprovalBridge.js";
+import { readPlanApprovalDraft, ensurePlansDirectory, getPlanFilePath, writePlanFile } from "./planMode.js";
+import { createPlanModeTools } from "./tools/planModeTools.js";
+import fs from "node:fs";
 import { normalizeAuthMode } from "@shared/authMode.js";
 import { listProjectDirectory } from "./projectBrowse.js";
 
@@ -86,7 +92,7 @@ function createWindow() {
             preload: path.join(__dirname, "../preload/index.js"),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: true,
+            sandbox: false,
         },
     });
     attachEditableContextMenu(mainWindow.webContents);
@@ -101,7 +107,9 @@ function createWindow() {
               : path.join(__dirname, "../renderer/index.html");
     if (isDev) {
         void mainWindow.loadURL(pageUrl);
-        mainWindow.webContents.openDevTools({ mode: "detach" });
+        if (process.env.CRAGENT_DEVTOOLS === "1") {
+            mainWindow.webContents.openDevTools({ mode: "detach" });
+        }
     } else {
         void mainWindow.loadFile(pageUrl);
     }
@@ -132,7 +140,10 @@ function buildMenu() {
                     accelerator: "CmdOrCtrl+N",
                     click: () => {
                         const session = sessionStore.openNewSession();
-                        mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
+                        mainWindow?.webContents.send(
+                            IPC_CHANNELS.onSessionChanged,
+                            sessionForRenderer(session),
+                        );
                     },
                 },
             ],
@@ -162,6 +173,14 @@ function registerIpc() {
             config: configStore.get(),
         };
     });
+    ipcMain.handle(IPC_CHANNELS.openConfigFile, async () => {
+        const filePath = configStore.filePath;
+        const error = await shell.openPath(filePath);
+        if (error) {
+            throw new Error(error);
+        }
+        return { ok: true, filePath };
+    });
     ipcMain.handle(IPC_CHANNELS.listSkills, () => skillLoader.listSummaries());
     ipcMain.handle(IPC_CHANNELS.listProjects, () => sessionStore.listProjects());
     ipcMain.handle(IPC_CHANNELS.addProject, (_event, directoryPath) =>
@@ -189,18 +208,33 @@ function registerIpc() {
         }
         return listProjectDirectory(project.directoryPath, relativePath);
     });
-    ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId) => sessionStore.get(sessionId));
+    ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId, options = {}) =>
+        sessionForRenderer(
+            sessionStore.get(sessionId, { hydrateImages: false, ...options }),
+        ),
+    );
+    ipcMain.handle(IPC_CHANNELS.getSessionContextDetail, (_event, sessionId) =>
+        runtime.getSessionContextDetail(sessionId),
+    );
     ipcMain.handle(IPC_CHANNELS.newSession, (_event, args = {}) =>
-        sessionStore.openNewSession(args),
+        sessionForRenderer(sessionStore.openNewSession(args)),
     );
     ipcMain.handle(IPC_CHANNELS.deleteSession, (_event, sessionId) => {
         const fallbackMeta = sessionStore.delete(sessionId);
-        return sessionStore.get(fallbackMeta.id);
+        return sessionForRenderer(
+            sessionStore.get(fallbackMeta.id, {
+                hydrateImages: false,
+                messageLimit: DEFAULT_UI_MESSAGE_PAGE,
+            }),
+        );
     });
     ipcMain.handle(IPC_CHANNELS.deleteMessages, (_event, args) => {
         const session = sessionStore.removeMessages(args.sessionId, args.messageIds);
-        mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
-        return session;
+        mainWindow?.webContents.send(
+            IPC_CHANNELS.onSessionChanged,
+            sessionForRenderer(session),
+        );
+        return sessionForRenderer(session);
     });
     ipcMain.handle(IPC_CHANNELS.sendChat, (_event, request) =>
         runtime.sendUserMessage(
@@ -211,18 +245,54 @@ function registerIpc() {
             request.userText,
         ),
     );
+    ipcMain.handle(IPC_CHANNELS.exitPlanMode, async (_event, sessionId) => {
+        const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
+        const draft = readPlanApprovalDraft(workspace, sessionId);
+        const approval = await requestPlanApproval(mainWindow, draft);
+        if (!approval.approved) {
+            const rejected = await runtime.rejectPlanMode(sessionId, {
+                planContent: approval.content ?? draft.content,
+                feedback: approval.feedback,
+            });
+            return { cancelled: true, session: sessionForRenderer(rejected.session) };
+        }
+        return runtime.exitPlanMode(sessionId, approval.content);
+    });
+    ipcMain.handle(IPC_CHANNELS.openPlanFile, async (_event, sessionId) => {
+        const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
+        ensurePlansDirectory(workspace);
+        const filePath = getPlanFilePath(workspace, sessionId);
+        if (!fs.existsSync(filePath)) {
+            writePlanFile(workspace, sessionId, "# Plan\n\n");
+        }
+        const error = await shell.openPath(filePath);
+        if (error) {
+            throw new Error(error);
+        }
+        return { filePath };
+    });
     ipcMain.handle(IPC_CHANNELS.cancelRun, (_event, sessionId) => runtime.cancelRun(sessionId));
+    ipcMain.handle(IPC_CHANNELS.getHookLogs, (_event, sessionId) => runtime.getHookLogs(sessionId));
+    ipcMain.handle(IPC_CHANNELS.clearHookLogs, (_event, sessionId) => {
+        runtime.clearHookLogs(sessionId);
+    });
     ipcMain.handle(IPC_CHANNELS.removeQueuedMessage, (_event, args) =>
         runtime.removeQueuedMessage(args.sessionId, args.messageId),
     );
     ipcMain.handle(IPC_CHANNELS.updateAuthMode, (_event, args) => {
         const session = sessionStore.updateAuthMode(args.sessionId, args.authMode);
-        mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
-        return session;
+        mainWindow?.webContents.send(
+            IPC_CHANNELS.onSessionChanged,
+            sessionForRenderer(session),
+        );
+        return sessionForRenderer(session);
     });
     ipcMain.handle(IPC_CHANNELS.updateModel, (_event, args) => {
         const session = sessionStore.updateModel(args.sessionId, args.providerKey, args.modelId);
-        mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
+        mainWindow?.webContents.send(
+            IPC_CHANNELS.onSessionChanged,
+            sessionForRenderer(session),
+        );
     });
     ipcMain.handle(IPC_CHANNELS.updateConfig, async (_event, next) => {
         const updated = configStore.update(next);
@@ -304,6 +374,7 @@ function registerIpc() {
 
 function bootstrap() {
     registerConfirmBridge();
+    registerPlanApprovalBridge();
     const appPaths = getAppPaths();
     configStore = new ConfigStore(appPaths.configFile);
     const getDefaultWorkspace = () => resolveWorkspace(configStore);
@@ -363,7 +434,11 @@ function bootstrap() {
                     runtime.updateTodos(sessionId, todos, merge, runId),
                 runSubAgent: (args) => runtime.runSubAgent(args),
             });
-            return [...builtin, ...buildMcpTools(), ...meta];
+            const planTools = createPlanModeTools({
+                getAgentWorkspace,
+                configStore,
+            });
+            return [...builtin, ...buildMcpTools(), ...meta, ...planTools];
         },
         baseConfirm,
         getAuthMode,

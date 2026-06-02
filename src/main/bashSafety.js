@@ -1,87 +1,79 @@
-const BLOCKED_COMMANDS = new Set([
-    "rm",
-    "rmdir",
-    "dd",
-    "mkfs",
-    "sudo",
-    "shutdown",
-    "reboot",
-    "halt",
-    "poweroff",
-    "kill",
-    "killall",
-    "diskutil",
-]);
+import { scanShellSecurity } from "./shellSecurity.js";
+import { getShellPolicy } from "./shellPolicy.js";
+import { resolveShellRuntime, SHELL_KIND } from "./shellRuntime.js";
 
-const CONFIRM_COMMANDS = new Set([
-    "cp",
-    "mv",
-    "chmod",
-    "chown",
-    "tar",
-    "zip",
-    "unzip",
-    "npm",
-    "yarn",
-    "pip",
-    "brew",
-    "apt",
-    "apt-get",
-    "make",
-    "xcodebuild",
-    "ln",
-    "git",
-    "open",
-]);
+/**
+ * Classify a shell command for the `bash` tool (security scan + command policy).
+ * @param {string} command
+ * @param {import('./shellRuntime.js').ShellRuntime} [runtime] Defaults to `resolveShellRuntime()`
+ */
+export function classifyBashCommand(command, runtime = resolveShellRuntime()) {
+    const security = scanShellSecurity(command, runtime);
+    if (!security.ok) {
+        return {
+            kind: "needsConfirmation",
+            reason: security.message,
+            securityCheckId: security.checkId,
+            shellKind: runtime.kind,
+        };
+    }
 
-const DANGEROUS_PATTERNS = [
-    ":(){",
-    "> /dev/sd",
-    "of=/dev/sd",
-    "mkfs.",
-    "format ",
-    "/dev/disk",
-    "shutdown -",
-    "rm -rf /",
-    "chmod 777 /",
-    "chown -R / ",
-];
-
-export function classifyBashCommand(command) {
+    const policy = getShellPolicy(runtime);
     const lower = command.toLowerCase();
-    for (const pattern of DANGEROUS_PATTERNS) {
-        if (lower.includes(pattern)) {
-            return { kind: "blocked", reason: `matches dangerous pattern: ${pattern}` };
+    for (const pattern of policy.dangerousPatterns) {
+        if (lower.includes(pattern.toLowerCase())) {
+            return {
+                kind: "blocked",
+                reason: `matches dangerous pattern: ${pattern}`,
+                shellKind: runtime.kind,
+            };
         }
     }
 
-    const segments = command.split(/[|;&]/);
+    const segments = command.split(runtime.segmentSeparator);
     for (const segment of segments) {
         const trimmed = segment.trim();
-        if (!trimmed) {
-            continue;
-        }
+        if (!trimmed) continue;
+
         const head = trimmed.split(/\s+/)[0] || "";
-        const token = head.includes("=") ? "" : head;
-        if (BLOCKED_COMMANDS.has(token)) {
-            return { kind: "blocked", reason: `'${token}' is a blocked command` };
+        const rawToken = head.includes("=") ? "" : head.replace(/^['"]|['"]$/g, "");
+        const token = policy.normalizeToken(rawToken);
+
+        if (policy.blockedCommands.has(token)) {
+            return {
+                kind: "blocked",
+                reason: `'${rawToken}' is a blocked command`,
+                shellKind: runtime.kind,
+            };
         }
+
         if (token === "git") {
-            const rest = trimmed.slice(token.length).trim();
+            const rest = trimmed.slice(head.length).trim();
             if (
-                rest.startsWith("push") ||
-                rest.startsWith("reset --hard") ||
-                rest.startsWith("clean -fd") ||
-                rest.startsWith("rebase")
+                /^push\b/i.test(rest) ||
+                /^reset\s+--hard/i.test(rest) ||
+                /^clean\s+-fd/i.test(rest) ||
+                /^rebase\b/i.test(rest)
             ) {
-                return { kind: "needsConfirmation", reason: `git ${rest}` };
+                return {
+                    kind: "needsConfirmation",
+                    reason: `git ${rest}`,
+                    shellKind: runtime.kind,
+                };
             }
             continue;
         }
-        if (CONFIRM_COMMANDS.has(token)) {
-            return { kind: "needsConfirmation", reason: `'${token}' is a write-class command` };
+
+        if (policy.confirmCommands.has(token)) {
+            return {
+                kind: "needsConfirmation",
+                reason: `'${rawToken}' is a write-class command`,
+                shellKind: runtime.kind,
+            };
         }
     }
 
-    return { kind: "allowed" };
+    return { kind: "allowed", shellKind: runtime.kind };
 }
+
+export { SHELL_KIND, resolveShellRuntime };

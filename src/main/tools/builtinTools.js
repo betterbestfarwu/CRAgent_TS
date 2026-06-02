@@ -3,7 +3,9 @@ import fsSync from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { classifyBashCommand } from "../bashSafety.js";
+import { classifyBashCommand, resolveShellRuntime } from "../bashSafety.js";
+import { classifyBashForPlanMode } from "../planMode.js";
+import { describeShellInvocation } from "../shellRuntime.js";
 import { shouldRequireBashConfirmation, shouldRequireNetworkConfirmation } from "../authPolicy.js";
 import { assertWritableTarget } from "@shared/memoryPaths.js";
 import { resolveCwd, resolvePathInWorkspace } from "../workspacePaths.js";
@@ -18,11 +20,12 @@ function fnSchema(name, description, parameters) {
     };
 }
 
-async function runBash(command, cwd) {
+async function runShell(command, cwd, runtime) {
     const startedAt = Date.now();
     const timeoutMs = 60_000;
+    const execArgs = [...runtime.argsPrefix, command];
     try {
-        const { stdout, stderr } = await execFileAsync("/bin/zsh", ["-c", command], {
+        const { stdout, stderr } = await execFileAsync(runtime.executable, execArgs, {
             cwd,
             maxBuffer: 4 * 1024 * 1024,
             timeout: timeoutMs,
@@ -58,7 +61,15 @@ export function createBuiltinTools({
     getAgentTools,
     confirmToolExecution,
     getAuthMode = () => "default",
+    getShellRuntime = resolveShellRuntime,
 }) {
+    let shellRuntime;
+    try {
+        shellRuntime = getShellRuntime();
+    } catch {
+        shellRuntime = null;
+    }
+
     const tools = [
         {
             name: "read_file",
@@ -134,7 +145,9 @@ export function createBuiltinTools({
             enabled: () => getAgentTools().enable_tools !== false,
             schema: fnSchema(
                 "bash",
-                "Run a shell command via /bin/zsh -c. Defaults to the agent workspace (~/.CRAgent).",
+                shellRuntime
+                    ? `Run a shell command via ${describeShellInvocation(shellRuntime)}. Defaults to the agent workspace (~/.CRAgent).`
+                    : "Run a shell command in the agent workspace (~/.CRAgent).",
                 {
                     type: "object",
                     properties: {
@@ -149,22 +162,28 @@ export function createBuiltinTools({
                 if (!command) {
                     throw new Error("'command' is required");
                 }
+                if (!shellRuntime) {
+                    throw new Error("No supported shell found on this system");
+                }
                 const workspace = getAgentWorkspace(context?.sessionId);
                 const cwd = resolveCwd(workspace, args.cwd);
-                const safety = classifyBashCommand(command);
+                const safety =
+                    context?.executionMode === "plan"
+                        ? classifyBashForPlanMode(command, shellRuntime)
+                        : classifyBashCommand(command, shellRuntime);
                 if (safety.kind === "blocked") {
                     throw new Error(safety.reason);
                 }
                 if (shouldRequireBashConfirmation(safety, () => getAuthMode(context?.sessionId))) {
                     const approved = await confirmToolExecution(
                         "bash",
-                        `$ ${command}\n(cwd: ${cwd})\n\n${safety.reason}`,
+                        `[${shellRuntime.label}]\n$ ${command}\n(cwd: ${cwd})\n\n${safety.reason}`,
                     );
                     if (!approved) {
                         throw new Error(`user declined: ${safety.reason}`);
                     }
                 }
-                return runBash(command, cwd);
+                return runShell(command, cwd, shellRuntime);
             },
         },
         {

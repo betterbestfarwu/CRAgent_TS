@@ -1,27 +1,57 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS } from "@shared/ipc";
+import { stripMessageImagesForUi, stripSessionImagesForUi } from "@shared/sessionForUi.js";
+
+function asUiSession(session) {
+    return session?.messages ? stripSessionImagesForUi(session) : session;
+}
+
+async function invokeUiSession(channel, ...args) {
+    return asUiSession(await ipcRenderer.invoke(channel, ...args));
+}
+
 function subscribe(channel, callback) {
-    const listener = (_event, payload) => callback(payload);
+    const listener = (_event, payload) => {
+        if (channel === IPC_CHANNELS.onSessionChanged) {
+            callback(asUiSession(payload));
+            return;
+        }
+        if (channel === IPC_CHANNELS.onMessageAppended && payload?.message) {
+            callback({
+                ...payload,
+                message: stripMessageImagesForUi(payload.message),
+            });
+            return;
+        }
+        callback(payload);
+    };
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.off(channel, listener);
 }
+
 const api = {
     isDesktop: true,
     platform: process.platform,
     getSnapshot: () => ipcRenderer.invoke(IPC_CHANNELS.getSnapshot),
+    openConfigFile: () => ipcRenderer.invoke(IPC_CHANNELS.openConfigFile),
     listSkills: () => ipcRenderer.invoke(IPC_CHANNELS.listSkills),
     listProjects: () => ipcRenderer.invoke(IPC_CHANNELS.listProjects),
     addProject: (directoryPath) => ipcRenderer.invoke(IPC_CHANNELS.addProject, directoryPath),
     pickProjectDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.pickProjectDirectory),
     listProjectDirectory: (args) => ipcRenderer.invoke(IPC_CHANNELS.listProjectDirectory, args),
-    getSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getSession, sessionId),
-    newSession: (args) => ipcRenderer.invoke(IPC_CHANNELS.newSession, args),
-    deleteSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.deleteSession, sessionId),
-    deleteMessages: (args) => ipcRenderer.invoke(IPC_CHANNELS.deleteMessages, args),
+    getSession: (sessionId, options) =>
+        invokeUiSession(IPC_CHANNELS.getSession, sessionId, options),
+    getSessionContextDetail: (sessionId) =>
+        ipcRenderer.invoke(IPC_CHANNELS.getSessionContextDetail, sessionId),
+    newSession: (args) => invokeUiSession(IPC_CHANNELS.newSession, args),
+    deleteSession: (sessionId) => invokeUiSession(IPC_CHANNELS.deleteSession, sessionId),
+    deleteMessages: (args) => invokeUiSession(IPC_CHANNELS.deleteMessages, args),
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),
+    exitPlanMode: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.exitPlanMode, sessionId),
+    openPlanFile: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.openPlanFile, sessionId),
     cancelRun: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.cancelRun, sessionId),
     removeQueuedMessage: (args) => ipcRenderer.invoke(IPC_CHANNELS.removeQueuedMessage, args),
-    updateAuthMode: (args) => ipcRenderer.invoke(IPC_CHANNELS.updateAuthMode, args),
+    updateAuthMode: (args) => invokeUiSession(IPC_CHANNELS.updateAuthMode, args),
     updateModel: (args) => ipcRenderer.invoke(IPC_CHANNELS.updateModel, args),
     updateConfig: (next) => ipcRenderer.invoke(IPC_CHANNELS.updateConfig, next),
     syncProviderModels: (args) => ipcRenderer.invoke(IPC_CHANNELS.syncProviderModels, args),
@@ -34,8 +64,13 @@ const api = {
     onTodosChanged: (callback) => subscribe(IPC_CHANNELS.onTodosChanged, callback),
     onQueueChanged: (callback) => subscribe(IPC_CHANNELS.onQueueChanged, callback),
     onContextWarningChanged: (callback) => subscribe(IPC_CHANNELS.onContextWarningChanged, callback),
+    onHookLog: (callback) => subscribe(IPC_CHANNELS.onHookLog, callback),
+    getHookLogs: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getHookLogs, sessionId),
+    clearHookLogs: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.clearHookLogs, sessionId),
     onConfirmRequest: (callback) => subscribe(IPC_CHANNELS.onConfirmRequest, callback),
     respondConfirm: (payload) => ipcRenderer.send(IPC_CHANNELS.confirmResponse, payload),
+    onPlanApprovalRequest: (callback) => subscribe("ui:planApprovalRequest", callback),
+    respondPlanApproval: (payload) => ipcRenderer.send("ui:planApprovalResponse", payload),
     onOpenSettings: (callback) => subscribe("ui:openSettings", callback),
 };
 contextBridge.exposeInMainWorld("cragent", api);

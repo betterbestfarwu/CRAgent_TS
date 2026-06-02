@@ -1,0 +1,73 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { describe, it } from "node:test";
+import {
+    externalizeSessionImages,
+    hydrateSessionImages,
+    sessionHasInlineImages,
+} from "../src/main/sessionImageStorage.js";
+import { SessionStore } from "../src/main/sessionStore.js";
+import { messagesFile, metaFile } from "../src/main/sessionStorage.js";
+
+describe("sessionImageStorage", () => {
+    it("externalizes inline images to disk and removes dataUrl from session", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-img-"));
+        const session = {
+            meta: { id: "session-1" },
+            messages: [
+                {
+                    id: "msg-1",
+                    role: "user",
+                    content: "pic",
+                    images: [{ mimeType: "image/png", dataUrl: "data:image/png;base64,QUJD" }],
+                },
+            ],
+        };
+
+        const externalized = externalizeSessionImages(session, dir);
+        assert.equal(sessionHasInlineImages(externalized), false);
+        assert.match(externalized.messages[0].images[0].imageFile || "", /^msg-1-0\.png$/);
+
+        const hydrated = hydrateSessionImages(externalized, dir);
+        assert.equal(hydrated.messages[0].images[0].dataUrl, "data:image/png;base64,QUJD");
+    });
+});
+
+describe("SessionStore image migration", () => {
+    it("rewrites legacy inline images on first get", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-store-"));
+        const sessionsDir = path.join(dir, "sessions");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        const sessionId = "legacy-session";
+        fs.writeFileSync(
+            path.join(sessionsDir, `${sessionId}.json`),
+            JSON.stringify(
+                {
+                    meta: { id: sessionId, title: "legacy", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+                    messages: [
+                        {
+                            id: "msg-1",
+                            role: "user",
+                            content: "pic",
+                            images: [{ mimeType: "image/png", dataUrl: "data:image/png;base64,QUJD" }],
+                        },
+                    ],
+                },
+                null,
+                2,
+            ),
+            "utf-8",
+        );
+
+        const store = new SessionStore(sessionsDir, { providerKey: "openai", modelId: "gpt-4o-mini" }, null);
+        const uiSession = store.get(sessionId, { hydrateImages: false });
+        assert.equal(sessionHasInlineImages(uiSession), false);
+
+        assert.equal(fs.existsSync(metaFile(sessionsDir, sessionId)), true);
+        const raw = fs.readFileSync(messagesFile(sessionsDir, sessionId), "utf-8");
+        assert.equal(raw.includes("dataUrl"), false);
+        assert.equal(raw.includes("imageFile"), true);
+    });
+});

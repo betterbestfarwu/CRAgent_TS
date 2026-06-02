@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef } from "react";
 import { formatAtMentionsForDisplay } from "@shared/atMention.js";
-import { dedupeConsecutiveContextDividers, getMessageModelId } from "@shared/chatMessages.js";
+import {
+  appendedMessagesNeedFullRender,
+  dedupeConsecutiveContextDividers,
+  getMessageModelId,
+} from "@shared/chatMessages.js";
+import { isPlanRejectionMessage } from "@shared/planMessages.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
 
-function toWireMessage(message) {
+function toWireMessage(message, planContext) {
   const toolCalls = message.toolCalls?.map((call) => ({
     ...(call.id ? { id: call.id } : {}),
     name: call.function?.name || call.name || "tool",
@@ -41,20 +46,39 @@ function toWireMessage(message) {
           user_text: message.userText ?? "",
         }
       : {}),
+    ...(planContext?.active && message.role === "assistant"
+      ? {
+          plan_file_path: planContext.displayPath,
+          plan_session_id: planContext.sessionId,
+        }
+      : {}),
+    ...(isPlanRejectionMessage(message) ? { plan_rejection: true } : {}),
   };
 }
 
-export function ChatView({ messages, todoRuns, busy, verboseThinking, onDelete, onOpenImage }) {
+export function ChatView({
+  sessionId,
+  messages,
+  todoRuns,
+  busy,
+  verboseThinking,
+  planContext,
+  onDelete,
+  onOpenImage,
+  onOpenPlanFile,
+}) {
   const iframeRef = useRef(null);
   const readyRef = useRef(false);
   const pendingRef = useRef([]);
   const messagesRef = useRef(messages);
   const todoRunsRef = useRef(todoRuns);
-  const wireSnapshotRef = useRef({ ids: [], todoJson: "" });
+  const wireSnapshotRef = useRef({ ids: [], todoJson: "", wireJson: "" });
   const verboseThinkingRef = useRef(verboseThinking);
+  const planContextRef = useRef(planContext);
   messagesRef.current = messages;
   todoRunsRef.current = todoRuns;
   verboseThinkingRef.current = verboseThinking;
+  planContextRef.current = planContext;
 
   const syncIframeLayout = useCallback(() => {
     injectChatLayout(iframeRef.current?.contentDocument ?? null);
@@ -70,21 +94,29 @@ export function ChatView({ messages, todoRuns, busy, verboseThinking, onDelete, 
   }, []);
 
   const syncMessages = useCallback(() => {
-    const wireMessages = dedupeConsecutiveContextDividers(messagesRef.current || []).map(toWireMessage);
+    const wireMessages = dedupeConsecutiveContextDividers(messagesRef.current || []).map((message) =>
+      toWireMessage(message, planContextRef.current),
+    );
     const ids = wireMessages.map((message) => message.id);
     const todoJson = JSON.stringify(todoRunsRef.current || {});
+    const wireJson = JSON.stringify(wireMessages);
     const prev = wireSnapshotRef.current;
     const idsSame =
       ids.length === prev.ids.length && ids.every((id, index) => id === prev.ids[index]);
+    if (idsSame && todoJson === prev.todoJson && wireJson === prev.wireJson) {
+      return;
+    }
     const idsAppended =
       prev.ids.length > 0 &&
       ids.length >= prev.ids.length &&
       prev.ids.every((id, index) => id === ids[index]);
     const todosOnly = idsSame && todoJson !== prev.todoJson;
+    const needsFullRender =
+      idsAppended && appendedMessagesNeedFullRender(wireMessages, prev.ids.length);
 
     if (todosOnly) {
       postToChat("updateTodoRuns", todoRunsRef.current || {});
-    } else if (idsAppended && ids.length > prev.ids.length) {
+    } else if (idsAppended && ids.length > prev.ids.length && !needsFullRender) {
       postToChat("patchActiveRun", {
         messages: wireMessages,
         todoRuns: todoRunsRef.current || {},
@@ -96,7 +128,7 @@ export function ChatView({ messages, todoRuns, busy, verboseThinking, onDelete, 
       });
     }
 
-    wireSnapshotRef.current = { ids, todoJson };
+    wireSnapshotRef.current = { ids, todoJson, wireJson };
   }, [postToChat]);
 
   useEffect(() => {
@@ -135,11 +167,19 @@ export function ChatView({ messages, todoRuns, busy, verboseThinking, onDelete, 
           mimeType: data.mimeType || "",
         });
       }
+
+      if (data.action === "openPlan" && data.sessionId) {
+        void onOpenPlanFile?.(data.sessionId);
+      }
     };
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [busy, onDelete, onOpenImage, postToChat, syncIframeLayout, syncMessages]);
+  }, [busy, onDelete, onOpenImage, onOpenPlanFile, postToChat, syncIframeLayout, syncMessages]);
+
+  useEffect(() => {
+    wireSnapshotRef.current = { ids: [], todoJson: "", wireJson: "" };
+  }, [sessionId]);
 
   useEffect(() => {
     if (!readyRef.current) return;
@@ -155,6 +195,11 @@ export function ChatView({ messages, todoRuns, busy, verboseThinking, onDelete, 
     if (!readyRef.current) return;
     postToChat("setVerboseThinking", verboseThinking);
   }, [verboseThinking, postToChat]);
+
+  useEffect(() => {
+    if (!readyRef.current) return;
+    postToChat("setPlanContext", planContext || { active: false });
+  }, [planContext, postToChat]);
 
   return (
     <iframe
