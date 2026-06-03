@@ -728,6 +728,12 @@ body.app-sidebar-resizing {
   padding-left: var(--sidebar-tree-indent, 10px);
 }
 
+.session-node-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
 .session-node-content .session-group-header,
 .project-node-content .session-group-header {
   padding-left: 18px;
