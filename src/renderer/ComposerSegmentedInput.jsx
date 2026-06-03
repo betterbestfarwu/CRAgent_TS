@@ -83,12 +83,8 @@ export function ComposerSegmentedInput({
     const isPrimary = segmentIndex === segments.length - 1;
     const followsMention = segmentIndex > 0 && segments[segmentIndex - 1]?.kind === "mention";
     const prefixChars = Math.max(segment.content.length, 1);
-    const inlineWidthChars = Math.max(segment.content.length, 1);
-    const inlineStyle = isPrimary
-      ? mentions.length > 0
-        ? { width: `${inlineWidthChars}ch` }
-        : undefined
-      : { width: `${prefixChars}ch` };
+    const inlineStyle =
+      !isPrimary && mentions.length > 0 ? { width: `${prefixChars}em` } : undefined;
 
     return (
       <textarea
