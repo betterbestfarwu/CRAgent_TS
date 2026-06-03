@@ -27,6 +27,7 @@ var CRAgentChatUtils = (() => {
     collapseAdjacentThinkingItems: () => collapseAdjacentThinkingItems,
     formatCodexStepLine: () => formatCodexStepLine,
     formatThinkingSummaryLine: () => formatThinkingSummaryLine,
+    formatToolRunningLine: () => formatToolRunningLine,
     getCurrentInProgressTodo: () => getCurrentInProgressTodo,
     parseToolArguments: () => parseToolArguments,
     sortTodosForDisplay: () => sortTodosForDisplay,
@@ -457,6 +458,17 @@ var CRAgentChatUtils = (() => {
     const built = buildThinkingSummary(thinkingMessages, { verbose });
     const lines = (built.items || []).map((item) => formatCodexStepLine(item)).filter(Boolean);
     return { ...built, lines };
+  }
+  function formatToolRunningLine(toolName, toolInput = {}) {
+    const name = String(toolName || "tool");
+    if (name === "bash") {
+      const cmd = String(toolInput.command || "").trim();
+      if (cmd) {
+        return `\u6B63\u5728\u8FD0\u884C ${cmd.length > 80 ? `${cmd.slice(0, 80)}\u2026` : cmd}`;
+      }
+    }
+    const label = TOOL_NAME_ZH[name] || name;
+    return `\u6B63\u5728${label}\u2026`;
   }
   return __toCommonJS(chatUiUtils_exports);
 })();

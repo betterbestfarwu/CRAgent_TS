@@ -26,6 +26,7 @@
   var codexTimeline = true;
   var busyState = { busy: false, runStartedAt: null };
   var pendingAsk = null;
+  var activeTool = null;
   var runStatusTimer = null;
   var planContext = { active: false };
   var planPreviewTarget = { messageId: null, runId: null };
@@ -908,12 +909,23 @@
           label = '已处理 ' + sec + 's · 正在思考';
         } catch (_) {}
       }
+      var toolLine = '';
+      if (activeTool && activeTool.toolName) {
+        var running =
+          chatUi.formatToolRunningLine &&
+          chatUi.formatToolRunningLine(activeTool.toolName, activeTool.toolInput || {});
+        if (running) {
+          toolLine = '<div class="run-status-tool">' + escapeText(running) + '</div>';
+        }
+      }
       var askHtml = '';
       if (pendingAsk && pendingAsk.questions && pendingAsk.questions.length) {
         askHtml = renderAskChoiceCard(pendingAsk);
       }
       footer.innerHTML =
-        '<div class="run-status-line">' + escapeText(label) + '</div>' + askHtml;
+        '<div class="run-status-line">' + escapeText(label) + '</div>' +
+        toolLine +
+        askHtml;
     }
     renderElapsed();
     if (!runStatusTimer) {
@@ -1553,6 +1565,10 @@
     },
     setPendingAsk: function (value) {
       pendingAsk = value && typeof value === 'object' ? value : null;
+      renderRunStatusFooter();
+    },
+    setActiveTool: function (value) {
+      activeTool = value && typeof value === 'object' ? value : null;
       renderRunStatusFooter();
     },
     patchMessageDelta: function (payload) {

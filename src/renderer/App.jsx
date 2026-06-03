@@ -112,6 +112,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState(null);
   const [pendingAsk, setPendingAsk] = useState(null);
+  const [activeTool, setActiveTool] = useState(null);
   const [busyBySession, setBusyBySession] = useState({});
   const [unreadBySession, setUnreadBySession] = useState({});
   const [page, setPage] = useState("chat");
@@ -491,9 +492,18 @@ export function App() {
         setRunStartedAt(nextBusy ? startedAt || new Date().toISOString() : null);
         if (!nextBusy) {
           setPendingAsk(null);
+          setActiveTool(null);
         }
       }
     });
+
+    const offToolStarted = window.cragent.onToolStarted?.(
+      ({ sessionId, toolName, toolInput }) => {
+        if (sessionIdRef.current === sessionId) {
+          setActiveTool({ toolName, toolInput: toolInput || {} });
+        }
+      },
+    );
 
     const offTodos = window.cragent.onTodosChanged?.(({ sessionId, todoRuns, todos }) => {
       setCurrentSession((prev) => {
@@ -582,6 +592,9 @@ export function App() {
 
     return () => {
       offMessage();
+      offMessageDelta?.();
+      offAskUser?.();
+      offToolStarted?.();
       offSession();
       offBusy();
       offTodos?.();
@@ -1678,6 +1691,7 @@ export function App() {
                     runStartedAt={runStartedAt}
                     codexTimeline={config?.ui?.codex_timeline !== false}
                     pendingAsk={pendingAsk}
+                    activeTool={activeTool}
                     verboseThinking={verboseThinking}
                     planContext={planContext}
                     onDelete={handleDeleteMessage}

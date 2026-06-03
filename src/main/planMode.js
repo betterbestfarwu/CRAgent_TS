@@ -22,6 +22,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
     "load_skill",
     "tool_search",
     "write_file",
+    "ask_user",
 ]);
 
 const PLAN_MODE_BLOCKED_TOOLS = new Set([

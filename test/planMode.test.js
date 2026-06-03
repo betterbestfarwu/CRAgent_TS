@@ -32,8 +32,10 @@ test("filterToolsForPlanMode keeps read tools and write_file", () => {
         { name: "Task" },
         { name: "mcp_foo" },
     ];
-    const names = filterToolsForPlanMode(tools).map((t) => t.name);
-    assert.deepEqual(names.sort(), ["read_file", "write_file"].sort());
+    const names = filterToolsForPlanMode(
+        [...tools, { name: "ask_user" }],
+    ).map((t) => t.name);
+    assert.deepEqual(names.sort(), ["ask_user", "read_file", "write_file"].sort());
 });
 
 test("validatePlanModeToolCall blocks writes outside plan file", () => {

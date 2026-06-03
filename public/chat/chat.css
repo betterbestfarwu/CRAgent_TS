@@ -1119,6 +1119,13 @@ html, body {
   line-height: 1.5;
 }
 
+.run-status-tool {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
 .codex-timeline {
   display: flex;
   flex-direction: column;

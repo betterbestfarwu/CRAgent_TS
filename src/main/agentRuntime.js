@@ -1630,12 +1630,12 @@ export class AgentRuntime {
                     });
                     this.emit(IPC_CHANNELS.onSessionChanged, session);
                     let lastEmit = 0;
-                    streamHandlers.onDelta = ({ content }) => {
+                    const emitStreamDelta = (content, force = false) => {
                         if (content == null || this.wasRunCancelled(sessionId)) {
                             return;
                         }
                         const now = Date.now();
-                        if (now - lastEmit < 60) {
+                        if (!force && now - lastEmit < 60) {
                             return;
                         }
                         lastEmit = now;
@@ -1653,6 +1653,8 @@ export class AgentRuntime {
                             this.emit(IPC_CHANNELS.onSessionChanged, session);
                         }
                     };
+                    streamHandlers.onDelta = ({ content }) => emitStreamDelta(content);
+                    streamHandlers.flushDelta = (content) => emitStreamDelta(content, true);
                 }
 
                 const chatResult = await this.requestAgentChat(
@@ -1669,6 +1671,14 @@ export class AgentRuntime {
                     },
                     streamHandlers,
                 );
+                if (streamingMessageId && streamHandlers.flushDelta) {
+                    const streamed = this.sessionStore
+                        .get(sessionId)
+                        .messages.find((m) => m.id === streamingMessageId);
+                    if (streamed?.content != null) {
+                        streamHandlers.flushDelta(streamed.content);
+                    }
+                }
                 if (this.wasRunCancelled(sessionId)) {
                     return;
                 }
@@ -1746,11 +1756,18 @@ export class AgentRuntime {
                     if (this.wasRunCancelled(sessionId)) {
                         return;
                     }
+                    let toolInput = {};
+                    try {
+                        toolInput = JSON.parse(call.function.arguments || "{}");
+                    } catch {
+                        toolInput = {};
+                    }
                     this.emit(IPC_CHANNELS.onToolStarted, {
                         sessionId,
                         runId,
                         toolName: call.function.name,
                         toolCallId: call.id,
+                        toolInput,
                     });
                     const result = await this.executeToolWithHooks(
                         call,

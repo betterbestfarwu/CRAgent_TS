@@ -6,6 +6,7 @@ import {
     collapseAdjacentThinkingItems,
     formatCodexStepLine,
     buildCodexTimeline,
+    formatToolRunningLine,
     formatThinkingSummaryLine,
     getCurrentInProgressTodo,
     sortTodosForDisplay,
@@ -218,6 +219,15 @@ describe("todo display helpers", () => {
             { id: "2", content: "B", activeForm: "Building", status: "in_progress" },
         ]);
         assert.equal(current?.id, "2");
+    });
+});
+
+describe("formatToolRunningLine", () => {
+    it("shows bash command while running", () => {
+        assert.match(
+            formatToolRunningLine("bash", { command: "pwd && ls" }),
+            /正在运行 pwd/,
+        );
     });
 });
 

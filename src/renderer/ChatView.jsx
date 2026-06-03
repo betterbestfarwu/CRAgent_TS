@@ -96,6 +96,7 @@ export function ChatView({
   runStartedAt,
   codexTimeline,
   pendingAsk,
+  activeTool,
   verboseThinking,
   planContext,
   onDelete,
@@ -113,6 +114,7 @@ export function ChatView({
   const runStartedAtRef = useRef(runStartedAt);
   const codexTimelineRef = useRef(codexTimeline);
   const pendingAskRef = useRef(pendingAsk);
+  const activeToolRef = useRef(activeTool);
   const planContextRef = useRef(planContext);
   messagesRef.current = messages;
   todoRunsRef.current = todoRuns;
@@ -120,6 +122,7 @@ export function ChatView({
   runStartedAtRef.current = runStartedAt;
   codexTimelineRef.current = codexTimeline;
   pendingAskRef.current = pendingAsk;
+  activeToolRef.current = activeTool;
   planContextRef.current = planContext;
 
   const syncIframeLayout = useCallback(() => {
@@ -204,6 +207,7 @@ export function ChatView({
         postToChat("setVerboseThinking", verboseThinkingRef.current);
         postToChat("setCodexTimeline", codexTimelineRef.current !== false);
         postToChat("setPendingAsk", pendingAskRef.current || null);
+        postToChat("setActiveTool", activeToolRef.current || null);
         const queue = pendingRef.current;
         pendingRef.current = [];
         queue.forEach((run) => run());
@@ -263,6 +267,11 @@ export function ChatView({
     if (!readyRef.current) return;
     postToChat("setPendingAsk", pendingAsk || null);
   }, [pendingAsk, postToChat]);
+
+  useEffect(() => {
+    if (!readyRef.current) return;
+    postToChat("setActiveTool", activeTool || null);
+  }, [activeTool, postToChat]);
 
   useEffect(() => {
     if (!readyRef.current) return;

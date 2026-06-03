@@ -199,8 +199,11 @@ export function installWebBridge() {
 
   const listeners = {
     messageAppended: new Set(),
+    messageDelta: new Set(),
     sessionChanged: new Set(),
     busyChanged: new Set(),
+    toolStarted: new Set(),
+    askUserRequest: new Set(),
     error: new Set(),
     openSettings: new Set(),
   };
@@ -619,6 +622,18 @@ export function installWebBridge() {
     },
     onBusyChanged(callback) {
       return subscribe(listeners.busyChanged, callback);
+    },
+    onMessageDelta(callback) {
+      return subscribe(listeners.messageDelta, callback);
+    },
+    onToolStarted(callback) {
+      return subscribe(listeners.toolStarted, callback);
+    },
+    onAskUserRequest(callback) {
+      return subscribe(listeners.askUserRequest, callback);
+    },
+    respondAskUser(payload) {
+      return Promise.resolve({ ok: false, error: "ask_user is not available in web preview" });
     },
     onError(callback) {
       return subscribe(listeners.error, callback);

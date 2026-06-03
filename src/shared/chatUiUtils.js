@@ -499,3 +499,16 @@ export function buildCodexTimeline(thinkingMessages, options = {}) {
         .filter(Boolean);
     return { ...built, lines };
 }
+
+/** Live status while a tool is executing (Codex-style footer). */
+export function formatToolRunningLine(toolName, toolInput = {}) {
+    const name = String(toolName || "tool");
+    if (name === "bash") {
+        const cmd = String(toolInput.command || "").trim();
+        if (cmd) {
+            return `正在运行 ${cmd.length > 80 ? `${cmd.slice(0, 80)}…` : cmd}`;
+        }
+    }
+    const label = TOOL_NAME_ZH[name] || name;
+    return `正在${label}…`;
+}
