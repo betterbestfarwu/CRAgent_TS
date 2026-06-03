@@ -1255,8 +1255,13 @@ export function App() {
       const resolvedProjectId =
         projectId !== undefined
           ? projectId || null
-          : focusedProjectId
-            ?? (expandedProjectIds.length === 1 ? expandedProjectIds[0] : null);
+          : focusedProjectId != null
+            ? focusedProjectId
+            : page === "chat" && currentSession
+              ? (currentSession.meta?.projectId ?? null)
+              : expandedProjectIds.length === 1
+                ? expandedProjectIds[0]
+                : null;
       const next = await window.cragent.newSession({ projectId: resolvedProjectId });
       setCurrentSession(next);
       setFocusedProjectId(next?.meta?.projectId ?? null);
