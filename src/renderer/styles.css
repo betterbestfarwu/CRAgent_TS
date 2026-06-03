@@ -2242,6 +2242,14 @@ body.app-sidebar-resizing {
   user-select: none;
 }
 
+.composer-auth-wrap--autoReview .composer-auth-label {
+  color: #3b82f6;
+}
+
+.composer-auth-wrap--fullAccess .composer-auth-label {
+  color: #b45309;
+}
+
 .composer-auth-chevron {
   flex-shrink: 0;
   display: flex;
