@@ -1274,6 +1274,12 @@ export function App() {
   }
 
   const active = Boolean(currentSession && currentSession.messages.length > 0);
+  const hasComposerDraft =
+    input.length > 0 ||
+    pendingImages.length > 0 ||
+    pendingFiles.length > 0 ||
+    pendingAtMentions.length > 0;
+  const chatWelcomeLayout = !active && !hasComposerDraft;
   const onSettingsPage = page === "settings";
 
   const titleBarLabel = useMemo(() => {
@@ -1408,7 +1414,9 @@ export function App() {
           />
         ) : (
           <div className="chat-layout">
-            <div className="chat-content-column">
+            <div
+              className={`chat-content-column${chatWelcomeLayout ? " chat-content-column--welcome" : ""}`}
+            >
             <div className="chat-history">
               {!active ? (
                 <div className="empty-state">

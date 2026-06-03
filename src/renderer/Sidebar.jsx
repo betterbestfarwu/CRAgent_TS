@@ -126,6 +126,14 @@ function SeeMoreRow({ onClick }) {
   );
 }
 
+function ProjectEmptyState() {
+  return (
+    <div className="project-node-empty" aria-hidden="true">
+      No agents yet
+    </div>
+  );
+}
+
 function SessionRow({ meta, active, busy, unread, forceActionButtons, onSelect, onDelete }) {
   const [hovered, setHovered] = useState(false);
   const rowRef = useRef(null);
@@ -367,19 +375,23 @@ export function Sidebar({
                 />
                 {expanded ? (
                   <div className="project-node-content">
-                    {projectSessionsDisplay.visible.map((meta) => (
-                      <SessionRow
-                        key={meta.id}
-                        meta={meta}
-                        active={!settingsActive && meta.id === currentSessionId}
-                        busy={Boolean(busyBySession[meta.id])}
-                        unread={Boolean(unreadBySession[meta.id])}
-                        forceActionButtons={forceActionButtons}
-                        onSelect={onSelect}
-                        onDelete={onDelete}
-                      />
-                    ))}
-                    {projectSessionsDisplay.hasMore ? (
+                    {rows.length === 0 ? (
+                      <ProjectEmptyState />
+                    ) : (
+                      projectSessionsDisplay.visible.map((meta) => (
+                        <SessionRow
+                          key={meta.id}
+                          meta={meta}
+                          active={!settingsActive && meta.id === currentSessionId}
+                          busy={Boolean(busyBySession[meta.id])}
+                          unread={Boolean(unreadBySession[meta.id])}
+                          forceActionButtons={forceActionButtons}
+                          onSelect={onSelect}
+                          onDelete={onDelete}
+                        />
+                      ))
+                    )}
+                    {rows.length > 0 && projectSessionsDisplay.hasMore ? (
                       <SeeMoreRow
                         onClick={() =>
                           setProjectSessionsVisibleLimits((prev) => {

@@ -564,8 +564,11 @@ body.app-sidebar-resizing {
 }
 
 .project-node {
-  margin: 0 6px 2px;
+  margin: 0 6px 1px;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .project-node-head {
@@ -574,7 +577,9 @@ body.app-sidebar-resizing {
 }
 
 .project-node-content {
-  margin-top: 0.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .project-node-content .session-row {
@@ -584,8 +589,20 @@ body.app-sidebar-resizing {
 
 .project-node-content .sidebar-see-more {
   width: 100%;
-  margin-left: 0;
-  margin-right: 0;
+  margin: 0;
+}
+
+.project-node-empty {
+  height: 34px;
+  margin: 0;
+  padding: 0 4px 0 30px;
+  display: flex;
+  align-items: center;
+  color: var(--sidebar-muted);
+  font-size: var(--cursor-sidebar-list-size);
+  line-height: var(--cursor-sidebar-list-line-height);
+  user-select: none;
+  pointer-events: none;
 }
 
 .project-node-surface {
@@ -862,6 +879,24 @@ body.app-sidebar-resizing {
   min-height: 0;
   gap: 0;
   box-sizing: border-box;
+}
+
+.chat-content-column--welcome {
+  justify-content: center;
+}
+
+.chat-content-column--welcome .chat-history {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.chat-content-column--welcome .empty-state {
+  flex: 0 0 auto;
+  padding-inline: var(--chat-gutter-x);
+}
+
+.chat-content-column--welcome .composer {
+  margin-top: 20px;
 }
 
 .chat-history {
