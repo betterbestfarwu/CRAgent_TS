@@ -284,7 +284,7 @@ export class SessionStore {
             hasUserMessages: meta.hasUserMessages || message.role === "user",
         };
         if (message.role === "user" && isDefaultSessionTitle(meta.title)) {
-            const derived = titleFromFirstUserMessage(message.content);
+            const derived = titleFromFirstUserMessage(message.userText || message.content);
             if (derived) {
                 meta.title = derived;
             }

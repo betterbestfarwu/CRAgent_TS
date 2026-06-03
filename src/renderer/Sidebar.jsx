@@ -52,33 +52,28 @@ const ICON_PLUS = (
   </svg>
 );
 
-const ICON_FOLDER = (
-  <svg
-    viewBox="0 0 24 24"
-    width="16"
-    height="16"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
-  </svg>
-);
+const CURSOR_OUTLINE_ICON = {
+  folder: "\uEA83",
+  "folder-open": "\uEAF7",
+  "folder-plus": "\uEA80",
+  "chevron-right": "\uEAB6",
+  "chevron-down": "\uEAB4",
+};
 
-const ICON_CARET_RIGHT = (
-  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
-    <path d="M6 4.5 10.5 8 6 11.5V4.5Z" />
-  </svg>
-);
-
-const ICON_CARET_DOWN = (
-  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
-    <path d="M4.5 6 8 10.5 11.5 6H4.5Z" />
-  </svg>
-);
+function CursorOutlineIcon({ name, size = 14 }) {
+  const glyph = CURSOR_OUTLINE_ICON[name];
+  if (!glyph) return null;
+  return (
+    <i
+      className="cursor-icon ui-icon"
+      style={{
+        "--cursor-icon-content": `"${glyph}"`,
+        "--icon-size": `${size}px`,
+      }}
+      aria-hidden="true"
+    />
+  );
+}
 
 function ProjectNodeHead({ project, expanded, onSelect, onNewChat }) {
   const [hovered, setHovered] = useState(false);
@@ -98,7 +93,11 @@ function ProjectNodeHead({ project, expanded, onSelect, onNewChat }) {
           onClick={() => onSelect?.(project.id)}
         >
           <span className="project-node-icon">
-            {expanded ? ICON_CARET_DOWN : hovered ? ICON_CARET_RIGHT : ICON_FOLDER}
+            {hovered ? (
+              <CursorOutlineIcon name={expanded ? "chevron-down" : "chevron-right"} />
+            ) : (
+              <CursorOutlineIcon name={expanded ? "folder-open" : "folder"} />
+            )}
           </span>
           <span className="project-node-name">{project.name}</span>
         </button>
@@ -349,7 +348,7 @@ export function Sidebar({
               aria-label="添加项目目录"
               onClick={onAddProject}
             >
-              {ICON_PLUS}
+              <CursorOutlineIcon name="folder-plus" />
             </button>
           </div>
           <div className="project-node-list">

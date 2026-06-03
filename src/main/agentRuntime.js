@@ -70,9 +70,11 @@ import {
     getPlanFilePath,
     planFileExists,
     readPlanFile,
+    shouldStartInPlanMode,
     validatePlanModeToolCall,
     writePlanFile,
 } from "./planMode.js";
+import { PLAN_MODE_AUTO_SYSTEM_HINT } from "@shared/planMessages.js";
 import {
     estimateMcpToolDefinitionTokens,
     getEnabledMcpServers,
@@ -190,6 +192,26 @@ export class AgentRuntime {
     executionMode() {
         const mode = this.configStore.get().agents?.default?.execution_mode;
         return mode === "plan" ? "plan" : "goal";
+    }
+
+    maybeAutoEnterPlanMode(sessionId, input) {
+        if (this.executionMode() === "plan" || !shouldStartInPlanMode(input)) {
+            return false;
+        }
+        const workspace = resolveSessionWorkspace(this.sessionStore, this.configStore, sessionId);
+        ensurePlansDirectory(workspace);
+        const config = this.configStore.get();
+        this.configStore.update({
+            ...config,
+            agents: {
+                ...config.agents,
+                default: {
+                    ...(config.agents?.default || {}),
+                    execution_mode: "plan",
+                },
+            },
+        });
+        return true;
     }
 
     buildSystemPromptContent(session) {
@@ -813,6 +835,7 @@ export class AgentRuntime {
             return { queued: true };
         }
         await this.dispatchUserMessage(sessionId, rawInput, storedImages, normalizedMentions, userText);
+        return { queued: false, config: this.configStore.get() };
     }
 
     async dispatchUserMessage(sessionId, rawInput, storedImages = [], atMentions = [], userText = null) {
@@ -860,6 +883,10 @@ export class AgentRuntime {
                 ? expandAtMentionsToAbsolute(skillInvoke.rest, projectRoot)
                 : `请按照已加载的 skill「${skillInvoke.skillName}」执行任务。`;
         }
+        const autoPlanMode = this.maybeAutoEnterPlanMode(sessionId, displayText || input);
+        if (autoPlanMode) {
+            messageContent = [messageContent, "", PLAN_MODE_AUTO_SYSTEM_HINT].join("\n");
+        }
 
         const promptHook = await this.runUserPromptSubmitHook(sessionId, messageContent);
         if (promptHook.blocked) {
@@ -881,9 +908,10 @@ export class AgentRuntime {
             content: messageContent,
             createdAt: new Date().toISOString(),
             runId,
-            ...(normalizedMentions.length
-                ? { atMentions: normalizedMentions, userText: displayText }
+            ...(normalizedMentions.length || autoPlanMode
+                ? { userText: displayText, ...(normalizedMentions.length ? { atMentions: normalizedMentions } : {}) }
                 : {}),
+            ...(autoPlanMode ? { systemHint: PLAN_MODE_AUTO_SYSTEM_HINT } : {}),
             ...(skillInvoke
                 ? { skillName: skillInvoke.skillName, skillLoaded: true }
                 : {}),
@@ -1108,8 +1136,14 @@ export class AgentRuntime {
         }
     }
 
-    requestAgentChat(sessionId, chatArgs) {
-        return this.requestAgentLlm(sessionId, () => this.llmClient.chat(chatArgs));
+    requestAgentChat(sessionId, chatArgsOrFactory) {
+        return this.requestAgentLlm(sessionId, () => {
+            const chatArgs =
+                typeof chatArgsOrFactory === "function"
+                    ? chatArgsOrFactory()
+                    : chatArgsOrFactory;
+            return this.llmClient.chat(chatArgs);
+        });
     }
 
     async prepareSubAgentContext(sessionId, messages, model) {
@@ -1483,12 +1517,15 @@ export class AgentRuntime {
                         toolSchemas = this.toolRegistry.schemas({ unlockedToolNames });
                     }
                 }
-                const chatResult = await this.requestAgentChat(sessionId, {
-                    messages: this.messagesForLLM(session),
-                    model,
-                    modelChain: this.modelChainForSession(session),
-                    tools: toolSchemas,
-                    signal,
+                const chatResult = await this.requestAgentChat(sessionId, () => {
+                    const refreshedSession = this.sessionStore.get(sessionId);
+                    return {
+                        messages: this.messagesForLLM(refreshedSession),
+                        model,
+                        modelChain: this.modelChainForSession(refreshedSession),
+                        tools: toolSchemas,
+                        signal,
+                    };
                 });
                 if (this.wasRunCancelled(sessionId)) {
                     return;

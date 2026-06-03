@@ -1,5 +1,43 @@
 @import url("../../public/cursor-theme.css");
 
+@font-face {
+  font-display: block;
+  font-family: cursor-icons;
+  src: url("../../public/fonts/cursor-icons-outline.woff2") format("woff2");
+}
+
+.cursor-icon {
+  font: normal normal normal 16px/1 cursor-icons;
+  display: inline-block;
+  text-decoration: none;
+  text-rendering: auto;
+  text-align: center;
+  text-transform: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+.cursor-icon::before {
+  content: var(--cursor-icon-content);
+}
+
+.ui-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  line-height: 1;
+  vertical-align: middle;
+  width: var(--icon-size);
+  height: var(--icon-size);
+  --icon-size: 16px;
+}
+
+.ui-icon.cursor-icon {
+  font-size: var(--icon-size);
+}
+
 :root {
   font-family: var(--cursor-font-family);
   font-size: var(--cursor-font-size);
@@ -437,8 +475,6 @@ body.app-sidebar-resizing {
 
 .project-section {
   margin-top: 6px;
-  border-top: 1px solid var(--sidebar-border);
-  padding-top: 4px;
 }
 
 .project-section.drag-over {
@@ -585,15 +621,9 @@ body.app-sidebar-resizing {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   color: var(--sidebar-muted);
-}
-
-.project-node-icon svg {
-  display: block;
-  width: 16px;
-  height: 16px;
 }
 
 .session-node-content,
@@ -628,7 +658,7 @@ body.app-sidebar-resizing {
 }
 
 .session-row.active .session-row-surface {
-  background: var(--sidebar-active);
+  background: var(--sidebar-hover);
 }
 
 .session-row-main {
@@ -1291,57 +1321,76 @@ body.app-sidebar-resizing {
 
 .composer-input-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
+  align-items: flex-start;
   width: 100%;
   min-width: 0;
 }
 
-.composer-input-row .composer-input-prefix {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: 0;
-  max-width: 100%;
-  padding-left: 0;
-  field-sizing: content;
-}
-
-.composer-input-row .composer-input-primary {
-  flex: 1 1 80px;
-  width: auto;
-  min-width: 80px;
-  max-width: 100%;
-  padding-left: 0;
-}
-
 .composer-at-chip {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 0;
+  gap: 2px;
+  width: fit-content;
   max-width: 100%;
   min-width: 0;
+  height: 22px;
+  margin: 1px 2px;
+  padding: 0 0 0 1px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  vertical-align: middle;
+  user-select: none;
+  cursor: default;
 }
 
-.composer-at-chip-remove {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+.composer-at-chip-icon-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
   padding: 0;
   margin: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: 4px;
   background: transparent;
   color: var(--sidebar-muted);
-  font-size: 13px;
-  line-height: 16px;
   cursor: pointer;
 }
 
-.composer-at-chip:hover .composer-at-chip-remove,
-.composer-at-chip-remove:hover {
+.composer-at-chip-icon-btn:hover {
   color: var(--app-fg);
   background: var(--sidebar-hover);
+}
+
+.composer-at-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.composer-at-chip-icon-close {
+  display: none;
+}
+
+.composer-at-chip:hover .composer-at-chip-icon-file {
+  display: none;
+}
+
+.composer-at-chip:hover .composer-at-chip-icon-close {
+  display: inline-flex;
+}
+
+.composer-at-chip-icon-css {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: #a855f7;
 }
 
 .composer-at-chip-label {
@@ -1349,20 +1398,20 @@ body.app-sidebar-resizing {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: inherit;
-  line-height: 24px;
-  color: var(--app-fg);
-  cursor: default;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 500;
+  color: var(--accent);
 }
 
-.composer-at-chip:hover .composer-at-chip-label {
-  color: var(--accent);
+.composer-at-chip:hover {
+  cursor: pointer;
 }
 
 .composer-input {
   width: 100%;
   min-height: 24px;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   padding: 0 0 0 8px;
   margin: 0;
   border: 0;
@@ -1376,8 +1425,22 @@ body.app-sidebar-resizing {
   background: transparent;
 }
 
-.composer-input-row .composer-input {
-  width: auto;
+.composer-input-editor {
+  min-width: 80px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  caret-color: var(--app-fg);
+}
+
+.composer-input-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--sidebar-muted);
+  pointer-events: none;
+}
+
+.composer-input-editor:focus {
+  outline: none;
 }
 
 .composer-input::placeholder {
@@ -2233,7 +2296,7 @@ body.app-sidebar-resizing {
   border-radius: 8px;
   padding: 0 8px;
   font-size: 13px;
-  line-height: 1;
+  line-height: 1.2;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -2253,7 +2316,7 @@ body.app-sidebar-resizing {
 .composer-model-label {
   grid-area: 1 / 1;
   font-size: 13px;
-  line-height: 1;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
@@ -3690,10 +3753,32 @@ body.app-sidebar-resizing {
 }
 
 .plan-approval-dialog {
+  position: relative;
   width: min(560px, calc(100vw - 32px));
   max-height: min(80vh, 720px);
   display: flex;
   flex-direction: column;
+}
+
+.plan-approval-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cursor-fg-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.plan-approval-close:hover {
+  background: var(--cursor-hover);
+  color: var(--cursor-fg);
 }
 
 .plan-approval-path {

@@ -799,9 +799,22 @@
     });
   }
 
+  function appendSystemHintBlock(bubble, systemHint) {
+    var hintText = String(systemHint || '').trim();
+    if (!hintText) return;
+    var bodyText = hintText.replace(/^系统提示[：:]\s*/, '');
+    var hint = document.createElement('div');
+    hint.className = 'msg-system-hint';
+    hint.innerHTML =
+      '<div class="msg-system-hint-label">系统提示</div>' +
+      '<div class="msg-system-hint-body">' + escapeText(bodyText) + '</div>';
+    bubble.appendChild(hint);
+  }
+
   function appendUserBubbleContent(bubble, msg) {
     var mentions = msg.at_mentions || [];
     var userText = String(msg.user_text || msg.content || '').trim();
+    var systemHint = String(msg.system_hint || '').trim();
 
     if (mentions.length) {
       var body = document.createElement('div');
@@ -818,11 +831,12 @@
         var chip = document.createElement('span');
         chip.className = 'msg-at-chip';
         chip.title = mention.relative_path || mention.name || '';
-        chip.textContent = '@' + (mention.name || '');
+        chip.textContent = String(mention.name || '').replace(/^@+/, '');
         chips.appendChild(chip);
       });
       body.appendChild(chips);
       bubble.appendChild(body);
+      appendSystemHintBlock(bubble, systemHint);
       return;
     }
 
@@ -833,6 +847,7 @@
       bubble.appendChild(plain);
       postProcessRenderedContent(plain);
     }
+    appendSystemHintBlock(bubble, systemHint);
   }
 
   function buildBubble(msg) {

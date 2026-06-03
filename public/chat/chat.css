@@ -831,6 +831,26 @@ html, body {
   min-width: 0;
 }
 
+.msg-system-hint {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.msg-system-hint-label {
+  font-weight: 600;
+  font-size: 11px;
+  color: #b45309;
+  margin-bottom: 4px;
+}
+
+.msg-system-hint-body {
+  color: var(--muted);
+}
+
 .msg-at-chips {
   display: flex;
   flex-wrap: wrap;

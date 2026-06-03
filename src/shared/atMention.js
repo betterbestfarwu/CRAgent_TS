@@ -211,6 +211,14 @@ export function atMentionFileName(relativePath) {
 }
 
 /**
+ * Visible chip label (no leading @).
+ * @param {string} name
+ */
+export function atChipDisplayName(name) {
+    return String(name ?? "").replace(/^@+/, "");
+}
+
+/**
  * @param {string} text
  * @param {AtMentionRef[]} mentions
  * @returns {string}

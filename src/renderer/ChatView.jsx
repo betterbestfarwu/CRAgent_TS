@@ -5,7 +5,10 @@ import {
   dedupeConsecutiveContextDividers,
   getMessageModelId,
 } from "@shared/chatMessages.js";
-import { isPlanRejectionMessage } from "@shared/planMessages.js";
+import {
+  isPlanRejectionMessage,
+  splitPlanModeAutoSystemHint,
+} from "@shared/planMessages.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
 
 function toWireMessage(message, planContext) {
@@ -19,11 +22,24 @@ function toWireMessage(message, planContext) {
   }));
 
   const hasAtMentions = Boolean(message.atMentions?.length);
+  let systemHint = message.systemHint ?? null;
+  let userDisplayText = message.userText ?? null;
+  if (message.role === "user" && !systemHint && !userDisplayText) {
+    const split = splitPlanModeAutoSystemHint(message.content);
+    if (split.systemHint) {
+      systemHint = split.systemHint;
+      userDisplayText = split.userText;
+    }
+  }
   const content =
     message.role === "user"
-      ? hasAtMentions
-        ? message.userText ?? ""
-        : formatAtMentionsForDisplay(message.content)
+      ? systemHint || userDisplayText != null
+        ? hasAtMentions
+          ? userDisplayText ?? ""
+          : formatAtMentionsForDisplay(userDisplayText ?? message.content)
+        : hasAtMentions
+          ? message.userText ?? ""
+          : formatAtMentionsForDisplay(message.content)
       : message.content;
 
   return {
@@ -37,15 +53,20 @@ function toWireMessage(message, planContext) {
     ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
     ...(message.name ? { name: message.name } : {}),
     ...(message.images?.length ? { image_count: message.images.length } : {}),
-    ...(hasAtMentions
+    ...((hasAtMentions || userDisplayText != null) && message.role === "user"
       ? {
-          at_mentions: message.atMentions.map((mention) => ({
-            name: mention.name,
-            relative_path: mention.relativePath,
-          })),
-          user_text: message.userText ?? "",
+          ...(hasAtMentions
+            ? {
+                at_mentions: message.atMentions.map((mention) => ({
+                  name: mention.name,
+                  relative_path: mention.relativePath,
+                })),
+              }
+            : {}),
+          user_text: userDisplayText ?? message.userText ?? "",
         }
       : {}),
+    ...(systemHint ? { system_hint: systemHint } : {}),
     ...(planContext?.active && message.role === "assistant"
       ? {
           plan_file_path: planContext.displayPath,

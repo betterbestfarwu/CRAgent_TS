@@ -12,6 +12,10 @@ import {
     splitAtQueryPath,
 } from "@shared/atMention.js";
 import { expandAtMentionsToAbsolute } from "../src/main/atMentionExpand.js";
+import {
+    COMPOSER_CARET_ZWSP,
+    normalizeComposerEditorText,
+} from "@shared/composerEditor.js";
 
 describe("parseActiveAtMention", () => {
     it("detects trailing @ mention", () => {
@@ -126,6 +130,12 @@ describe("buildInputWithAtMentions", () => {
             buildInputWithAtMentions("", [{ name: "App.jsx", relativePath: "src/App.jsx" }]),
             "@src/App.jsx",
         );
+    });
+});
+
+describe("normalizeComposerEditorText", () => {
+    it("strips invisible caret anchors", () => {
+        assert.equal(normalizeComposerEditorText(`hello${COMPOSER_CARET_ZWSP}`), "hello");
     });
 });
 
