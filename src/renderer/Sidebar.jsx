@@ -39,6 +39,27 @@ const ICON_PLUS = (
   </svg>
 );
 
+const ICON_MORE = (
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+    <circle cx="5" cy="12" r="1.5" />
+    <circle cx="12" cy="12" r="1.5" />
+    <circle cx="19" cy="12" r="1.5" />
+  </svg>
+);
+
+const ICON_MENU_FOLDER = (
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+    <path d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+  </svg>
+);
+
+const ICON_MENU_REMOVE = (
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
 const CURSOR_OUTLINE_ICON = {
   folder: "\uEA83",
   "folder-open": "\uEAF7",
@@ -76,9 +97,79 @@ function CursorOutlineIcon({ name, size = 14 }) {
   );
 }
 
-function ProjectNodeHead({ project, expanded, onSelect, onNewChat }) {
+function ProjectNodeMenu({ project, onRemove, onOpenChange }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (event) => {
+      if (!wrapRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  return (
+    <div className="project-node-menu-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className={`project-node-menu-btn${open ? " is-open" : ""}`}
+        title="更多操作"
+        aria-label="更多操作"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((prev) => !prev);
+        }}
+      >
+        {ICON_MORE}
+      </button>
+      {open ? (
+        <div className="project-node-menu" role="menu">
+          <button
+            type="button"
+            className="project-node-menu-item"
+            role="menuitem"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+              void window.cragent?.openProjectDirectory?.(project.id);
+            }}
+          >
+            <span className="project-node-menu-item-icon">{ICON_MENU_FOLDER}</span>
+            <span className="project-node-menu-item-label">在 Finder 中显示</span>
+          </button>
+          <button
+            type="button"
+            className="project-node-menu-item"
+            role="menuitem"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+              onRemove?.(project);
+            }}
+          >
+            <span className="project-node-menu-item-icon">{ICON_MENU_REMOVE}</span>
+            <span className="project-node-menu-item-label">移除</span>
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ProjectNodeHead({ project, expanded, forceActionButtons, onSelect, onNewChat, onRemove }) {
   const [hovered, setHovered] = useState(false);
-  const showAddBtn = hovered;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const showActions = hovered || forceActionButtons || menuOpen;
 
   return (
     <div
@@ -102,16 +193,26 @@ function ProjectNodeHead({ project, expanded, onSelect, onNewChat }) {
           </span>
           <span className="project-node-name">{project.name}</span>
         </button>
-        {showAddBtn ? (
-          <button
-            type="button"
-            className="project-node-add-chat"
-            title="在此项目新建会话"
-            aria-label="在此项目新建会话"
-            onClick={() => onNewChat?.(project.id)}
-          >
-            {ICON_PLUS}
-          </button>
+        {showActions ? (
+          <>
+            <ProjectNodeMenu
+              project={project}
+              onRemove={onRemove}
+              onOpenChange={setMenuOpen}
+            />
+            <button
+              type="button"
+              className="project-node-add-chat"
+              title="在此项目新建会话"
+              aria-label="在此项目新建会话"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNewChat?.(project.id);
+              }}
+            >
+              {ICON_PLUS}
+            </button>
+          </>
         ) : null}
       </div>
     </div>
@@ -194,6 +295,7 @@ export function Sidebar({
   onAddProject,
   onAddProjectByPath,
   onNewProjectChat,
+  onRemoveProject,
 }) {
   const [search, setSearch] = useState("");
   const [forceActionButtons, setForceActionButtons] = useState(false);
@@ -370,8 +472,10 @@ export function Sidebar({
                 <ProjectNodeHead
                   project={project}
                   expanded={expanded}
+                  forceActionButtons={forceActionButtons}
                   onSelect={onSelectProject}
                   onNewChat={onNewProjectChat}
+                  onRemove={onRemoveProject}
                 />
                 {expanded ? (
                   <div className="project-node-content">

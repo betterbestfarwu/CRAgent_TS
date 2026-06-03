@@ -187,6 +187,9 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.addProject, (_event, directoryPath) =>
         sessionStore.addProject(directoryPath),
     );
+    ipcMain.handle(IPC_CHANNELS.removeProject, (_event, projectId) =>
+        sessionStore.removeProject(projectId),
+    );
     ipcMain.handle(IPC_CHANNELS.pickProjectDirectory, async () => {
         const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
             title: "选择项目目录",
@@ -196,6 +199,21 @@ function registerIpc() {
             return null;
         }
         return result.filePaths[0];
+    });
+    ipcMain.handle(IPC_CHANNELS.openProjectDirectory, async (_event, projectId) => {
+        const id = String(projectId || "").trim();
+        if (!id) {
+            throw new Error("缺少 projectId");
+        }
+        const project = sessionStore.listProjects().find((item) => item.id === id);
+        if (!project?.directoryPath) {
+            throw new Error("未找到项目");
+        }
+        const error = await shell.openPath(project.directoryPath);
+        if (error) {
+            throw new Error(error);
+        }
+        return { ok: true, directoryPath: project.directoryPath };
     });
     ipcMain.handle(IPC_CHANNELS.listProjectDirectory, async (_event, args = {}) => {
         const projectId = String(args.projectId || "").trim();

@@ -284,8 +284,16 @@ export function installWebBridge() {
       throw new Error("Web 演示模式暂不支持添加项目目录。");
     },
 
+    async removeProject() {
+      throw new Error("Web 演示模式暂不支持移除项目。");
+    },
+
     async pickProjectDirectory() {
       return null;
+    },
+
+    async openProjectDirectory() {
+      return { ok: false, error: "Web 演示模式暂不支持打开本地项目文件夹。" };
     },
 
     async listProjectDirectory() {

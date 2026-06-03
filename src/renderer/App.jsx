@@ -978,6 +978,45 @@ export function App() {
     }
   }
 
+  async function handleRemoveProject(project) {
+    const name = project?.name || "此项目";
+    const confirmed = await askConfirm({
+      message: `移除「${name}」？`,
+      detail: "项目将从侧栏移除，相关会话会保留并移到「会话」分组。",
+      confirmLabel: "移除",
+      cancelLabel: "取消",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    if (!window.cragent?.removeProject) {
+      showSessionError("无法移除项目，请完全退出并重启 CRAgent。", currentSession?.meta?.id);
+      return;
+    }
+    try {
+      const result = await window.cragent.removeProject(project.id);
+      const detachedIds = new Set(result?.detachedSessionIds || []);
+      setProjects((prev) => prev.filter((item) => item.id !== project.id));
+      setExpandedProjectIds((prev) => prev.filter((id) => id !== project.id));
+      if (focusedProjectId === project.id) {
+        setFocusedProjectId(null);
+      }
+      setSessions((prev) =>
+        prev.map((meta) =>
+          meta.projectId === project.id || detachedIds.has(meta.id)
+            ? { ...meta, projectId: null }
+            : meta,
+        ),
+      );
+      if (currentSession?.meta?.projectId === project.id) {
+        setCurrentSession((prev) =>
+          prev ? { ...prev, meta: { ...prev.meta, projectId: null } } : prev,
+        );
+      }
+    } catch (err) {
+      showSessionError(err instanceof Error ? err.message : String(err), currentSession?.meta?.id);
+    }
+  }
+
   function removePendingAtMention(mentionId) {
     setPendingAtMentions((prev) => prev.filter((mention) => mention.id !== mentionId));
   }
@@ -1424,6 +1463,7 @@ export function App() {
         }}
         onAddProjectByPath={(directoryPath) => void handleAddProjectDirectory(directoryPath)}
         onNewProjectChat={(projectId) => void handleNewChat(projectId)}
+        onRemoveProject={(project) => void handleRemoveProject(project)}
         onSelect={(sessionId) => void handleSwitchSession(sessionId)}
         onDelete={(meta) => void handleDeleteSession(meta)}
         onNewChat={() => void handleNewChat()}

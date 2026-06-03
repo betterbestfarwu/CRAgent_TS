@@ -37,7 +37,9 @@ const api = {
     listSkills: () => ipcRenderer.invoke(IPC_CHANNELS.listSkills),
     listProjects: () => ipcRenderer.invoke(IPC_CHANNELS.listProjects),
     addProject: (directoryPath) => ipcRenderer.invoke(IPC_CHANNELS.addProject, directoryPath),
+    removeProject: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.removeProject, projectId),
     pickProjectDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.pickProjectDirectory),
+    openProjectDirectory: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.openProjectDirectory, projectId),
     listProjectDirectory: (args) => ipcRenderer.invoke(IPC_CHANNELS.listProjectDirectory, args),
     getSession: (sessionId, options) =>
         invokeUiSession(IPC_CHANNELS.getSession, sessionId, options),

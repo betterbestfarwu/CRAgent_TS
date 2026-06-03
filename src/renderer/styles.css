@@ -531,6 +531,7 @@ body.app-sidebar-resizing {
 }
 
 .project-add-btn,
+.project-node-menu-btn,
 .project-node-add-chat {
   flex-shrink: 0;
   width: 28px;
@@ -546,6 +547,69 @@ body.app-sidebar-resizing {
   cursor: pointer;
 }
 
+.project-node-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.project-node-menu-btn {
+  margin-right: 0;
+}
+
+.project-node-menu-btn.is-open,
+.project-node-menu-btn:hover {
+  color: var(--sidebar-fg);
+  background: transparent;
+}
+
+.project-node-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 196px;
+  border: 1px solid var(--slash-menu-border);
+  border-radius: 10px;
+  background: var(--slash-menu-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 30;
+}
+
+.project-node-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--app-fg);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.project-node-menu-item:hover {
+  background: var(--sidebar-hover);
+}
+
+.project-node-menu-item-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--sidebar-muted);
+}
+
+.project-node-menu-item-label {
+  flex: 1;
+  min-width: 0;
+}
+
 .project-add-btn {
   opacity: 0;
   pointer-events: none;
@@ -553,6 +617,7 @@ body.app-sidebar-resizing {
 }
 
 .project-add-btn:hover,
+.project-node-menu-btn:hover,
 .project-node-add-chat:hover {
   color: var(--sidebar-fg);
 }

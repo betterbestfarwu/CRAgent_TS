@@ -122,6 +122,31 @@ export class SessionStore {
         return project;
     }
 
+    removeProject(projectId) {
+        const id = normalizeProjectId(projectId);
+        if (!id) {
+            throw new Error("缺少 projectId");
+        }
+        const projects = this.listProjects();
+        if (!projects.some((item) => item.id === id)) {
+            throw new Error("未找到项目");
+        }
+        this.persistProjects(projects.filter((item) => item.id !== id));
+        const detachedSessionIds = [];
+        for (const meta of this.listMetas()) {
+            if (normalizeProjectId(meta.projectId) !== id) {
+                continue;
+            }
+            this.ensureMigrated(meta.id);
+            const updated = readMeta(this.sessionsDir, meta.id);
+            updated.projectId = null;
+            updated.updatedAt = nowIso();
+            writeMeta(this.sessionsDir, updated);
+            detachedSessionIds.push(meta.id);
+        }
+        return { projectId: id, detachedSessionIds };
+    }
+
     listMetas() {
         const metas = [];
         for (const entry of listSessionEntries(this.sessionsDir)) {
