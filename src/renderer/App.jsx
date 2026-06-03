@@ -51,13 +51,6 @@ import { formatModelRef } from "@shared/modelRef.js";
 import { filterVisibleTodoRuns, msUntilTodoRunsHide } from "@shared/todoRunsDisplay.js";
 import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
 
-const SUGGESTIONS = [
-  "总结当前项目结构",
-  "帮我写一段 README",
-  "解释最近这段代码逻辑",
-  "重构最近改动",
-];
-
 const COMPOSER_LINE_HEIGHT = 24;
 const COMPOSER_MIN_HEIGHT = COMPOSER_LINE_HEIGHT;
 /** ~3 行可视高度，达到 2 倍后出现滚动条 */
@@ -108,6 +101,7 @@ export function App() {
   const [composerDragOver, setComposerDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyBySession, setBusyBySession] = useState({});
+  const [unreadBySession, setUnreadBySession] = useState({});
   const [page, setPage] = useState("chat");
   const [sessionError, setSessionError] = useState(null);
   const [compactLayout, setCompactLayout] = useState(false);
@@ -418,7 +412,13 @@ export function App() {
 
     const offBusy = window.cragent.onBusyChanged(({ sessionId, busy: nextBusy }) => {
       busyBySessionRef.current.set(sessionId, nextBusy);
-      setBusyBySession((prev) => ({ ...prev, [sessionId]: nextBusy }));
+      setBusyBySession((prev) => {
+        const wasBusy = prev[sessionId];
+        if (wasBusy && !nextBusy && sessionIdRef.current !== sessionId) {
+          setUnreadBySession((unread) => ({ ...unread, [sessionId]: true }));
+        }
+        return { ...prev, [sessionId]: nextBusy };
+      });
       if (sessionIdRef.current === sessionId) {
         setBusy(nextBusy);
       }
@@ -481,7 +481,13 @@ export function App() {
       }
       if (sessionId) {
         busyBySessionRef.current.set(sessionId, false);
-        setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
+        setBusyBySession((prev) => {
+          const wasBusy = prev[sessionId];
+          if (wasBusy && sessionIdRef.current !== sessionId) {
+            setUnreadBySession((unread) => ({ ...unread, [sessionId]: true }));
+          }
+          return { ...prev, [sessionId]: false };
+        });
         if (sessionIdRef.current === sessionId) {
           setBusy(false);
         }
@@ -1116,6 +1122,12 @@ export function App() {
 
   async function handleSwitchSession(sessionId) {
     clearSessionError();
+    setUnreadBySession((prev) => {
+      if (!prev[sessionId]) return prev;
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
     const session = await window.cragent.getSession(sessionId, {
       messageLimit: DEFAULT_UI_MESSAGE_PAGE,
     });
@@ -1146,6 +1158,12 @@ export function App() {
     if (!confirmed) {
       return;
     }
+    setUnreadBySession((prev) => {
+      if (!prev[meta.id]) return prev;
+      const next = { ...prev };
+      delete next[meta.id];
+      return next;
+    });
     const session = await window.cragent.deleteSession(meta.id);
     setSessions((prev) => {
       const next = prev.filter((s) => s.id !== meta.id);
@@ -1328,6 +1346,7 @@ export function App() {
         sessions={sessions}
         currentSessionId={currentSession?.meta.id}
         busyBySession={busyBySession}
+        unreadBySession={unreadBySession}
         settingsActive={onSettingsPage}
         onSelectProject={handleSelectProject}
         onAddProject={async () => {
@@ -1394,13 +1413,6 @@ export function App() {
               {!active ? (
                 <div className="empty-state">
                   <h1>有什么我能帮你的吗？</h1>
-                  <div className="suggestions">
-                    {SUGGESTIONS.map((s) => (
-                      <button key={s} type="button" onClick={() => void handleSend(s)}>
-                        {s}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               ) : (
                 <>

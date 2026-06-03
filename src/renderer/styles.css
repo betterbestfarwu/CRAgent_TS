@@ -702,6 +702,19 @@ body.app-sidebar-resizing {
   color: var(--sidebar-muted);
 }
 
+.session-status-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--session-dot-color, var(--cursor-fg-subtle));
+  flex-shrink: 0;
+}
+
+.session-status-dot--unread {
+  --session-dot-color: var(--cursor-accent);
+}
+
 .session-spinner {
   display: block;
   width: 10px;
@@ -938,11 +951,6 @@ body.app-sidebar-resizing {
   gap: 14px;
   padding-inline: var(--chat-gutter-x);
   box-sizing: border-box;
-}
-
-.suggestions {
-  display: grid;
-  gap: 8px;
 }
 
 .todo-panel {
@@ -2466,16 +2474,6 @@ body.app-sidebar-resizing {
 
 .composer-send-ready:hover:not(:disabled) {
   background: #006cbe;
-}
-
-.suggestions button,
-.actions button {
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--surface-border);
-  background: var(--input-surface-bg);
-  color: var(--app-fg);
-  cursor: pointer;
 }
 
 .main-settings {
