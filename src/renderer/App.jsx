@@ -1078,36 +1078,49 @@ export function App() {
   async function handleRemoveProject(project) {
     const name = project?.name || "此项目";
     const confirmed = await askConfirm({
-      message: `移除「${name}」？`,
-      detail: "项目将从侧栏移除，相关会话会保留并移到「会话」分组。",
-      confirmLabel: "移除",
+      message: `删除「${name}」？`,
+      detail: "将从 projects.json 移除该项目，并删除 Projects 目录下与项目 ID 同名的文件夹（含全部会话）。此操作无法撤销。",
+      confirmLabel: "删除",
       cancelLabel: "取消",
       destructive: true,
     });
     if (!confirmed) return;
     if (!window.cragent?.removeProject) {
-      showSessionError("无法移除项目，请完全退出并重启 CRAgent。", currentSession?.meta?.id);
+      showSessionError("无法删除项目，请完全退出并重启 CRAgent。", currentSession?.meta?.id);
       return;
     }
     try {
       const result = await window.cragent.removeProject(project.id);
-      const detachedIds = new Set(result?.detachedSessionIds || []);
+      const deletedIds = new Set(result?.deletedSessionIds || []);
       setProjects((prev) => prev.filter((item) => item.id !== project.id));
       setExpandedProjectIds((prev) => prev.filter((id) => id !== project.id));
       if (focusedProjectId === project.id) {
         setFocusedProjectId(null);
       }
-      setSessions((prev) =>
-        prev.map((meta) =>
-          meta.projectId === project.id || detachedIds.has(meta.id)
-            ? { ...meta, projectId: null }
-            : meta,
-        ),
-      );
-      if (currentSession?.meta?.projectId === project.id) {
-        setCurrentSession((prev) =>
-          prev ? { ...prev, meta: { ...prev.meta, projectId: null } } : prev,
-        );
+      setUnreadBySession((prev) => {
+        if (!deletedIds.size) return prev;
+        const next = { ...prev };
+        for (const sessionId of deletedIds) {
+          delete next[sessionId];
+        }
+        return next;
+      });
+      const snapshot = await window.cragent.getSnapshot();
+      setSessions(sortSessions(snapshot.sessions));
+      if (currentSession && deletedIds.has(currentSession.meta.id)) {
+        const fallbackId =
+          result?.fallbackSessionId || snapshot.sessions[0]?.id || snapshot.currentSessionId;
+        if (fallbackId) {
+          const session = await window.cragent.getSession(fallbackId, {
+            messageLimit: DEFAULT_UI_MESSAGE_PAGE,
+          });
+          setCurrentSession(session);
+          setFocusedProjectId(session?.meta?.projectId ?? null);
+          ensureProjectExpanded(session?.meta?.projectId);
+          setPage("chat");
+        } else {
+          setCurrentSession(null);
+        }
       }
     } catch (err) {
       showSessionError(err instanceof Error ? err.message : String(err), currentSession?.meta?.id);
@@ -1400,7 +1413,7 @@ export function App() {
     return {
       active: true,
       sessionId: currentSession.meta.id,
-      displayPath: `.cragent/plans/${currentSession.meta.id}.md`,
+      displayPath: "plan.md",
       content: planFileContent,
     };
   }, [executionMode, currentSession?.meta?.id, planFileContent]);

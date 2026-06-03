@@ -14,21 +14,32 @@ import {
     isSplitSession,
     listSessionEntries,
     messagesFile,
-    metaFile,
     migrateLegacySessionIfNeeded,
+    moveSessionStorage,
     readLegacyMeta,
     readMessages,
     readMeta,
     rewriteMessages,
+    sessionExistsInDir,
     writeMeta,
     writeSplitSession,
 } from "./sessionStorage.js";
+import {
+    projectSessionsDir as resolveProjectSessionsDir,
+    projectStorageRoot,
+    projectsStorageRoot,
+} from "@shared/projectStoragePaths.js";
 import {
     deleteSessionImages,
     externalizeSessionImages,
     hydrateSessionImages,
     sessionHasInlineImages,
 } from "./sessionImageStorage.js";
+import {
+    indexSessionsByProjectId,
+    normalizeProjectSessions,
+    repairProjectRecords,
+} from "@shared/projectSessions.js";
 
 function nowIso() {
     return new Date().toISOString();
@@ -40,6 +51,27 @@ function normalizeProjectId(projectId) {
     }
     const trimmed = projectId.trim();
     return trimmed ? trimmed : null;
+}
+
+function parseProjectRecord(item) {
+    return {
+        id: String(item.id || "").trim(),
+        name: String(item.name || "").trim(),
+        directoryPath: String(item.directoryPath || "").trim(),
+        createdAt: String(item.createdAt || nowIso()),
+        updatedAt: String(item.updatedAt || nowIso()),
+        sessions: normalizeProjectSessions(item.sessions),
+    };
+}
+
+function projectForRenderer(project) {
+    return {
+        id: project.id,
+        name: project.name,
+        directoryPath: project.directoryPath,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+    };
 }
 
 function normalizeGetOptions(options = {}) {
@@ -56,14 +88,155 @@ function normalizeGetOptions(options = {}) {
 }
 
 export class SessionStore {
-    constructor(sessionsDir, defaultModel, projectsFile) {
+    constructor(sessionsDir, defaultModel, projectsFile, projectsDir = null) {
         this.sessionsDir = sessionsDir;
+        this.projectsDir =
+            projectsDir ?? projectsStorageRoot(path.dirname(sessionsDir));
         this.defaultModel = defaultModel;
         this.projectsFile = projectsFile;
         fs.mkdirSync(this.sessionsDir, { recursive: true });
+        fs.mkdirSync(this.projectsDir, { recursive: true });
+        this.ensureAllProjectLayouts();
+        this.migrateGlobalProjectSessions();
+        this.repairProjectsFile();
     }
 
-    listProjects() {
+    projectSessionsDir(projectId) {
+        return resolveProjectSessionsDir(this.projectsDir, projectId);
+    }
+
+    ensureProjectLayout(projectId) {
+        const id = normalizeProjectId(projectId);
+        if (!id) {
+            return;
+        }
+        fs.mkdirSync(projectStorageRoot(this.projectsDir, id), { recursive: true });
+        fs.mkdirSync(this.projectSessionsDir(id), { recursive: true });
+    }
+
+    ensureAllProjectLayouts() {
+        for (const project of this.readRawProjects()) {
+            this.ensureProjectLayout(project.id);
+        }
+    }
+
+    locateSessionStorage(sessionId) {
+        const cleanSessionId = String(sessionId || "").trim();
+        if (!cleanSessionId) {
+            throw new Error("缺少 sessionId");
+        }
+        if (sessionExistsInDir(this.sessionsDir, cleanSessionId)) {
+            return this.sessionsDir;
+        }
+        for (const project of this.readRawProjects()) {
+            const dir = this.projectSessionsDir(project.id);
+            if (sessionExistsInDir(dir, cleanSessionId)) {
+                return dir;
+            }
+        }
+        throw new Error(`Session not found: ${cleanSessionId}`);
+    }
+
+    resolveSessionsDirForNew(projectId) {
+        const normalized = normalizeProjectId(projectId);
+        if (normalized) {
+            this.ensureProjectLayout(normalized);
+            return this.projectSessionsDir(normalized);
+        }
+        return this.sessionsDir;
+    }
+
+    collectMetasFromDir(sessionsDir, { expectedProjectId = undefined } = {}) {
+        const metas = [];
+        for (const entry of listSessionEntries(sessionsDir)) {
+            let meta;
+            if (entry.kind === "split") {
+                meta = readMeta(sessionsDir, entry.id);
+            } else {
+                meta = readLegacyMeta(sessionsDir, entry.id);
+                if (!meta) {
+                    continue;
+                }
+            }
+            const metaProjectId = normalizeProjectId(meta.projectId);
+            if (expectedProjectId === null && metaProjectId) {
+                continue;
+            }
+            const projectId =
+                typeof expectedProjectId === "string" ? expectedProjectId : metaProjectId;
+            metas.push({
+                ...meta,
+                projectId,
+            });
+        }
+        return metas;
+    }
+
+    migrateGlobalProjectSessions() {
+        const projectIds = new Set(this.readRawProjects().map((project) => project.id));
+        for (const entry of listSessionEntries(this.sessionsDir)) {
+            let meta;
+            if (entry.kind === "split") {
+                meta = readMeta(this.sessionsDir, entry.id);
+            } else {
+                meta = readLegacyMeta(this.sessionsDir, entry.id);
+                if (!meta) {
+                    continue;
+                }
+            }
+            const projectId = normalizeProjectId(meta.projectId);
+            if (!projectId || !projectIds.has(projectId)) {
+                continue;
+            }
+            this.ensureProjectLayout(projectId);
+            moveSessionStorage(
+                this.sessionsDir,
+                this.projectSessionsDir(projectId),
+                entry.id,
+            );
+        }
+    }
+
+    listMetasOnDisk() {
+        const metas = this.collectMetasFromDir(this.sessionsDir, { expectedProjectId: null });
+        for (const project of this.readRawProjects()) {
+            this.ensureProjectLayout(project.id);
+            metas.push(
+                ...this.collectMetasFromDir(this.projectSessionsDir(project.id), {
+                    expectedProjectId: project.id,
+                }),
+            );
+        }
+        return metas;
+    }
+
+    repairProjectsFile() {
+        if (!this.projectsFile || !fs.existsSync(this.projectsFile)) {
+            return { changed: false, projects: [] };
+        }
+        let projects;
+        try {
+            const parsed = JSON.parse(fs.readFileSync(this.projectsFile, "utf-8"));
+            if (!Array.isArray(parsed)) {
+                return { changed: false, projects: [] };
+            }
+            projects = parsed
+                .map((item) => parseProjectRecord(item))
+                .filter((item) => item.id && item.directoryPath);
+        } catch {
+            return { changed: false, projects: [] };
+        }
+        const sessionsByProjectId = indexSessionsByProjectId(this.listMetasOnDisk());
+        const { projects: repaired, changed } = repairProjectRecords(projects, sessionsByProjectId, {
+            now: nowIso,
+        });
+        if (changed) {
+            this.persistProjects(repaired);
+        }
+        return { changed, projects: repaired };
+    }
+
+    readRawProjects() {
         if (!this.projectsFile || !fs.existsSync(this.projectsFile)) {
             return [];
         }
@@ -73,19 +246,17 @@ export class SessionStore {
                 return [];
             }
             return parsed
-                .filter((item) => item && typeof item === "object")
-                .map((item) => ({
-                    id: String(item.id || "").trim(),
-                    name: String(item.name || "").trim(),
-                    directoryPath: String(item.directoryPath || "").trim(),
-                    createdAt: String(item.createdAt || nowIso()),
-                    updatedAt: String(item.updatedAt || nowIso()),
-                }))
-                .filter((item) => item.id && item.directoryPath)
-                .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+                .map((item) => parseProjectRecord(item))
+                .filter((item) => item.id && item.directoryPath);
         } catch {
             return [];
         }
+    }
+
+    listProjects() {
+        return this.readRawProjects()
+            .map((project) => projectForRenderer(project))
+            .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
     }
 
     persistProjects(projects) {
@@ -98,17 +269,92 @@ export class SessionStore {
         fs.renameSync(tmp, this.projectsFile);
     }
 
+    mutateProject(projectId, mutator) {
+        const id = normalizeProjectId(projectId);
+        if (!id) {
+            return null;
+        }
+        const projects = this.readRawProjects();
+        const index = projects.findIndex((item) => item.id === id);
+        if (index < 0) {
+            return null;
+        }
+        const timestamp = nowIso();
+        const next = mutator({ ...projects[index], updatedAt: timestamp });
+        if (!next) {
+            return null;
+        }
+        projects[index] = {
+            ...next,
+            updatedAt: timestamp,
+            sessions: normalizeProjectSessions(next.sessions),
+        };
+        this.persistProjects(projects);
+        return projects[index];
+    }
+
+    registerProjectSession(projectId, sessionId, name = "新会话") {
+        const cleanSessionId = String(sessionId || "").trim();
+        if (!cleanSessionId) {
+            return;
+        }
+        const sessionName = String(name || "").trim() || "新会话";
+        this.mutateProject(projectId, (project) => {
+            const sessions = normalizeProjectSessions(project.sessions);
+            const existing = sessions.find((item) => item.sessionId === cleanSessionId);
+            if (existing) {
+                existing.name = sessionName;
+                return { ...project, sessions };
+            }
+            return {
+                ...project,
+                sessions: [...sessions, { sessionId: cleanSessionId, name: sessionName }],
+            };
+        });
+    }
+
+    unregisterProjectSession(projectId, sessionId) {
+        const cleanSessionId = String(sessionId || "").trim();
+        if (!cleanSessionId) {
+            return;
+        }
+        this.mutateProject(projectId, (project) => ({
+            ...project,
+            sessions: normalizeProjectSessions(project.sessions).filter(
+                (item) => item.sessionId !== cleanSessionId,
+            ),
+        }));
+    }
+
+    syncProjectSessionName(projectId, sessionId, name) {
+        const cleanSessionId = String(sessionId || "").trim();
+        const sessionName = String(name || "").trim();
+        if (!cleanSessionId || !sessionName) {
+            return;
+        }
+        this.mutateProject(projectId, (project) => {
+            const sessions = normalizeProjectSessions(project.sessions);
+            const target = sessions.find((item) => item.sessionId === cleanSessionId);
+            if (!target || target.name === sessionName) {
+                return project;
+            }
+            target.name = sessionName;
+            return { ...project, sessions };
+        });
+    }
+
     addProject(directoryPath) {
         const cleanPath = String(directoryPath || "").trim();
         if (!cleanPath) {
             throw new Error("目录路径不能为空");
         }
-        const projects = this.listProjects();
+        const projects = this.readRawProjects();
         const existing = projects.find(
             (project) => project.directoryPath.toLowerCase() === cleanPath.toLowerCase(),
         );
         if (existing) {
-            return existing;
+            this.ensureProjectLayout(existing.id);
+            return projectForRenderer(existing);
         }
         const createdAt = nowIso();
         const project = {
@@ -117,9 +363,11 @@ export class SessionStore {
             directoryPath: cleanPath,
             createdAt,
             updatedAt: createdAt,
+            sessions: [],
         };
+        this.ensureProjectLayout(project.id);
         this.persistProjects([...projects, project]);
-        return project;
+        return projectForRenderer(project);
     }
 
     removeProject(projectId) {
@@ -127,43 +375,29 @@ export class SessionStore {
         if (!id) {
             throw new Error("缺少 projectId");
         }
-        const projects = this.listProjects();
-        if (!projects.some((item) => item.id === id)) {
+        const projects = this.readRawProjects();
+        const project = projects.find((item) => item.id === id);
+        if (!project) {
             throw new Error("未找到项目");
         }
+        const deletedSessionIds = normalizeProjectSessions(project.sessions).map(
+            (item) => item.sessionId,
+        );
         this.persistProjects(projects.filter((item) => item.id !== id));
-        const detachedSessionIds = [];
-        for (const meta of this.listMetas()) {
-            if (normalizeProjectId(meta.projectId) !== id) {
-                continue;
-            }
-            this.ensureMigrated(meta.id);
-            const updated = readMeta(this.sessionsDir, meta.id);
-            updated.projectId = null;
-            updated.updatedAt = nowIso();
-            writeMeta(this.sessionsDir, updated);
-            detachedSessionIds.push(meta.id);
+        const projectRoot = projectStorageRoot(this.projectsDir, id);
+        if (fs.existsSync(projectRoot)) {
+            fs.rmSync(projectRoot, { recursive: true, force: true });
         }
-        return { projectId: id, detachedSessionIds };
+        const remaining = this.listMetas();
+        return {
+            projectId: id,
+            deletedSessionIds,
+            fallbackSessionId: remaining[0]?.id ?? null,
+        };
     }
 
     listMetas() {
-        const metas = [];
-        for (const entry of listSessionEntries(this.sessionsDir)) {
-            let meta;
-            if (entry.kind === "split") {
-                meta = readMeta(this.sessionsDir, entry.id);
-            } else {
-                meta = readLegacyMeta(this.sessionsDir, entry.id);
-                if (!meta) {
-                    continue;
-                }
-            }
-            metas.push({
-                ...meta,
-                projectId: normalizeProjectId(meta.projectId),
-            });
-        }
+        const metas = this.listMetasOnDisk();
         if (metas.length === 0) {
             return [this.newSession().meta];
         }
@@ -171,7 +405,8 @@ export class SessionStore {
     }
 
     ensureMigrated(sessionId) {
-        migrateLegacySessionIfNeeded(this.sessionsDir, sessionId);
+        const sessionsDir = this.locateSessionStorage(sessionId);
+        migrateLegacySessionIfNeeded(sessionsDir, sessionId);
     }
 
     findPlaceholderSession(projectId = null) {
@@ -196,6 +431,13 @@ export class SessionStore {
         const normalizedProjectId = normalizeProjectId(options.projectId);
         const existing = this.findPlaceholderSession(normalizedProjectId);
         if (existing) {
+            if (normalizedProjectId) {
+                this.registerProjectSession(
+                    normalizedProjectId,
+                    existing.meta.id,
+                    existing.meta.title,
+                );
+            }
             return existing;
         }
         return this.newSession({ projectId: normalizedProjectId });
@@ -218,19 +460,24 @@ export class SessionStore {
             },
             [],
         );
-        writeMeta(this.sessionsDir, meta);
+        const sessionsDir = this.resolveSessionsDirForNew(projectId);
+        writeMeta(sessionsDir, meta);
+        if (projectId) {
+            this.registerProjectSession(projectId, id, meta.title);
+        }
         return { meta, messages: [] };
     }
 
     get(sessionId, options = {}) {
         const normalized = normalizeGetOptions(options);
         this.ensureMigrated(sessionId);
+        const sessionsDir = this.locateSessionStorage(sessionId);
 
-        if (!isSplitSession(this.sessionsDir, sessionId)) {
+        if (!isSplitSession(sessionsDir, sessionId)) {
             throw new Error(`Session not found: ${sessionId}`);
         }
 
-        let meta = readMeta(this.sessionsDir, sessionId);
+        let meta = readMeta(sessionsDir, sessionId);
         const paging = {};
         if (!normalized.loadAllMessages) {
             if (normalized.beforeMessageId) {
@@ -242,7 +489,7 @@ export class SessionStore {
         }
 
         let { messages, totalCount, hasMoreBefore } = readMessages(
-            this.sessionsDir,
+            sessionsDir,
             sessionId,
             paging,
         );
@@ -250,11 +497,11 @@ export class SessionStore {
         let session = { meta, messages };
 
         if (sessionHasInlineImages(session)) {
-            session = externalizeSessionImages(session, this.sessionsDir);
+            session = externalizeSessionImages(session, sessionsDir);
             this.persist(session);
             meta = session.meta;
             ({ messages, totalCount, hasMoreBefore } = readMessages(
-                this.sessionsDir,
+                sessionsDir,
                 sessionId,
                 paging,
             ));
@@ -262,7 +509,7 @@ export class SessionStore {
         }
 
         if (normalized.hydrateImages) {
-            session = hydrateSessionImages(session, this.sessionsDir);
+            session = hydrateSessionImages(session, sessionsDir);
             messages = session.messages;
         }
 
@@ -294,13 +541,14 @@ export class SessionStore {
 
     appendMessage(sessionId, message) {
         this.ensureMigrated(sessionId);
-        let meta = readMeta(this.sessionsDir, sessionId);
+        const sessionsDir = this.locateSessionStorage(sessionId);
+        let meta = readMeta(sessionsDir, sessionId);
         const prepared = externalizeSessionImages(
             { meta, messages: [message] },
-            this.sessionsDir,
+            sessionsDir,
         ).messages[0];
 
-        appendMessageLine(this.sessionsDir, sessionId, prepared);
+        appendMessageLine(sessionsDir, sessionId, prepared);
 
         meta = {
             ...meta,
@@ -314,7 +562,11 @@ export class SessionStore {
                 meta.title = derived;
             }
         }
-        writeMeta(this.sessionsDir, meta);
+        writeMeta(sessionsDir, meta);
+        const projectId = normalizeProjectId(meta.projectId);
+        if (projectId) {
+            this.syncProjectSessionName(projectId, sessionId, meta.title);
+        }
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
 
@@ -336,16 +588,18 @@ export class SessionStore {
 
     updateTodos(sessionId, todos) {
         this.ensureMigrated(sessionId);
-        const meta = readMeta(this.sessionsDir, sessionId);
+        const sessionsDir = this.locateSessionStorage(sessionId);
+        const meta = readMeta(sessionsDir, sessionId);
         meta.todos = todos;
         meta.updatedAt = nowIso();
-        writeMeta(this.sessionsDir, meta);
+        writeMeta(sessionsDir, meta);
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
 
     updateTodoRun(sessionId, runId, todos) {
         this.ensureMigrated(sessionId);
-        const meta = readMeta(this.sessionsDir, sessionId);
+        const sessionsDir = this.locateSessionStorage(sessionId);
+        const meta = readMeta(sessionsDir, sessionId);
         meta.todoRuns = meta.todoRuns || {};
         meta.todoRuns[runId] = {
             todos,
@@ -353,16 +607,17 @@ export class SessionStore {
         };
         meta.todos = todos;
         meta.updatedAt = nowIso();
-        writeMeta(this.sessionsDir, meta);
+        writeMeta(sessionsDir, meta);
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
 
     updateAuthMode(sessionId, authMode) {
         this.ensureMigrated(sessionId);
-        const meta = readMeta(this.sessionsDir, sessionId);
+        const sessionsDir = this.locateSessionStorage(sessionId);
+        const meta = readMeta(sessionsDir, sessionId);
         meta.authMode = authMode;
         meta.updatedAt = nowIso();
-        writeMeta(this.sessionsDir, meta);
+        writeMeta(sessionsDir, meta);
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
 
@@ -370,32 +625,64 @@ export class SessionStore {
         this.ensureMigrated(sessionId);
         const normalized = normalizeProjectId(projectId);
         if (normalized) {
-            const exists = this.listProjects().some((item) => item.id === normalized);
+            const exists = this.readRawProjects().some((item) => item.id === normalized);
             if (!exists) {
                 throw new Error("未找到项目");
             }
         }
-        const meta = readMeta(this.sessionsDir, sessionId);
+        const fromDir = this.locateSessionStorage(sessionId);
+        const meta = readMeta(fromDir, sessionId);
+        const previousProjectId = normalizeProjectId(meta.projectId);
+        const targetDir = this.resolveSessionsDirForNew(normalized);
+        if (fromDir !== targetDir) {
+            moveSessionStorage(fromDir, targetDir, sessionId);
+        }
         meta.projectId = normalized;
         meta.updatedAt = nowIso();
-        writeMeta(this.sessionsDir, meta);
+        writeMeta(targetDir, meta);
+        if (previousProjectId && previousProjectId !== normalized) {
+            this.unregisterProjectSession(previousProjectId, sessionId);
+        }
+        if (normalized) {
+            this.registerProjectSession(normalized, sessionId, meta.title);
+        }
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
 
     persist(session) {
         this.ensureMigrated(session.meta.id);
-        const payload = externalizeSessionImages(session, this.sessionsDir);
+        const sessionsDir = this.locateSessionStorage(session.meta.id);
+        const payload = externalizeSessionImages(session, sessionsDir);
         const meta = enrichMeta(
             { ...payload.meta, updatedAt: payload.meta.updatedAt || nowIso() },
             payload.messages,
         );
-        writeMeta(this.sessionsDir, meta);
-        rewriteMessages(this.sessionsDir, payload.meta.id, payload.messages);
+        writeMeta(sessionsDir, meta);
+        rewriteMessages(sessionsDir, payload.meta.id, payload.messages);
+        const projectId = normalizeProjectId(meta.projectId);
+        if (projectId) {
+            this.syncProjectSessionName(projectId, meta.id, meta.title);
+        }
     }
 
     delete(sessionId) {
-        deleteSessionFiles(this.sessionsDir, sessionId);
-        deleteSessionImages(sessionId, this.sessionsDir);
+        let previousProjectId = null;
+        let sessionsDir = null;
+        try {
+            sessionsDir = this.locateSessionStorage(sessionId);
+            this.ensureMigrated(sessionId);
+            previousProjectId = normalizeProjectId(readMeta(sessionsDir, sessionId).projectId);
+        } catch {
+            previousProjectId = null;
+            sessionsDir = null;
+        }
+        if (sessionsDir) {
+            deleteSessionFiles(sessionsDir, sessionId);
+            deleteSessionImages(sessionId, sessionsDir);
+        }
+        if (previousProjectId) {
+            this.unregisterProjectSession(previousProjectId, sessionId);
+        }
         const remaining = this.listMetas();
         if (remaining.length) {
             return remaining[0];
@@ -406,6 +693,6 @@ export class SessionStore {
     /** Path to append-only message log (hooks / tooling). */
     transcriptPath(sessionId) {
         this.ensureMigrated(sessionId);
-        return messagesFile(this.sessionsDir, sessionId);
+        return messagesFile(this.locateSessionStorage(sessionId), sessionId);
     }
 }

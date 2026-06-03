@@ -21,7 +21,7 @@ import { mcpToolRegistryName } from "@shared/mcpConfig.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
 import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
 import { registerPlanApprovalBridge, requestPlanApproval } from "./planApprovalBridge.js";
-import { readPlanApprovalDraft, ensurePlansDirectory, getPlanFilePath, getPlanDisplayPath, readPlanFile, writePlanFile } from "./planMode.js";
+import { readPlanApprovalDraft, getPlanDisplayPath, readPlanFile, writePlanFile } from "./planMode.js";
 import { createPlanModeTools } from "./tools/planModeTools.js";
 import { createComputerUseTools } from "./tools/computerUseTools.js";
 import fs from "node:fs";
@@ -187,9 +187,14 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.addProject, (_event, directoryPath) =>
         sessionStore.addProject(directoryPath),
     );
-    ipcMain.handle(IPC_CHANNELS.removeProject, (_event, projectId) =>
-        sessionStore.removeProject(projectId),
-    );
+    ipcMain.handle(IPC_CHANNELS.removeProject, (_event, projectId) => {
+        const result = sessionStore.removeProject(projectId);
+        for (const sessionId of result.deletedSessionIds || []) {
+            runtime.cancelRun(sessionId);
+            runtime.clearHookLogs(sessionId);
+        }
+        return result;
+    });
     ipcMain.handle(IPC_CHANNELS.pickProjectDirectory, async () => {
         const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
             title: "选择项目目录",
@@ -265,8 +270,9 @@ function registerIpc() {
         ),
     );
     ipcMain.handle(IPC_CHANNELS.exitPlanMode, async (_event, sessionId) => {
+        const sessionsDir = sessionStore.locateSessionStorage(sessionId);
         const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
-        const draft = readPlanApprovalDraft(workspace, sessionId);
+        const draft = readPlanApprovalDraft(sessionsDir, sessionId, workspace);
         const approval = await requestPlanApproval(mainWindow, draft);
         if (approval.dismissed || approval.cancelled) {
             return { dismissed: true };
@@ -281,11 +287,11 @@ function registerIpc() {
         return runtime.exitPlanMode(sessionId, approval.content);
     });
     ipcMain.handle(IPC_CHANNELS.openPlanFile, async (_event, sessionId) => {
+        const sessionsDir = sessionStore.locateSessionStorage(sessionId);
         const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
-        ensurePlansDirectory(workspace);
-        const filePath = getPlanFilePath(workspace, sessionId);
+        let { filePath } = readPlanFile(sessionsDir, sessionId, workspace);
         if (!fs.existsSync(filePath)) {
-            writePlanFile(workspace, sessionId, "# Plan\n\n");
+            filePath = writePlanFile(sessionsDir, sessionId, "# Plan\n\n", workspace);
         }
         const error = await shell.openPath(filePath);
         if (error) {
@@ -294,11 +300,12 @@ function registerIpc() {
         return { filePath };
     });
     ipcMain.handle(IPC_CHANNELS.readPlanContent, (_event, sessionId) => {
+        const sessionsDir = sessionStore.locateSessionStorage(sessionId);
         const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
-        const { content } = readPlanFile(workspace, sessionId);
+        const { content } = readPlanFile(sessionsDir, sessionId, workspace);
         return {
             content: content ?? "",
-            displayPath: getPlanDisplayPath(workspace, sessionId),
+            displayPath: getPlanDisplayPath(),
         };
     });
     ipcMain.handle(IPC_CHANNELS.cancelRun, (_event, sessionId) => runtime.cancelRun(sessionId));
@@ -432,7 +439,12 @@ function bootstrap() {
     };
 
     const primary = configStore.resolvePrimaryRef();
-    sessionStore = new SessionStore(appPaths.sessionsDir, primary, appPaths.projectsFile);
+    sessionStore = new SessionStore(
+        appPaths.sessionsDir,
+        primary,
+        appPaths.projectsFile,
+        appPaths.projectsDir,
+    );
 
     const getAuthMode = (sessionId) => {
         try {
@@ -473,8 +485,10 @@ function bootstrap() {
                 runSubAgent: (args) => runtime.runSubAgent(args),
             });
             const planTools = createPlanModeTools({
-                getAgentWorkspace,
                 configStore,
+                sessionStore,
+                resolveWorkspaceForSession: (sessionId) =>
+                    resolveSessionWorkspace(sessionStore, configStore, sessionId),
             });
             const computerTools = createComputerUseTools({
                 getAgentTools,

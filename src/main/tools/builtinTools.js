@@ -8,10 +8,42 @@ import { classifyBashForPlanMode } from "../planMode.js";
 import { describeShellInvocation } from "../shellRuntime.js";
 import { shouldRequireBashConfirmation, shouldRequireNetworkConfirmation } from "../authPolicy.js";
 import { assertWritableTarget } from "@shared/memoryPaths.js";
+import {
+    goalModeBashBlocksWorkspaceCragent,
+    isPathUnderWorkspaceCragent,
+    resolveSessionStorageToolPath,
+} from "@shared/sessionStoragePaths.js";
 import { resolveCwd, resolvePathInWorkspace } from "../workspacePaths.js";
 import { resolveSkillName } from "../skillLoader.js";
 
 const execFileAsync = promisify(execFile);
+
+function resolveToolFilePath(workspace, rawPath, context) {
+    const sessionId = context?.sessionId;
+    const sessionsDir = context?.sessionsDir;
+    if (sessionsDir && sessionId) {
+        const redirected = resolveSessionStorageToolPath(rawPath, {
+            workspace,
+            sessionsDir,
+            sessionId,
+            planFilePath: context?.planFilePath,
+        });
+        if (redirected) {
+            return redirected;
+        }
+    }
+    const resolved = resolvePathInWorkspace(workspace, rawPath);
+    if (
+        context?.executionMode === "goal" &&
+        workspace &&
+        isPathUnderWorkspaceCragent(workspace, resolved)
+    ) {
+        throw new Error(
+            "不要向工作区 .cragent 写入。请使用 write_file，路径使用 plan.md 或相对会话目录的文件名。",
+        );
+    }
+    return resolved;
+}
 
 function fnSchema(name, description, parameters) {
     return {
@@ -85,7 +117,7 @@ export function createBuiltinTools({
             }),
             async execute(args, context) {
                 const workspace = getAgentWorkspace(context?.sessionId);
-                const filePath = resolvePathInWorkspace(workspace, args.path);
+                const filePath = resolveToolFilePath(workspace, args.path, context);
                 if (!fsSync.existsSync(filePath)) {
                     throw new Error(`file not found: ${filePath}`);
                 }
@@ -103,17 +135,21 @@ export function createBuiltinTools({
             name: "write_file",
             requiresConfirmation: true,
             enabled: () => getAgentTools().enable_file_tools !== false,
-            schema: fnSchema("write_file", "Create or overwrite a UTF-8 text file inside the workspace.", {
+            schema: fnSchema(
+                "write_file",
+                "Create or overwrite a UTF-8 text file. Project code stays in the workspace; paths like plan.md or .cragent/... are stored under the session data directory (Projects/<projectId>/sessions/<sessionId>/).",
+                {
                 type: "object",
                 properties: {
                     path: { type: "string" },
                     content: { type: "string" },
                 },
                 required: ["path", "content"],
-            }),
+                },
+            ),
             async execute(args, context) {
                 const workspace = getAgentWorkspace(context?.sessionId);
-                const filePath = resolvePathInWorkspace(workspace, args.path);
+                const filePath = resolveToolFilePath(workspace, args.path, context);
                 assertWritableTarget(workspace, filePath);
                 await fs.mkdir(path.dirname(filePath), { recursive: true });
                 await fs.writeFile(filePath, String(args.content ?? ""), "utf-8");
@@ -132,9 +168,16 @@ export function createBuiltinTools({
             }),
             async execute(args, context) {
                 const workspace = getAgentWorkspace(context?.sessionId);
-                const dirPath = args.path
-                    ? resolvePathInWorkspace(workspace, args.path)
-                    : workspace;
+                let dirPath = workspace;
+                if (args.path) {
+                    const redirected = resolveSessionStorageToolPath(args.path, {
+                        workspace,
+                        sessionsDir: context?.sessionsDir,
+                        sessionId: context?.sessionId,
+                        planFilePath: context?.planFilePath,
+                    });
+                    dirPath = redirected || resolvePathInWorkspace(workspace, args.path);
+                }
                 const items = await fs.readdir(dirPath);
                 return items.join("\n");
             },
@@ -167,6 +210,12 @@ export function createBuiltinTools({
                 }
                 const workspace = getAgentWorkspace(context?.sessionId);
                 const cwd = resolveCwd(workspace, args.cwd);
+                if (context?.executionMode === "goal") {
+                    const cragentBlock = goalModeBashBlocksWorkspaceCragent(command);
+                    if (cragentBlock) {
+                        throw new Error(cragentBlock);
+                    }
+                }
                 const safety =
                     context?.executionMode === "plan"
                         ? classifyBashForPlanMode(command, shellRuntime)

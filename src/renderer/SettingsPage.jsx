@@ -1185,7 +1185,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
             <SettingsGroup label="Execution">
               <SettingsSelectRow
                 title="Work mode"
-                description="Plan 模式只读探索并写入计划文件（.cragent/plans）；Goal 模式按任务直接执行。"
+                description="Plan 模式只读探索并写入会话目录下的 plan.md；Goal 模式按任务直接执行。"
                 value={defaultAgentConfig.execution_mode || "goal"}
                 onChange={updateDefaultExecutionMode}
               >

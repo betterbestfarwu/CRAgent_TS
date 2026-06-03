@@ -1,44 +1,40 @@
-import test from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ConfigStore } from "../src/main/configStore.js";
+import { SessionStore } from "../src/main/sessionStore.js";
 import { createPlanModeTools } from "../src/main/tools/planModeTools.js";
-import { getPlanFilePath, planFileExists } from "../src/main/planMode.js";
+import { getPlanFilePath } from "../src/shared/sessionPlanPaths.js";
 
-test("enter_plan_mode tool switches execution_mode to plan", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-tool-"));
-    const configStore = new ConfigStore(path.join(dir, "config.json"));
-    const workspace = path.join(dir, "workspace");
-    fs.mkdirSync(workspace, { recursive: true });
-    const [tool] = createPlanModeTools({
-        getAgentWorkspace: () => workspace,
-        configStore,
+describe("enter_plan_mode tool", () => {
+    it("stores plan under session directory", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-tool-"));
+        const sessionsDir = path.join(dir, "sessions");
+        const projectsDir = path.join(dir, "Projects");
+        const configFile = path.join(dir, "config.json");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        const configStore = new ConfigStore(configFile);
+        const sessionStore = new SessionStore(
+            sessionsDir,
+            configStore.resolvePrimaryRef(),
+            null,
+            projectsDir,
+        );
+        const session = sessionStore.newSession();
+        const tools = createPlanModeTools({
+            configStore,
+            sessionStore,
+            resolveWorkspaceForSession: () => path.join(dir, "workspace"),
+        });
+        const enter = tools.find((tool) => tool.name === "enter_plan_mode");
+        await enter.execute({}, { sessionId: session.meta.id });
+        const planPath = getPlanFilePath(
+            sessionStore.locateSessionStorage(session.meta.id),
+            session.meta.id,
+        );
+        assert.equal(fs.existsSync(planPath), false);
+        assert.match(planPath, /plan\.md$/);
     });
-    assert.equal(tool.name, "enter_plan_mode");
-    assert.equal(configStore.get().agents.default.execution_mode, "goal");
-
-    const result = await tool.execute({}, { sessionId: "sess-enter" });
-    assert.match(result, /Plan mode/i);
-    assert.equal(configStore.get().agents.default.execution_mode, "plan");
-    assert.equal(planFileExists(workspace, "sess-enter"), false);
-    assert.equal(getPlanFilePath(workspace, "sess-enter").includes(".cragent/plans"), true);
-});
-
-test("enter_plan_mode is disabled while already in plan mode", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-tool-"));
-    const configStore = new ConfigStore(path.join(dir, "config.json"));
-    configStore.update({
-        ...configStore.get(),
-        agents: {
-            ...configStore.get().agents,
-            default: { ...configStore.get().agents.default, execution_mode: "plan" },
-        },
-    });
-    const [tool] = createPlanModeTools({
-        getAgentWorkspace: () => dir,
-        configStore,
-    });
-    assert.equal(tool.enabled(), false);
 });

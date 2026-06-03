@@ -65,15 +65,15 @@ import {
     buildExitPlanModeUserMessage,
     buildPlanRejectionUserMessage,
     buildPlanModeSystemPrompt,
-    ensurePlansDirectory,
     filterToolsForPlanMode,
-    getPlanFilePath,
+    getPlanDisplayPath,
     planFileExists,
     readPlanFile,
     shouldStartInPlanMode,
     validatePlanModeToolCall,
     writePlanFile,
 } from "./planMode.js";
+import { ensureSessionPlanFile } from "@shared/sessionPlanPaths.js";
 import { PLAN_MODE_AUTO_SYSTEM_HINT } from "@shared/planMessages.js";
 import {
     estimateMcpToolDefinitionTokens,
@@ -195,12 +195,23 @@ export class AgentRuntime {
         return mode === "plan" ? "plan" : "goal";
     }
 
+    resolveSessionPlan(sessionId) {
+        const sessionsDir = this.sessionStore.locateSessionStorage(sessionId);
+        const workspace = resolveSessionWorkspace(this.sessionStore, this.configStore, sessionId);
+        const filePath = ensureSessionPlanFile(sessionsDir, sessionId, workspace);
+        return {
+            sessionsDir,
+            workspace,
+            filePath,
+            displayPath: getPlanDisplayPath(),
+        };
+    }
+
     maybeAutoEnterPlanMode(sessionId, input) {
         if (this.executionMode() === "plan" || !shouldStartInPlanMode(input)) {
             return false;
         }
-        const workspace = resolveSessionWorkspace(this.sessionStore, this.configStore, sessionId);
-        ensurePlansDirectory(workspace);
+        this.resolveSessionPlan(sessionId);
         const config = this.configStore.get();
         this.configStore.update({
             ...config,
@@ -227,6 +238,8 @@ export class AgentRuntime {
             parts.push(
                 `<session_workspace path="${sessionWorkspace}">\n` +
                     "This session belongs to a project. File tools and shell commands use this directory as the working directory.\n" +
+                    "Do not write agent task files under .cragent/ in the project tree. " +
+                    "Use write_file with plan.md or paths relative to session storage (stored under ~/.CRAgent/Projects/<projectId>/sessions/<sessionId>/).\n" +
                     "</session_workspace>",
             );
         }
@@ -242,17 +255,13 @@ export class AgentRuntime {
             parts.push(computerUseSystemPromptSection());
         }
         if (this.executionMode() === "plan") {
-            const workspace = resolveSessionWorkspace(
-                this.sessionStore,
-                this.configStore,
+            const { filePath: planFilePath, sessionsDir, workspace } = this.resolveSessionPlan(
                 session.meta.id,
             );
-            ensurePlansDirectory(workspace);
-            const planFilePath = getPlanFilePath(workspace, session.meta.id);
             parts.push(
                 buildPlanModeSystemPrompt({
                     planFilePath,
-                    planExists: planFileExists(workspace, session.meta.id),
+                    planExists: planFileExists(sessionsDir, session.meta.id, workspace),
                 }),
             );
         }
@@ -585,18 +594,13 @@ export class AgentRuntime {
         }
 
         if (context.planMode) {
-            const workspace = resolveSessionWorkspace(
-                this.sessionStore,
-                this.configStore,
-                sessionId,
-            );
-            const planFilePath = getPlanFilePath(workspace, sessionId);
+            const { filePath: planFilePath, workspace } = this.resolveSessionPlan(sessionId);
             const planError = validatePlanModeToolCall(
                 toolName,
                 toolInput,
                 planFilePath,
                 workspace,
-                (ws, rel) => resolvePathInWorkspace(ws, rel),
+                sessionId,
             );
             if (planError) {
                 return planError;
@@ -985,10 +989,10 @@ export class AgentRuntime {
     }
 
     async exitPlanMode(sessionId, approvedContent) {
-        const workspace = resolveSessionWorkspace(this.sessionStore, this.configStore, sessionId);
-        let { filePath, content } = readPlanFile(workspace, sessionId);
+        const { sessionsDir, workspace } = this.resolveSessionPlan(sessionId);
+        let { filePath, content } = readPlanFile(sessionsDir, sessionId, workspace);
         if (typeof approvedContent === "string") {
-            filePath = writePlanFile(workspace, sessionId, approvedContent);
+            filePath = writePlanFile(sessionsDir, sessionId, approvedContent, workspace);
             content = approvedContent;
         }
         const config = this.configStore.get();
@@ -1017,11 +1021,11 @@ export class AgentRuntime {
     }
 
     async rejectPlanMode(sessionId, { planContent, feedback } = {}) {
-        const workspace = resolveSessionWorkspace(this.sessionStore, this.configStore, sessionId);
+        const { sessionsDir, workspace } = this.resolveSessionPlan(sessionId);
         if (typeof planContent === "string") {
-            writePlanFile(workspace, sessionId, planContent);
+            writePlanFile(sessionsDir, sessionId, planContent, workspace);
         }
-        const { content } = readPlanFile(workspace, sessionId);
+        const { content } = readPlanFile(sessionsDir, sessionId, workspace);
         const rejectionMessage = {
             id: randomUUID(),
             role: "user",
@@ -1542,15 +1546,9 @@ export class AgentRuntime {
                     return;
                 }
                 const planMode = this.executionMode() === "plan";
-                const workspace = resolveSessionWorkspace(
-                    this.sessionStore,
-                    this.configStore,
-                    sessionId,
-                );
-                const planFilePath = planMode ? getPlanFilePath(workspace, sessionId) : null;
-                if (planMode) {
-                    ensurePlansDirectory(workspace);
-                }
+                const planFilePath = planMode
+                    ? this.resolveSessionPlan(sessionId).filePath
+                    : null;
                 session = this.sessionStore.get(sessionId);
                 session = this.applyMicroCompact(session);
                 await this.maybeAutoCompact(sessionId);
@@ -1647,6 +1645,7 @@ export class AgentRuntime {
                         call,
                         {
                             sessionId,
+                            sessionsDir: this.sessionStore.locateSessionStorage(sessionId),
                             runId,
                             unlockedToolNames,
                             planMode,

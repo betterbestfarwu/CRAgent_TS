@@ -158,7 +158,7 @@ function ProjectNodeMenu({ project, onRemove, onOpenChange }) {
             }}
           >
             <span className="project-node-menu-item-icon">{ICON_MENU_REMOVE}</span>
-            <span className="project-node-menu-item-label">移除</span>
+            <span className="project-node-menu-item-label">删除</span>
           </button>
         </div>
       ) : null}

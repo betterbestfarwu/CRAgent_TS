@@ -5,11 +5,18 @@ import {
     PLAN_REJECTION_FOOTER,
     PLAN_REJECTION_PREFIX,
 } from "@shared/planMessages.js";
+import {
+    getPlanDisplayPath,
+    getPlanFilePath,
+    ensureSessionPlanFile,
+    migrateLegacyWorkspacePlan,
+    resolvePlanToolPath,
+} from "@shared/sessionPlanPaths.js";
 import { classifyBashCommand } from "./bashSafety.js";
 
-export { PLAN_REJECTION_PREFIX } from "@shared/planMessages.js";
+export { getPlanDisplayPath, getPlanFilePath } from "@shared/sessionPlanPaths.js";
 
-export const PLANS_DIR = ".cragent/plans";
+export { PLAN_REJECTION_PREFIX } from "@shared/planMessages.js";
 
 /** Tools exposed in plan mode (write_file is allowed only for the session plan path). */
 export const PLAN_MODE_TOOL_NAMES = new Set([
@@ -55,35 +62,21 @@ const PLAN_MODE_BASH_WRITE_PATTERNS = [
     /\bpip\s+install\b/i,
 ];
 
-export function getPlanFilePath(workspace, sessionId) {
-    return path.join(workspace, PLANS_DIR, `${sessionId}.md`);
+export function planFileExists(sessionsDir, sessionId, workspace = null) {
+    migrateLegacyWorkspacePlan(workspace, sessionsDir, sessionId);
+    return fs.existsSync(getPlanFilePath(sessionsDir, sessionId));
 }
 
-export function ensurePlansDirectory(workspace) {
-    const dir = path.join(workspace, PLANS_DIR);
-    fs.mkdirSync(dir, { recursive: true });
-    return dir;
-}
-
-export function planFileExists(workspace, sessionId) {
-    return fs.existsSync(getPlanFilePath(workspace, sessionId));
-}
-
-export function readPlanFile(workspace, sessionId) {
-    const filePath = getPlanFilePath(workspace, sessionId);
+export function readPlanFile(sessionsDir, sessionId, workspace = null) {
+    const filePath = ensureSessionPlanFile(sessionsDir, sessionId, workspace);
     if (!fs.existsSync(filePath)) {
         return { filePath, content: null };
     }
     return { filePath, content: fs.readFileSync(filePath, "utf-8") };
 }
 
-export function getPlanDisplayPath(workspace, sessionId) {
-    return path.join(PLANS_DIR, `${sessionId}.md`);
-}
-
-export function writePlanFile(workspace, sessionId, content) {
-    ensurePlansDirectory(workspace);
-    const filePath = getPlanFilePath(workspace, sessionId);
+export function writePlanFile(sessionsDir, sessionId, content, workspace = null) {
+    const filePath = ensureSessionPlanFile(sessionsDir, sessionId, workspace);
     fs.writeFileSync(filePath, String(content ?? ""), "utf-8");
     return filePath;
 }
@@ -105,10 +98,10 @@ export function shouldStartInPlanMode(input) {
     return deliveryAction && deliveryTarget;
 }
 
-export function readPlanApprovalDraft(workspace, sessionId) {
-    const filePath = getPlanFilePath(workspace, sessionId);
-    const displayPath = getPlanDisplayPath(workspace, sessionId);
-    const { content } = readPlanFile(workspace, sessionId);
+export function readPlanApprovalDraft(sessionsDir, sessionId, workspace = null) {
+    const filePath = ensureSessionPlanFile(sessionsDir, sessionId, workspace);
+    const displayPath = getPlanDisplayPath();
+    const { content } = readPlanFile(sessionsDir, sessionId, workspace);
     return {
         filePath,
         displayPath,
@@ -118,8 +111,8 @@ export function readPlanApprovalDraft(workspace, sessionId) {
 
 export function buildPlanModeSystemPrompt({ planFilePath, planExists }) {
     const planFileInfo = planExists
-        ? `A plan file already exists at ${planFilePath}. You may read and edit it with write_file.`
-        : `No plan file exists yet. Create your plan at ${planFilePath} with write_file.`;
+        ? `A plan file already exists at ${planFilePath}. You may read and edit it with write_file (path: ${getPlanDisplayPath()} or the full path).`
+        : `No plan file exists yet. Create your plan with write_file at path ${getPlanDisplayPath()} or ${planFilePath}.`;
 
     return [
         "You are in Plan Mode.",
@@ -154,7 +147,13 @@ export function filterToolsForPlanMode(tools) {
     );
 }
 
-export function validatePlanModeToolCall(toolName, toolInput, planFilePath, workspace, resolvePath) {
+export function validatePlanModeToolCall(
+    toolName,
+    toolInput,
+    planFilePath,
+    workspace,
+    sessionId,
+) {
     if (PLAN_MODE_BLOCKED_TOOLS.has(toolName)) {
         return `Error: ${toolName} is not available in plan mode`;
     }
@@ -162,11 +161,23 @@ export function validatePlanModeToolCall(toolName, toolInput, planFilePath, work
         return `Error: ${toolName} is not available in plan mode`;
     }
     if (toolName === "write_file" && toolInput?.path != null) {
-        const target = resolvePath(workspace, toolInput.path);
-        const normalizedPlan = path.normalize(planFilePath);
-        const normalizedTarget = path.normalize(target);
-        if (normalizedTarget !== normalizedPlan) {
+        const target = resolvePlanToolPath(toolInput.path, {
+            planFilePath,
+            workspace,
+            sessionId,
+        });
+        if (!target) {
             return `Error: in plan mode you may only write the plan file (${planFilePath})`;
+        }
+    }
+    if (toolName === "read_file" && toolInput?.path != null) {
+        const target = resolvePlanToolPath(toolInput.path, {
+            planFilePath,
+            workspace,
+            sessionId,
+        });
+        if (target) {
+            return null;
         }
     }
     return null;

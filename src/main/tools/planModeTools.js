@@ -1,4 +1,6 @@
-import { getPlanFilePath, planFileExists, ensurePlansDirectory } from "../planMode.js";
+import fs from "node:fs";
+import { getPlanDisplayPath, planFileExists } from "../planMode.js";
+import { ensureSessionPlanFile } from "@shared/sessionPlanPaths.js";
 
 function fnSchema(name, description, parameters) {
     return {
@@ -7,7 +9,7 @@ function fnSchema(name, description, parameters) {
     };
 }
 
-export function createPlanModeTools({ getAgentWorkspace, configStore, sessionIdFromContext }) {
+export function createPlanModeTools({ configStore, sessionStore, resolveWorkspaceForSession }) {
     return [
         {
             name: "enter_plan_mode",
@@ -19,13 +21,13 @@ export function createPlanModeTools({ getAgentWorkspace, configStore, sessionIdF
                 { type: "object", properties: {}, additionalProperties: false },
             ),
             async execute(_args, context) {
-                const sessionId = context?.sessionId || sessionIdFromContext?.();
+                const sessionId = context?.sessionId;
                 if (!sessionId) {
                     throw new Error("enter_plan_mode requires an active session");
                 }
-                const workspace = getAgentWorkspace(sessionId);
-                ensurePlansDirectory(workspace);
-                const planFilePath = getPlanFilePath(workspace, sessionId);
+                const sessionsDir = sessionStore.locateSessionStorage(sessionId);
+                const workspace = resolveWorkspaceForSession(sessionId);
+                const planFilePath = ensureSessionPlanFile(sessionsDir, sessionId, workspace);
                 const config = configStore.get();
                 configStore.update({
                     ...config,
@@ -37,12 +39,12 @@ export function createPlanModeTools({ getAgentWorkspace, configStore, sessionIdF
                         },
                     },
                 });
-                const exists = planFileExists(workspace, sessionId);
+                const exists = planFileExists(sessionsDir, sessionId, workspace);
                 return [
                     "Entered Plan mode.",
                     exists
                         ? `Continue editing the plan at: ${planFilePath}`
-                        : `Create your plan at: ${planFilePath}`,
+                        : `Create your plan at: ${planFilePath} (write_file path: ${getPlanDisplayPath()})`,
                     "Use read-only tools to explore; only the plan file may be written.",
                     "When ready, ask the user to approve the plan (开始执行).",
                 ].join("\n");

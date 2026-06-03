@@ -274,6 +274,49 @@ export function deleteSessionFiles(sessionsDir, sessionId) {
     }
 }
 
+export function sessionExistsInDir(sessionsDir, sessionId) {
+    if (!sessionsDir || !sessionId) {
+        return false;
+    }
+    return (
+        isSplitSession(sessionsDir, sessionId) ||
+        fs.existsSync(legacySessionFile(sessionsDir, sessionId))
+    );
+}
+
+export function moveSessionStorage(fromDir, toDir, sessionId) {
+    if (!fromDir || !toDir || !sessionId || fromDir === toDir) {
+        return;
+    }
+    fs.mkdirSync(toDir, { recursive: true });
+    const fromSplit = sessionDir(fromDir, sessionId);
+    const toSplit = sessionDir(toDir, sessionId);
+    if (fs.existsSync(fromSplit)) {
+        if (fs.existsSync(toSplit)) {
+            fs.rmSync(toSplit, { recursive: true, force: true });
+        }
+        fs.renameSync(fromSplit, toSplit);
+    }
+    const fromLegacy = legacySessionFile(fromDir, sessionId);
+    if (fs.existsSync(fromLegacy)) {
+        const toLegacy = legacySessionFile(toDir, sessionId);
+        if (fs.existsSync(toLegacy)) {
+            fs.unlinkSync(toLegacy);
+        }
+        fs.renameSync(fromLegacy, toLegacy);
+    }
+    const fromImages = path.join(fromDir, "_images", sessionId);
+    if (fs.existsSync(fromImages)) {
+        const imagesRoot = path.join(toDir, "_images");
+        fs.mkdirSync(imagesRoot, { recursive: true });
+        const toImages = path.join(imagesRoot, sessionId);
+        if (fs.existsSync(toImages)) {
+            fs.rmSync(toImages, { recursive: true, force: true });
+        }
+        fs.renameSync(fromImages, toImages);
+    }
+}
+
 export function listSessionEntries(sessionsDir) {
     if (!fs.existsSync(sessionsDir)) {
         return [];

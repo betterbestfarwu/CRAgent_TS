@@ -15,12 +15,16 @@ import {
     writePlanFile,
 } from "../src/main/planMode.js";
 import { resolveShellRuntime } from "../src/main/bashSafety.js";
+import {
+    ensureSessionPlanFile,
+    getPlanDisplayPath,
+} from "../src/shared/sessionPlanPaths.js";
 
-test("getPlanFilePath uses session-scoped markdown under workspace", () => {
-    const workspace = "/tmp/project";
+test("getPlanFilePath uses session storage directory", () => {
+    const sessionsDir = "/tmp/.CRAgent/sessions";
     assert.equal(
-        getPlanFilePath(workspace, "sess-1"),
-        path.join(workspace, ".cragent/plans", "sess-1.md"),
+        getPlanFilePath(sessionsDir, "sess-1"),
+        path.join(sessionsDir, "sess-1", "plan.md"),
     );
 });
 
@@ -37,17 +41,31 @@ test("filterToolsForPlanMode keeps read tools and write_file", () => {
 });
 
 test("validatePlanModeToolCall blocks writes outside plan file", () => {
-    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-"));
-    const planFilePath = getPlanFilePath(workspace, "s1");
-    const resolvePath = (_ws, rel) => path.join(workspace, rel);
+    const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-"));
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-ws-"));
+    const planFilePath = writePlanFile(sessionsDir, "s1", "# Plan", workspace);
     const err = validatePlanModeToolCall(
         "write_file",
         { path: "src/foo.ts", content: "x" },
         planFilePath,
         workspace,
-        resolvePath,
+        "s1",
     );
     assert.match(err, /only write the plan file/);
+});
+
+test("validatePlanModeToolCall accepts plan.md alias", () => {
+    const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-alias-"));
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-alias-ws-"));
+    const planFilePath = writePlanFile(sessionsDir, "s1", "# Plan", workspace);
+    const err = validatePlanModeToolCall(
+        "write_file",
+        { path: getPlanDisplayPath(), content: "# Plan\n" },
+        planFilePath,
+        workspace,
+        "s1",
+    );
+    assert.equal(err, null);
 });
 
 test("classifyBashForPlanMode blocks write-class commands", () => {
@@ -82,11 +100,23 @@ test("buildExitPlanModeUserMessage matches delivery heuristics used by auto plan
     );
 });
 
-test("writePlanFile persists markdown plan", () => {
-    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-write-"));
+test("writePlanFile persists markdown plan in session dir", () => {
+    const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-write-"));
     const content = "# Plan\n\n- step one";
-    const filePath = writePlanFile(workspace, "s-write", content);
+    const filePath = writePlanFile(sessionsDir, "s-write", content);
     assert.equal(fs.readFileSync(filePath, "utf-8"), content);
+    assert.match(filePath, /s-write[\\/]plan\.md$/);
+});
+
+test("writePlanFile migrates legacy workspace plan", () => {
+    const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-migrate-"));
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-plan-migrate-ws-"));
+    const legacyDir = path.join(workspace, ".cragent", "plans");
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.writeFileSync(path.join(legacyDir, "legacy-s.md"), "# Legacy\n", "utf-8");
+    const filePath = ensureSessionPlanFile(sessionsDir, "legacy-s", workspace);
+    assert.equal(fs.readFileSync(filePath, "utf-8"), "# Legacy\n");
+    assert.equal(fs.existsSync(path.join(legacyDir, "legacy-s.md")), false);
 });
 
 test("buildPlanRejectionUserMessage includes prefix, plan, and feedback", () => {
@@ -100,10 +130,10 @@ test("buildPlanRejectionUserMessage includes prefix, plan, and feedback", () => 
 
 test("buildPlanModeSystemPrompt mentions plan file path", () => {
     const prompt = buildPlanModeSystemPrompt({
-        planFilePath: "/proj/.cragent/plans/s1.md",
+        planFilePath: "/data/sessions/s1/plan.md",
         planExists: false,
     });
     assert.match(prompt, /Plan Mode/);
-    assert.match(prompt, /\/proj\/\.cragent\/plans\/s1\.md/);
+    assert.match(prompt, /\/data\/sessions\/s1\/plan\.md/);
     assert.match(prompt, /read-only/i);
 });
