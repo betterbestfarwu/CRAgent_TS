@@ -470,6 +470,9 @@ export function App() {
           window.cragent.respondPlanApproval?.({
             id: payload.id,
             approved: Boolean(result?.approved),
+            cancelled: Boolean(result?.cancelled),
+            dismissed: Boolean(result?.dismissed),
+            rejected: Boolean(result?.rejected),
             content: result?.content,
             feedback: result?.feedback,
           });
@@ -1275,7 +1278,10 @@ export function App() {
     if (!currentSession || busy || executionMode !== "plan") return;
     try {
       const result = await window.cragent.exitPlanMode(currentSession.meta.id);
-      if (result?.cancelled) {
+      if (result?.dismissed) {
+        return;
+      }
+      if (result?.rejected) {
         if (result.session) setCurrentSession(result.session);
         return;
       }

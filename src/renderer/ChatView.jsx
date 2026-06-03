@@ -7,6 +7,7 @@ import {
 } from "@shared/chatMessages.js";
 import {
   isPlanRejectionMessage,
+  parsePlanRejectionDisplay,
   splitPlanModeAutoSystemHint,
 } from "@shared/planMessages.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
@@ -73,7 +74,16 @@ function toWireMessage(message, planContext) {
           plan_session_id: planContext.sessionId,
         }
       : {}),
-    ...(isPlanRejectionMessage(message) ? { plan_rejection: true } : {}),
+    ...(isPlanRejectionMessage(message)
+      ? (() => {
+          const { plan, feedback } = parsePlanRejectionDisplay(message.content);
+          return {
+            plan_rejection: true,
+            plan_rejection_plan: plan,
+            ...(feedback ? { plan_rejection_feedback: feedback } : {}),
+          };
+        })()
+      : {}),
   };
 }
 

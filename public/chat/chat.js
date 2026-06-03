@@ -1047,9 +1047,26 @@
       } else if (msg.role === 'user' && msg.plan_rejection) {
         var rejectionBody = document.createElement('div');
         rejectionBody.className = 'plan-rejection-body';
-        rejectionBody.innerHTML =
-          '<div class="plan-rejection-title">计划未批准 · 继续规划</div>' +
-          '<pre class="plan-rejection-plan">' + escapeText(msg.content || '') + '</pre>';
+        var rejectionTitle = document.createElement('div');
+        rejectionTitle.className = 'plan-rejection-title';
+        rejectionTitle.textContent = '计划未批准 · 继续规划';
+        rejectionBody.appendChild(rejectionTitle);
+        var planEl = document.createElement('div');
+        planEl.className = 'plan-rejection-plan';
+        planEl.innerHTML = window.MD.render(msg.plan_rejection_plan || msg.content || '');
+        rejectionBody.appendChild(planEl);
+        postProcessRenderedContent(planEl);
+        if (msg.plan_rejection_feedback) {
+          var feedbackLabel = document.createElement('div');
+          feedbackLabel.className = 'plan-rejection-feedback-label';
+          feedbackLabel.textContent = '你的反馈';
+          rejectionBody.appendChild(feedbackLabel);
+          var feedbackEl = document.createElement('div');
+          feedbackEl.className = 'plan-rejection-feedback';
+          feedbackEl.innerHTML = window.MD.render(msg.plan_rejection_feedback);
+          rejectionBody.appendChild(feedbackEl);
+          postProcessRenderedContent(feedbackEl);
+        }
         bubble.appendChild(rejectionBody);
       } else if (msg.role === 'user') {
         appendUserBubbleContent(bubble, msg);

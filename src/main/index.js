@@ -250,12 +250,15 @@ function registerIpc() {
         const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
         const draft = readPlanApprovalDraft(workspace, sessionId);
         const approval = await requestPlanApproval(mainWindow, draft);
-        if (!approval.approved) {
+        if (approval.dismissed || approval.cancelled) {
+            return { dismissed: true };
+        }
+        if (approval.rejected || !approval.approved) {
             const rejected = await runtime.rejectPlanMode(sessionId, {
                 planContent: approval.content ?? draft.content,
                 feedback: approval.feedback,
             });
-            return { cancelled: true, session: sessionForRenderer(rejected.session) };
+            return { rejected: true, session: sessionForRenderer(rejected.session) };
         }
         return runtime.exitPlanMode(sessionId, approval.content);
     });

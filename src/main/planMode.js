@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PLAN_REJECTION_PREFIX } from "@shared/planMessages.js";
+import {
+    PLAN_REJECTION_FEEDBACK_MARKER,
+    PLAN_REJECTION_FOOTER,
+    PLAN_REJECTION_PREFIX,
+} from "@shared/planMessages.js";
 import { classifyBashCommand } from "./bashSafety.js";
 
 export { PLAN_REJECTION_PREFIX } from "@shared/planMessages.js";
@@ -203,10 +207,9 @@ export function buildPlanRejectionUserMessage(planContent, feedback) {
     let message = `${PLAN_REJECTION_PREFIX}${plan}`;
     const trimmedFeedback = feedback?.trim();
     if (trimmedFeedback) {
-        message += `\n\nUser feedback:\n${trimmedFeedback}`;
+        message += `${PLAN_REJECTION_FEEDBACK_MARKER}${trimmedFeedback}`;
     }
-    message +=
-        "\n\nStay in plan mode. Update the plan file to address the feedback. Do not implement code changes until the user approves execution.";
+    message += PLAN_REJECTION_FOOTER;
     return message;
 }
 

@@ -3802,9 +3802,19 @@ body.app-sidebar-resizing {
 .plan-approval-dialog {
   position: relative;
   width: min(560px, calc(100vw - 32px));
-  max-height: min(80vh, 720px);
+  min-width: 420px;
+  min-height: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: min(90vh, 900px);
   display: flex;
   flex-direction: column;
+  text-align: left;
+  overflow: auto;
+  resize: both;
+}
+
+.plan-approval-title {
+  padding-right: 32px;
 }
 
 .plan-approval-close {
@@ -3821,6 +3831,7 @@ body.app-sidebar-resizing {
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
+  z-index: 1;
 }
 
 .plan-approval-close:hover {
@@ -3835,26 +3846,94 @@ body.app-sidebar-resizing {
   word-break: break-all;
 }
 
-.plan-approval-editor {
-  width: 100%;
-  min-height: 240px;
-  max-height: 50vh;
+.plan-approval-content-wrap {
+  flex: 1 1 auto;
+  min-height: 180px;
   margin-bottom: 14px;
   padding: 10px 12px;
   border: 1px solid var(--cursor-border-strong);
   border-radius: 10px;
   background: var(--cursor-bg);
-  color: var(--cursor-fg);
-  font-family: var(--cursor-font-mono, ui-monospace, monospace);
-  font-size: 13px;
-  line-height: 1.45;
-  resize: vertical;
+  overflow: auto;
   box-sizing: border-box;
 }
 
-.plan-approval-editor:focus {
-  outline: 2px solid rgba(59, 130, 246, 0.35);
-  border-color: #3b82f6;
+.plan-approval-content {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--cursor-fg);
+  word-break: break-word;
+}
+
+.plan-approval-content h1,
+.plan-approval-content h2,
+.plan-approval-content h3 {
+  margin: 0.6em 0 0.3em;
+  font-weight: 600;
+}
+
+.plan-approval-content p {
+  margin: 0.4em 0;
+}
+
+.plan-approval-content ul,
+.plan-approval-content ol {
+  margin: 0.4em 0 0.4em 1.2em;
+  padding: 0;
+}
+
+.plan-approval-content blockquote {
+  border-left: 3px solid var(--cursor-border-strong);
+  margin: 0.5em 0;
+  padding-left: 10px;
+  color: var(--cursor-fg-muted);
+}
+
+.plan-approval-content pre {
+  background: var(--cursor-bg-input);
+  color: var(--cursor-fg);
+  border: 1px solid var(--cursor-border-strong);
+  padding: 10px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: var(--cursor-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.plan-approval-content code {
+  background: var(--cursor-bg-input);
+  color: var(--cursor-fg);
+  border: 1px solid var(--cursor-border-strong);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--cursor-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.plan-approval-content pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.plan-approval-content .table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+  max-width: 100%;
+}
+
+.plan-approval-content table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+}
+
+.plan-approval-content th,
+.plan-approval-content td {
+  border: 1px solid var(--cursor-border-strong);
+  padding: 6px 10px;
+  text-align: left;
 }
 
 .plan-approval-label {

@@ -1,58 +1,96 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+function renderPlanMarkdown(content) {
+  if (typeof window !== "undefined" && window.MD?.render) {
+    return window.MD.render(content || "");
+  }
+  return "";
+}
 
 export function PlanApprovalDialog({
   displayPath,
   content,
   onClose,
 }) {
-  const [draft, setDraft] = useState(content || "");
   const [feedback, setFeedback] = useState("");
 
   useEffect(() => {
-    setDraft(content || "");
     setFeedback("");
   }, [content]);
+
+  const renderedContent = useMemo(
+    () => renderPlanMarkdown(content),
+    [content],
+  );
+
+  function dismiss(event) {
+    event?.stopPropagation?.();
+    event?.preventDefault?.();
+    onClose({ dismissed: true });
+  }
+
+  function reject(event) {
+    event?.stopPropagation?.();
+    onClose({ rejected: true, content, feedback });
+  }
+
+  function approve(event) {
+    event?.stopPropagation?.();
+    onClose({ approved: true, content, feedback });
+  }
 
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
-        onClose({ approved: false, content: draft, feedback });
+        event.preventDefault();
+        onClose({ dismissed: true });
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, draft, feedback]);
-
-  function reject() {
-    onClose({ approved: false, content: draft, feedback });
-  }
+  }, [onClose]);
 
   return (
-    <div className="confirm-overlay" role="presentation" onClick={reject}>
+    <div
+      className="confirm-overlay"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          event.preventDefault();
+          dismiss(event);
+        }
+      }}
+    >
       <div
         className="confirm-dialog plan-approval-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="plan-approval-title"
-        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
       >
-        <div id="plan-approval-title" className="confirm-dialog-title">
+        <button
+          type="button"
+          className="plan-approval-close"
+          title="关闭"
+          aria-label="关闭"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={dismiss}
+        >
+          ×
+        </button>
+        <div id="plan-approval-title" className="confirm-dialog-title plan-approval-title">
           审阅计划
         </div>
         <p className="plan-approval-path" title={displayPath}>
           {displayPath}
         </p>
-        <label className="plan-approval-label" htmlFor="plan-approval-editor">
-          计划内容
-        </label>
-        <textarea
-          id="plan-approval-editor"
-          className="plan-approval-editor"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          spellCheck={false}
-          aria-label="计划内容"
-        />
+        <div className="plan-approval-label">计划内容</div>
+        <div className="plan-approval-content-wrap">
+          <div
+            className="plan-approval-content"
+            dangerouslySetInnerHTML={{ __html: renderedContent }}
+          />
+        </div>
         <label className="plan-approval-label" htmlFor="plan-approval-feedback">
           修改意见（可选）
         </label>
@@ -72,7 +110,7 @@ export function PlanApprovalDialog({
           <button
             type="button"
             className="confirm-dialog-btn confirm-dialog-btn-primary"
-            onClick={() => onClose({ approved: true, content: draft, feedback })}
+            onClick={approve}
           >
             批准并开始执行
           </button>
