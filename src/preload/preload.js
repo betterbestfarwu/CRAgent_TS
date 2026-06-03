@@ -47,6 +47,7 @@ const api = {
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),
     exitPlanMode: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.exitPlanMode, sessionId),
     openPlanFile: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.openPlanFile, sessionId),
+    readPlanContent: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.readPlanContent, sessionId),
     updateModel: (args) => ipcRenderer.invoke(IPC_CHANNELS.updateModel, args),
     updateConfig: (next) => ipcRenderer.invoke(IPC_CHANNELS.updateConfig, next),
     syncProviderModels: (args) => ipcRenderer.invoke(IPC_CHANNELS.syncProviderModels, args),

@@ -744,6 +744,153 @@ html, body {
   color: #1e3a8a;
 }
 
+.plan-preview-card {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+}
+
+.plan-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-preview-title {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.plan-preview-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plan-preview-file-link {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--link);
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: right;
+  word-break: break-all;
+  min-width: 0;
+}
+
+.plan-preview-file-link:hover {
+  opacity: 0.85;
+}
+
+.plan-preview-collapse-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 2px;
+  margin: 0;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
+.plan-preview-collapse-btn:hover {
+  color: var(--bubble-fg);
+}
+
+.plan-preview-card.is-card-collapsed .plan-preview-body-wrap {
+  display: none;
+}
+
+.plan-preview-card.is-card-collapsed .plan-preview-collapse-btn svg {
+  transform: rotate(180deg);
+}
+
+.plan-preview-body-wrap {
+  position: relative;
+  padding: 0 12px 12px;
+}
+
+.plan-preview-body {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.plan-preview-body-wrap.is-truncated .plan-preview-body {
+  max-height: 280px;
+  overflow: hidden;
+}
+
+.plan-preview-body-wrap.is-truncated::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  height: 56px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.04));
+}
+
+@media (prefers-color-scheme: dark) {
+  .plan-preview-card {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .plan-preview-body-wrap.is-truncated::after {
+    background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.05));
+  }
+}
+
+.plan-preview-expand-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 1;
+  appearance: none;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  background: #111;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.plan-preview-expand-btn:hover {
+  background: #333;
+}
+
+@media (prefers-color-scheme: dark) {
+  .plan-preview-expand-btn {
+    background: #e5e5e5;
+    color: #111;
+  }
+
+  .plan-preview-expand-btn:hover {
+    background: #fff;
+  }
+}
+
 .msg.user .plan-rejection-body {
   font-size: 13px;
   line-height: 1.45;

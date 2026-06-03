@@ -18,10 +18,34 @@
   var ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
   var ICON_EXPAND = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
 
+  var ICON_CHEVRON_UP = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>';
+
   var todoRunsById = {};
   var chatUi = window.CRAgentChatUtils || {};
   var verboseThinking = false;
   var planContext = { active: false };
+  var planPreviewTarget = { messageId: null, runId: null };
+  var PLAN_PREVIEW_MAX_HEIGHT = 280;
+
+  function planPreviewMessage(msg) {
+    return {
+      plan_file_path: (msg && msg.plan_file_path) || planContext.displayPath || '',
+      plan_session_id: (msg && msg.plan_session_id) || planContext.sessionId || '',
+    };
+  }
+
+  function hasPlanPreviewContent() {
+    return Boolean(planContext.active && planContext.content && String(planContext.content).trim());
+  }
+
+  function shouldShowPlanPreview(msg, runId) {
+    if (!hasPlanPreviewContent()) return false;
+    if (msg && msg.plan_file_path) {
+      if (planPreviewTarget.messageId && msg.id === planPreviewTarget.messageId) return true;
+    }
+    if (runId && planPreviewTarget.runId && runId === planPreviewTarget.runId) return true;
+    return false;
+  }
 
   function renderPlanFileBannerElement(msg) {
     if (!msg || !msg.plan_file_path) {
@@ -39,11 +63,158 @@
     return wrap;
   }
 
-  function prependPlanBanner(bubble, msg) {
+  function setupPlanPreviewTruncation(card) {
+    if (!card || card.classList.contains('is-card-collapsed')) return;
+    var bodyWrap = card.querySelector('.plan-preview-body-wrap');
+    var body = card.querySelector('.plan-preview-body');
+    var expandBtn = card.querySelector('.plan-preview-expand-btn');
+    if (!bodyWrap || !body || !expandBtn) return;
+
+    bodyWrap.classList.remove('is-truncated');
+    expandBtn.hidden = true;
+    if (body.scrollHeight > PLAN_PREVIEW_MAX_HEIGHT) {
+      bodyWrap.classList.add('is-truncated');
+      expandBtn.hidden = false;
+    }
+  }
+
+  function buildPlanPreviewCard(msg, content) {
+    var planMsg = planPreviewMessage(msg);
+    var wrap = document.createElement('div');
+    wrap.className = 'plan-preview-card';
+    wrap.dataset.planSession = planMsg.plan_session_id || '';
+
+    var header = document.createElement('div');
+    header.className = 'plan-preview-header';
+    header.innerHTML =
+      '<span class="plan-preview-title">编写计划</span>' +
+      '<div class="plan-preview-header-actions">' +
+        (planMsg.plan_file_path
+          ? '<button type="button" class="plan-preview-file-link" data-action="open-plan" data-session-id="' +
+            escapeAttr(planMsg.plan_session_id || '') +
+            '" title="在编辑器中打开计划文件">' +
+            escapeText(planMsg.plan_file_path) +
+            '</button>'
+          : '') +
+        '<button type="button" class="plan-preview-collapse-btn" aria-expanded="true" aria-label="收起计划">' +
+          ICON_CHEVRON_UP +
+        '</button>' +
+      '</div>';
+
+    var bodyWrap = document.createElement('div');
+    bodyWrap.className = 'plan-preview-body-wrap';
+
+    var body = document.createElement('div');
+    body.className = 'plan-preview-body';
+    body.innerHTML = window.MD.render(content || '');
+    bodyWrap.appendChild(body);
+
+    var expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'plan-preview-expand-btn';
+    expandBtn.textContent = '展开计划';
+    expandBtn.hidden = true;
+    bodyWrap.appendChild(expandBtn);
+
+    wrap.appendChild(header);
+    wrap.appendChild(bodyWrap);
+
+    header.querySelector('.plan-preview-collapse-btn').addEventListener('click', function () {
+      var collapsed = wrap.classList.toggle('is-card-collapsed');
+      var btn = header.querySelector('.plan-preview-collapse-btn');
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.setAttribute('aria-label', collapsed ? '展开计划卡片' : '收起计划');
+    });
+
+    expandBtn.addEventListener('click', function () {
+      bodyWrap.classList.remove('is-truncated');
+      expandBtn.hidden = true;
+    });
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        setupPlanPreviewTruncation(wrap);
+      });
+    });
+
+    return wrap;
+  }
+
+  function prependPlanSection(bubble, msg, options) {
+    options = options || {};
+    var showPreview = options.showPreview && hasPlanPreviewContent();
+    if (showPreview) {
+      bubble.insertBefore(buildPlanPreviewCard(msg, planContext.content), bubble.firstChild);
+      return;
+    }
     var banner = renderPlanFileBannerElement(msg);
     if (banner) {
       bubble.insertBefore(banner, bubble.firstChild);
     }
+  }
+
+  function prependPlanBanner(bubble, msg) {
+    prependPlanSection(bubble, msg, { showPreview: false });
+  }
+
+  function findPlanPreviewTarget(messages) {
+    var lastUserRunIndex = findLastActiveRunUserIndex(messages);
+    if (lastUserRunIndex >= 0) {
+      var collected = collectRunMessagesForUser(messages, lastUserRunIndex);
+      var split = splitRunMessages(collected.runMessages);
+      return {
+        messageId: split.finalReply && split.finalReply.id ? split.finalReply.id : null,
+        runId: collected.runId || null,
+      };
+    }
+    for (var i = messages.length - 1; i >= 0; i -= 1) {
+      var msg = messages[i];
+      if (
+        msg.role === 'assistant' &&
+        msg.plan_file_path &&
+        String(msg.content || '').trim()
+      ) {
+        return { messageId: msg.id, runId: msg.run_id || null };
+      }
+    }
+    return { messageId: null, runId: null };
+  }
+
+  function refreshPlanPreviewCards() {
+    if (!hasPlanPreviewContent()) {
+      container.querySelectorAll('.plan-preview-card').forEach(function (card) {
+        card.remove();
+      });
+      return;
+    }
+
+    var cards = container.querySelectorAll('.plan-preview-card');
+    if (cards.length) {
+      cards.forEach(function (card) {
+        var body = card.querySelector('.plan-preview-body');
+        if (body) {
+          body.innerHTML = window.MD.render(planContext.content || '');
+          postProcessRenderedContent(body);
+        }
+        setupPlanPreviewTruncation(card);
+      });
+      return;
+    }
+
+    var turns = container.querySelectorAll('.assistant-turn');
+    if (!turns.length) return;
+    var turn = turns[turns.length - 1];
+    var bubble = turn.querySelector('.bubble');
+    if (!bubble) return;
+
+    var banner = bubble.querySelector('.plan-file-banner');
+    if (banner) banner.remove();
+
+    bubble.insertBefore(
+      buildPlanPreviewCard(planPreviewMessage(null), planContext.content),
+      bubble.firstChild,
+    );
+    postProcessRenderedContent(bubble);
   }
   var hljsLoadPromise = null;
   var katexLoadPromise = null;
@@ -703,13 +874,17 @@
     bubble.className = 'bubble';
     bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking);
     if (contentMsg) {
-      prependPlanBanner(bubble, contentMsg);
+      prependPlanSection(bubble, contentMsg, {
+        showPreview: shouldShowPlanPreview(contentMsg, runId),
+      });
       var contentWrap = document.createElement('div');
       contentWrap.className = 'assistant-turn-content';
       contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
       bubble.appendChild(contentWrap);
       postProcessRenderedContent(bubble);
       setupCollapsibleContent(contentWrap);
+    } else if (shouldShowPlanPreview(null, runId)) {
+      prependPlanSection(bubble, null, { showPreview: true });
     }
     wrap.appendChild(bubble);
 
@@ -860,7 +1035,9 @@
 
     if (msg.role !== 'tool') {
       if (msg.role === 'assistant') {
-        prependPlanBanner(bubble, msg);
+        prependPlanSection(bubble, msg, {
+          showPreview: shouldShowPlanPreview(msg, msg.run_id || ''),
+        });
         var body = document.createElement('div');
         body.className = 'bubble-collapse-body';
         body.innerHTML = window.MD.render(msg.content || '');
@@ -971,6 +1148,13 @@
 
     bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking);
 
+    if (shouldShowPlanPreview(null, runId)) {
+      bubble.insertBefore(
+        buildPlanPreviewCard(planPreviewMessage(null), planContext.content),
+        bubble.firstChild,
+      );
+    }
+
     thinkingGroup = bubble.querySelector('.thinking-group');
     if (thinkingGroup && wasOpen) {
       thinkingGroup.open = true;
@@ -1015,6 +1199,7 @@
 
   function patchActiveRun(payload) {
     var messages = payload && payload.messages ? payload.messages : [];
+    planPreviewTarget = findPlanPreviewTarget(messages);
     todoRunsById = (payload && payload.todoRuns) || {};
     var anchor = captureScrollAnchor();
     var userIndex = findLastActiveRunUserIndex(messages);
@@ -1059,6 +1244,7 @@
     container.innerHTML = '';
     var messages = Array.isArray(payload) ? payload : (payload && payload.messages) || [];
     todoRunsById = (!Array.isArray(payload) && payload && payload.todoRuns) || {};
+    planPreviewTarget = findPlanPreviewTarget(messages);
     var index = 0;
     try {
     while (index < messages.length) {
@@ -1095,6 +1281,7 @@
           }
           continue;
         }
+        index += 1;
         continue;
       }
       if (isProcessMessage(msg)) {
@@ -1173,7 +1360,11 @@
       verboseThinking = Boolean(value);
     },
     setPlanContext: function (value) {
+      var prevContent = planContext && planContext.content;
       planContext = value && typeof value === 'object' ? value : { active: false };
+      if (planContext.content !== prevContent) {
+        refreshPlanPreviewCards();
+      }
     },
   };
 

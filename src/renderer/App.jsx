@@ -1228,6 +1228,37 @@ export function App() {
   const executionMode =
     config?.agents?.default?.execution_mode === "plan" ? "plan" : "goal";
 
+  const [planFileContent, setPlanFileContent] = useState(null);
+
+  useEffect(() => {
+    const sessionId = currentSession?.meta?.id;
+    if (executionMode !== "plan" || !sessionId || !window.cragent?.readPlanContent) {
+      setPlanFileContent(null);
+      return;
+    }
+    let cancelled = false;
+    void window.cragent
+      .readPlanContent(sessionId)
+      .then((result) => {
+        if (!cancelled) {
+          setPlanFileContent(result?.content ?? null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPlanFileContent(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    executionMode,
+    currentSession?.meta?.id,
+    currentSession?.meta?.updatedAt,
+    busy,
+  ]);
+
   const planContext = useMemo(() => {
     if (executionMode !== "plan" || !currentSession?.meta?.id) {
       return { active: false };
@@ -1236,8 +1267,9 @@ export function App() {
       active: true,
       sessionId: currentSession.meta.id,
       displayPath: `.cragent/plans/${currentSession.meta.id}.md`,
+      content: planFileContent,
     };
-  }, [executionMode, currentSession?.meta?.id]);
+  }, [executionMode, currentSession?.meta?.id, planFileContent]);
 
   async function handleExitPlanMode() {
     if (!currentSession || busy || executionMode !== "plan") return;

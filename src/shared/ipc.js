@@ -14,6 +14,7 @@ export const IPC_CHANNELS = {
     sendChat: "chat:send",
     exitPlanMode: "chat:exitPlanMode",
     openPlanFile: "plan:openFile",
+    readPlanContent: "plan:readContent",
     cancelRun: "chat:cancelRun",
     removeQueuedMessage: "chat:removeQueuedMessage",
     updateAuthMode: "session:updateAuthMode",

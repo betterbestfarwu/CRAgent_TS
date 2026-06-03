@@ -49,6 +49,7 @@ const api = {
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),
     exitPlanMode: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.exitPlanMode, sessionId),
     openPlanFile: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.openPlanFile, sessionId),
+    readPlanContent: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.readPlanContent, sessionId),
     cancelRun: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.cancelRun, sessionId),
     removeQueuedMessage: (args) => ipcRenderer.invoke(IPC_CHANNELS.removeQueuedMessage, args),
     updateAuthMode: (args) => invokeUiSession(IPC_CHANNELS.updateAuthMode, args),

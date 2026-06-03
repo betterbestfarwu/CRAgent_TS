@@ -21,7 +21,7 @@ import { mcpToolRegistryName } from "@shared/mcpConfig.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
 import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
 import { registerPlanApprovalBridge, requestPlanApproval } from "./planApprovalBridge.js";
-import { readPlanApprovalDraft, ensurePlansDirectory, getPlanFilePath, writePlanFile } from "./planMode.js";
+import { readPlanApprovalDraft, ensurePlansDirectory, getPlanFilePath, getPlanDisplayPath, readPlanFile, writePlanFile } from "./planMode.js";
 import { createPlanModeTools } from "./tools/planModeTools.js";
 import { createComputerUseTools } from "./tools/computerUseTools.js";
 import fs from "node:fs";
@@ -271,6 +271,14 @@ function registerIpc() {
             throw new Error(error);
         }
         return { filePath };
+    });
+    ipcMain.handle(IPC_CHANNELS.readPlanContent, (_event, sessionId) => {
+        const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
+        const { content } = readPlanFile(workspace, sessionId);
+        return {
+            content: content ?? "",
+            displayPath: getPlanDisplayPath(workspace, sessionId),
+        };
     });
     ipcMain.handle(IPC_CHANNELS.cancelRun, (_event, sessionId) => runtime.cancelRun(sessionId));
     ipcMain.handle(IPC_CHANNELS.getHookLogs, (_event, sessionId) => runtime.getHookLogs(sessionId));
