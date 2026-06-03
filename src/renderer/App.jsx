@@ -115,12 +115,14 @@ export function App() {
   const [queuePanelOpen, setQueuePanelOpen] = useState(false);
   const [contextPopupOpen, setContextPopupOpen] = useState(false);
   const [contextDetail, setContextDetail] = useState(null);
+  const [sessionContextUsage, setSessionContextUsage] = useState(null);
   const [runtimeContextState, setRuntimeContextState] = useState(null);
   const [executionModeSaving, setExecutionModeSaving] = useState(false);
   const [composerQuickMenuOpen, setComposerQuickMenuOpen] = useState(false);
   const [todoRunsHideTick, setTodoRunsHideTick] = useState(0);
   const contextRingRef = useRef(null);
   const contextDetailRequestRef = useRef(0);
+  const sessionContextUsageRequestRef = useRef(0);
   const composerQuickMenuRef = useRef(null);
   const filePickerRef = useRef(null);
   const sessionIdRef = useRef(null);
@@ -554,10 +556,42 @@ export function App() {
   useEffect(() => {
     setRuntimeContextState(null);
     setContextDetail(null);
+    setSessionContextUsage(null);
   }, [currentSession?.meta?.id]);
+
+  useEffect(() => {
+    const sessionId = currentSession?.meta?.id;
+    if (!sessionId || !window.cragent?.getSessionContextDetail) {
+      return undefined;
+    }
+
+    const requestId = ++sessionContextUsageRequestRef.current;
+    void window.cragent.getSessionContextDetail(sessionId).then((detail) => {
+      if (
+        requestId !== sessionContextUsageRequestRef.current ||
+        sessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
+      setSessionContextUsage({ sessionId, ...detail });
+    }).catch(() => {
+      if (
+        requestId === sessionContextUsageRequestRef.current &&
+        sessionIdRef.current === sessionId
+      ) {
+        setSessionContextUsage(null);
+      }
+    });
+    return undefined;
+  }, [
+    currentSession?.meta?.id,
+    currentSession?.meta?.providerKey,
+    currentSession?.meta?.modelId,
+  ]);
 
   const contextUsage = useMemo(() => {
     if (!currentSession || !config) return null;
+    const sessionId = currentSession.meta.id;
     const model = config.models[currentSession.meta.providerKey]?.models.find(
       (m) => m.id === currentSession.meta.modelId,
     );
@@ -579,23 +613,22 @@ export function App() {
       skillsCatalogText,
       mcpTokens,
     });
-    if (
-      !runtimeContextState ||
-      runtimeContextState.sessionId !== currentSession.meta.id
-    ) {
-      return estimated;
+    const baseline =
+      sessionContextUsage?.sessionId === sessionId ? sessionContextUsage : estimated;
+    if (!runtimeContextState || runtimeContextState.sessionId !== sessionId) {
+      return baseline;
     }
     return {
-      ...estimated,
-      percent: runtimeContextState.percent ?? estimated.percent,
+      ...baseline,
+      percent: runtimeContextState.percent ?? baseline.percent,
       isAboveWarningThreshold:
-        runtimeContextState.isAboveWarningThreshold ?? estimated.isAboveWarningThreshold,
+        runtimeContextState.isAboveWarningThreshold ?? baseline.isAboveWarningThreshold,
       isAboveAutoCompactThreshold:
         runtimeContextState.isAboveAutoCompactThreshold ??
-        estimated.isAboveAutoCompactThreshold,
-      isAtBlockingLimit: runtimeContextState.isAtBlockingLimit ?? estimated.isAtBlockingLimit,
+        baseline.isAboveAutoCompactThreshold,
+      isAtBlockingLimit: runtimeContextState.isAtBlockingLimit ?? baseline.isAtBlockingLimit,
     };
-  }, [currentSession, config, skills, runtimeContextState]);
+  }, [currentSession, config, skills, runtimeContextState, sessionContextUsage]);
 
   const refreshContextDetail = useCallback(async () => {
     const sessionId = currentSession?.meta?.id;
@@ -612,6 +645,7 @@ export function App() {
         return;
       }
       setContextDetail(detail);
+      setSessionContextUsage({ sessionId, ...detail });
     } catch {
       if (requestId === contextDetailRequestRef.current) {
         setContextDetail(null);
