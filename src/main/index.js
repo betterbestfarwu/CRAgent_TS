@@ -20,6 +20,7 @@ import { createMcpTools } from "./mcp/mcpTools.js";
 import { mcpToolRegistryName } from "@shared/mcpConfig.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
 import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
+import { registerAskBridge } from "./askBridge.js";
 import { registerPlanApprovalBridge, requestPlanApproval } from "./planApprovalBridge.js";
 import { readPlanApprovalDraft, ensurePlansDirectory, getPlanFilePath, getPlanDisplayPath, readPlanFile, writePlanFile } from "./planMode.js";
 import { createPlanModeTools } from "./tools/planModeTools.js";
@@ -412,6 +413,7 @@ function registerIpc() {
 
 function bootstrap() {
     registerConfirmBridge();
+    registerAskBridge();
     registerPlanApprovalBridge();
     const appPaths = getAppPaths();
     configStore = new ConfigStore(appPaths.configFile);

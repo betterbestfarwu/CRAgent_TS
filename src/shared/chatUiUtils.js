@@ -77,7 +77,10 @@ function isProcessAssistantWithTools(msg) {
 }
 
 function hasVisibleAssistantContent(msg) {
-    return msg?.role === "assistant" && String(msg.content || "").trim().length > 0;
+    return (
+        msg?.role === "assistant" &&
+        (Boolean(msg.streaming) || String(msg.content || "").trim().length > 0)
+    );
 }
 
 function recordToolCallStats(call, stats) {
@@ -425,4 +428,74 @@ export function todoDisplayLabel(item) {
 
 export function getCurrentInProgressTodo(todos) {
     return sortTodosForDisplay(todos).find((item) => item.status === "in_progress") || null;
+}
+
+
+const TOOL_NAME_ZH = {
+    read_file: "读取文件",
+    write_file: "写入文件",
+    list_dir: "列出目录",
+    glob_file_search: "搜索文件",
+    grep: "搜索内容",
+    bash: "运行命令",
+    web_search: "网络搜索",
+    fetch_url: "获取网页",
+    ask_user: "询问用户",
+};
+
+export function formatCodexStepLine(item) {
+    if (!item) {
+        return "";
+    }
+    if (item.kind === "assistant-text") {
+        const snippet = String(item.content || "").trim().split("\n")[0];
+        return snippet ? snippet.slice(0, 120) : "推理中";
+    }
+    if (item.kind === "tool-call" || item.kind === "tool-call-group") {
+        const name = item.name || "tool";
+        const label = TOOL_NAME_ZH[name] || name;
+        const count =
+            item.kind === "tool-call-group" ? (item.calls?.length || 0) : 1;
+        if (name === "bash" && item.kind === "tool-call") {
+            try {
+                const args = parseToolArguments(item.arguments);
+                const cmd = String(args.command || "").trim();
+                if (cmd) {
+                    return `正在运行 ${cmd.length > 80 ? `${cmd.slice(0, 80)}…` : cmd}`;
+                }
+            } catch {
+                /* ignore */
+            }
+        }
+        return count > 1 ? `已${label} × ${count}` : `已${label}`;
+    }
+    if (item.kind === "tool-result" || item.kind === "tool-result-group") {
+        const name = item.name || "tool";
+        const label = TOOL_NAME_ZH[name] || name;
+        const count =
+            item.kind === "tool-result-group" ? (item.results?.length || 0) : 1;
+        if (name === "read_file") {
+            return count > 1 ? `已探索 ${count} 个文件` : "已探索 1 个文件";
+        }
+        if (name === "list_dir") {
+            return "已列出文件";
+        }
+        if (name === "bash") {
+            return count > 1 ? `已运行 ${count} 条命令` : "已运行 1 条命令";
+        }
+        if (name === "grep" || name === "glob_file_search") {
+            return count > 1 ? `已搜索 ${count} 次` : "已搜索";
+        }
+        return count > 1 ? `已完成 ${label} × ${count}` : `已完成 ${label}`;
+    }
+    return "";
+}
+
+export function buildCodexTimeline(thinkingMessages, options = {}) {
+    const verbose = Boolean(options.verbose);
+    const built = buildThinkingSummary(thinkingMessages, { verbose });
+    const lines = (built.items || [])
+        .map((item) => formatCodexStepLine(item))
+        .filter(Boolean);
+    return { ...built, lines };
 }

@@ -318,6 +318,23 @@ export class SessionStore {
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
 
+    updateMessage(sessionId, messageId, patch) {
+        const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
+        const index = session.messages.findIndex((message) => message.id === messageId);
+        if (index < 0) {
+            return session;
+        }
+        session.messages[index] = { ...session.messages[index], ...patch };
+        const prepared = externalizeSessionImages(session, this.sessionsDir);
+        rewriteMessages(this.sessionsDir, sessionId, prepared.messages);
+        const meta = {
+            ...prepared.meta,
+            updatedAt: nowIso(),
+        };
+        writeMeta(this.sessionsDir, meta);
+        return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
+    }
+
     removeMessages(sessionId, messageIds) {
         const idSet = new Set(messageIds);
         const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: false });

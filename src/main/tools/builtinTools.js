@@ -352,6 +352,47 @@ export function createBuiltinTools({
                 return skillLoader.deleteSkill(skillName);
             },
         },
+        {
+            name: "ask_user",
+            requiresConfirmation: false,
+            enabled: () => getAgentTools().enable_tools !== false,
+            schema: fnSchema(
+                "ask_user",
+                "Ask the user to choose among options before continuing. Blocks until the user selects.",
+                {
+                    type: "object",
+                    properties: {
+                        questions: {
+                            type: "array",
+                            description: "Questions with options for the user",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    id: { type: "string" },
+                                    prompt: { type: "string" },
+                                    options: {
+                                        type: "array",
+                                        items: {
+                                            type: "object",
+                                            properties: {
+                                                id: { type: "string" },
+                                                label: { type: "string" },
+                                            },
+                                            required: ["id", "label"],
+                                        },
+                                    },
+                                },
+                                required: ["prompt", "options"],
+                            },
+                        },
+                    },
+                    required: ["questions"],
+                },
+            ),
+            async execute() {
+                return "Error: ask_user must be handled by the agent runtime";
+            },
+        },
     ];
 
     return tools;

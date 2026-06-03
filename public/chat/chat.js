@@ -23,6 +23,10 @@
   var todoRunsById = {};
   var chatUi = window.CRAgentChatUtils || {};
   var verboseThinking = false;
+  var codexTimeline = true;
+  var busyState = { busy: false, runStartedAt: null };
+  var pendingAsk = null;
+  var runStatusTimer = null;
   var planContext = { active: false };
   var planPreviewTarget = { messageId: null, runId: null };
   var PLAN_PREVIEW_MAX_HEIGHT = 280;
@@ -697,6 +701,9 @@
   }
 
   function buildRunThinking(messages) {
+    if (codexTimeline && chatUi.buildCodexTimeline) {
+      return chatUi.buildCodexTimeline(messages, { verbose: verboseThinking });
+    }
     if (chatUi.buildThinkingSummary) {
       return chatUi.buildThinkingSummary(messages, { verbose: verboseThinking });
     }
@@ -765,7 +772,7 @@
       if (
         candidate.role === 'assistant' &&
         !isProcessMessage(candidate) &&
-        hasVisibleAssistantContent(candidate)
+(hasVisibleAssistantContent(candidate) || candidate.streaming)
       ) {
         finalIndex = j;
         break;
@@ -856,9 +863,130 @@
     }
   }
 
+
+  function renderCodexTimelineHtml(thinking) {
+    var lines = thinking && thinking.lines ? thinking.lines : [];
+    if (!lines.length && thinking && thinking.items && thinking.items.length) {
+      lines = thinking.items.map(function (item) {
+        return chatUi.formatCodexStepLine ? chatUi.formatCodexStepLine(item) : '';
+      }).filter(Boolean);
+    }
+    if (!lines.length) {
+      return '';
+    }
+    return (
+      '<div class="codex-timeline">' +
+      lines.map(function (line) {
+        return '<div class="codex-step">' + escapeText(line) + '</div>';
+      }).join('') +
+      '</div>'
+    );
+  }
+
+  function renderRunStatusFooter() {
+    var existing = document.getElementById('run-status-footer');
+    if (!busyState.busy) {
+      if (existing) existing.remove();
+      if (runStatusTimer) {
+        clearInterval(runStatusTimer);
+        runStatusTimer = null;
+      }
+      return;
+    }
+    var footer = existing;
+    if (!footer) {
+      footer = document.createElement('div');
+      footer.id = 'run-status-footer';
+      footer.className = 'run-status-footer';
+      container.appendChild(footer);
+    }
+    function renderElapsed() {
+      var label = '正在思考';
+      if (busyState.runStartedAt) {
+        try {
+          var sec = Math.max(0, Math.floor((Date.now() - new Date(busyState.runStartedAt).getTime()) / 1000));
+          label = '已处理 ' + sec + 's · 正在思考';
+        } catch (_) {}
+      }
+      var askHtml = '';
+      if (pendingAsk && pendingAsk.questions && pendingAsk.questions.length) {
+        askHtml = renderAskChoiceCard(pendingAsk);
+      }
+      footer.innerHTML =
+        '<div class="run-status-line">' + escapeText(label) + '</div>' + askHtml;
+    }
+    renderElapsed();
+    if (!runStatusTimer) {
+      runStatusTimer = setInterval(renderElapsed, 1000);
+    }
+  }
+
+  function renderAskChoiceCard(ask) {
+    var questions = ask.questions || [];
+    return questions
+      .map(function (q, qi) {
+        var prompt = escapeText(q.prompt || q.question || '请选择');
+        var options = (q.options || []).map(function (opt, oi) {
+          var id = opt.id || String(oi + 1);
+          var label = escapeText(opt.label || opt.id || '');
+          return (
+            '<button type="button" class="choice-option" data-ask-id="' +
+            escapeAttr(ask.id || '') +
+            '" data-question-index="' +
+            qi +
+            '" data-option-id="' +
+            escapeAttr(id) +
+            '">' +
+            label +
+            '</button>'
+          );
+        }).join('');
+        return (
+          '<div class="choice-card" data-question-index="' +
+          qi +
+          '"><div class="choice-prompt">' +
+          prompt +
+          '</div><div class="choice-options">' +
+          options +
+          '</div></div>'
+        );
+      })
+      .join('');
+  }
+
+  function patchStreamingMessage(message) {
+    if (!message || !message.id) return;
+    var el =
+      container.querySelector('.msg[data-id="' + message.id + '"]') ||
+      container.querySelector('.assistant-turn[data-id="' + message.id + '"]');
+    if (!el) {
+      return false;
+    }
+    var body = el.querySelector('.assistant-turn-content') || el.querySelector('.bubble-collapse-body');
+    if (!body) {
+      var bubble = el.querySelector('.bubble');
+      if (!bubble) return false;
+      body = document.createElement('div');
+      body.className = message.streaming ? 'assistant-stream-content' : 'assistant-turn-content';
+      bubble.appendChild(body);
+    }
+    body.className = message.streaming ? 'assistant-stream-content' : 'assistant-turn-content';
+    if (message.streaming) {
+      body.textContent = message.content || '';
+    } else {
+      body.innerHTML = window.MD.render(message.content || '');
+      postProcessRenderedContent(body);
+      setupCollapsibleContent(body);
+    }
+    return true;
+  }
+
   function renderThinkingBlockHtml(thinking) {
     var items = thinking && thinking.items ? thinking.items : thinking;
     if (!items || !items.length) return '';
+    if (codexTimeline) {
+      return '<div class="thinking-block">' + renderCodexTimelineHtml(thinking) + '</div>';
+    }
     var summary =
       (thinking && thinking.summaryLine) ||
       ('Thinking · ' + items.length + ' step' + (items.length === 1 ? '' : 's'));
@@ -910,8 +1038,12 @@
         showPreview: shouldShowPlanPreview(contentMsg, runId),
       });
       var contentWrap = document.createElement('div');
-      contentWrap.className = 'assistant-turn-content';
-      contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
+      contentWrap.className = contentMsg.streaming ? 'assistant-stream-content' : 'assistant-turn-content';
+      if (contentMsg.streaming) {
+        contentWrap.textContent = contentMsg.content || '';
+      } else {
+        contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
+      }
       bubble.appendChild(contentWrap);
       postProcessRenderedContent(bubble);
       setupCollapsibleContent(contentWrap);
@@ -1407,7 +1539,31 @@
     },
     updateTodoRuns: updateTodoRuns,
     patchActiveRun: patchActiveRun,
-    setBusy: function () {},
+    setBusy: function (payload) {
+      if (payload && typeof payload === 'object') {
+        busyState.busy = Boolean(payload.busy);
+        busyState.runStartedAt = payload.runStartedAt || null;
+      } else {
+        busyState.busy = Boolean(payload);
+      }
+      renderRunStatusFooter();
+    },
+    setCodexTimeline: function (value) {
+      codexTimeline = value !== false;
+    },
+    setPendingAsk: function (value) {
+      pendingAsk = value && typeof value === 'object' ? value : null;
+      renderRunStatusFooter();
+    },
+    patchMessageDelta: function (payload) {
+      var message = payload && payload.message;
+      if (!message) return;
+      if (!patchStreamingMessage(message)) {
+        patchActiveRun(payload);
+      }
+      var anchor = captureScrollAnchor();
+      afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
+    },
     setVerboseThinking: function (value) {
       verboseThinking = Boolean(value);
     },

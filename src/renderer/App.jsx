@@ -110,6 +110,8 @@ export function App() {
   const [pendingAtMentions, setPendingAtMentions] = useState([]);
   const [composerDragOver, setComposerDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [runStartedAt, setRunStartedAt] = useState(null);
+  const [pendingAsk, setPendingAsk] = useState(null);
   const [busyBySession, setBusyBySession] = useState({});
   const [unreadBySession, setUnreadBySession] = useState({});
   const [page, setPage] = useState("chat");
@@ -433,6 +435,23 @@ export function App() {
       );
     });
 
+
+    const offMessageDelta = window.cragent.onMessageDelta?.(({ sessionId, message }) => {
+      setCurrentSession((prev) => {
+        if (!prev || prev.meta.id !== sessionId) return prev;
+        const messages = prev.messages.map((entry) =>
+          entry.id === message.id ? { ...entry, ...message } : entry,
+        );
+        return { ...prev, messages };
+      });
+    });
+
+    const offAskUser = window.cragent.onAskUserRequest?.((payload) => {
+      if (sessionIdRef.current) {
+        setPendingAsk(payload);
+      }
+    });
+
     const offSession = window.cragent.onSessionChanged((session) => {
       clearSessionError();
       ensureProjectExpanded(session?.meta?.projectId);
@@ -458,7 +477,7 @@ export function App() {
       });
     });
 
-    const offBusy = window.cragent.onBusyChanged(({ sessionId, busy: nextBusy }) => {
+    const offBusy = window.cragent.onBusyChanged(({ sessionId, busy: nextBusy, runStartedAt: startedAt }) => {
       busyBySessionRef.current.set(sessionId, nextBusy);
       setBusyBySession((prev) => {
         const wasBusy = prev[sessionId];
@@ -469,6 +488,10 @@ export function App() {
       });
       if (sessionIdRef.current === sessionId) {
         setBusy(nextBusy);
+        setRunStartedAt(nextBusy ? startedAt || new Date().toISOString() : null);
+        if (!nextBusy) {
+          setPendingAsk(null);
+        }
       }
     });
 
@@ -1222,6 +1245,19 @@ export function App() {
     }
   }
 
+
+  async function handleAskUserChoice(data) {
+    if (!data?.askId || !currentSession) return;
+    const answers = {
+      [String(data.questionIndex ?? 0)]: data.optionId,
+    };
+    setPendingAsk(null);
+    await window.cragent.respondAskUser?.({
+      id: data.askId,
+      answers,
+    });
+  }
+
   async function handleCancelRun() {
     if (!currentSession || !busy) return;
     await window.cragent.cancelRun?.(currentSession.meta.id);
@@ -1639,11 +1675,15 @@ export function App() {
                     messages={currentSession.messages}
                     todoRuns={visibleTodoRuns}
                     busy={busy}
+                    runStartedAt={runStartedAt}
+                    codexTimeline={config?.ui?.codex_timeline !== false}
+                    pendingAsk={pendingAsk}
                     verboseThinking={verboseThinking}
                     planContext={planContext}
                     onDelete={handleDeleteMessage}
                     onOpenImage={(image) => setViewerImage(image)}
                     onOpenPlanFile={(sessionId) => window.cragent.openPlanFile?.(sessionId)}
+                    onAskUserChoice={handleAskUserChoice}
                   />
                 </>
               )}

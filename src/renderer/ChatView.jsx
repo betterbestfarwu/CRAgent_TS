@@ -50,6 +50,7 @@ function toWireMessage(message, planContext) {
     created_at: message.createdAt,
     ...(getMessageModelId(message) ? { model_id: getMessageModelId(message) } : {}),
     ...(message.runId ? { run_id: message.runId } : {}),
+    ...(message.streaming ? { streaming: true } : {}),
     ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
     ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
     ...(message.name ? { name: message.name } : {}),
@@ -92,11 +93,15 @@ export function ChatView({
   messages,
   todoRuns,
   busy,
+  runStartedAt,
+  codexTimeline,
+  pendingAsk,
   verboseThinking,
   planContext,
   onDelete,
   onOpenImage,
   onOpenPlanFile,
+  onAskUserChoice,
 }) {
   const iframeRef = useRef(null);
   const readyRef = useRef(false);
@@ -105,10 +110,16 @@ export function ChatView({
   const todoRunsRef = useRef(todoRuns);
   const wireSnapshotRef = useRef({ ids: [], todoJson: "", wireJson: "" });
   const verboseThinkingRef = useRef(verboseThinking);
+  const runStartedAtRef = useRef(runStartedAt);
+  const codexTimelineRef = useRef(codexTimeline);
+  const pendingAskRef = useRef(pendingAsk);
   const planContextRef = useRef(planContext);
   messagesRef.current = messages;
   todoRunsRef.current = todoRuns;
   verboseThinkingRef.current = verboseThinking;
+  runStartedAtRef.current = runStartedAt;
+  codexTimelineRef.current = codexTimeline;
+  pendingAskRef.current = pendingAsk;
   planContextRef.current = planContext;
 
   const syncIframeLayout = useCallback(() => {
@@ -145,8 +156,17 @@ export function ChatView({
     const needsFullRender =
       idsAppended && appendedMessagesNeedFullRender(wireMessages, prev.ids.length);
 
+    const lastWire = wireMessages[wireMessages.length - 1];
+    const streamingDelta =
+      idsSame &&
+      wireJson !== prev.wireJson &&
+      lastWire?.streaming &&
+      lastWire?.role === "assistant";
+
     if (todosOnly) {
       postToChat("updateTodoRuns", todoRunsRef.current || {});
+    } else if (streamingDelta) {
+      postToChat("patchMessageDelta", { message: lastWire });
     } else if (idsAppended && ids.length > prev.ids.length && !needsFullRender) {
       postToChat("patchActiveRun", {
         messages: wireMessages,
@@ -180,8 +200,10 @@ export function ChatView({
         readyRef.current = true;
         syncIframeLayout();
         syncMessages();
-        postToChat("setBusy", busy);
+        postToChat("setBusy", { busy, runStartedAt: runStartedAtRef.current || null });
         postToChat("setVerboseThinking", verboseThinkingRef.current);
+        postToChat("setCodexTimeline", codexTimelineRef.current !== false);
+        postToChat("setPendingAsk", pendingAskRef.current || null);
         const queue = pendingRef.current;
         pendingRef.current = [];
         queue.forEach((run) => run());
@@ -202,11 +224,15 @@ export function ChatView({
       if (data.action === "openPlan" && data.sessionId) {
         void onOpenPlanFile?.(data.sessionId);
       }
+
+      if (data.action === "askUserChoice") {
+        void onAskUserChoice?.(data);
+      }
     };
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [busy, onDelete, onOpenImage, onOpenPlanFile, postToChat, syncIframeLayout, syncMessages]);
+  }, [busy, onDelete, onOpenImage, onOpenPlanFile, onAskUserChoice, postToChat, syncIframeLayout, syncMessages]);
 
   useEffect(() => {
     wireSnapshotRef.current = { ids: [], todoJson: "", wireJson: "" };
@@ -219,13 +245,24 @@ export function ChatView({
 
   useEffect(() => {
     if (!readyRef.current) return;
-    postToChat("setBusy", busy);
+    postToChat("setBusy", { busy, runStartedAt: runStartedAtRef.current || null });
   }, [busy, postToChat]);
 
   useEffect(() => {
     if (!readyRef.current) return;
     postToChat("setVerboseThinking", verboseThinking);
   }, [verboseThinking, postToChat]);
+
+
+  useEffect(() => {
+    if (!readyRef.current) return;
+    postToChat("setCodexTimeline", codexTimeline !== false);
+  }, [codexTimeline, postToChat]);
+
+  useEffect(() => {
+    if (!readyRef.current) return;
+    postToChat("setPendingAsk", pendingAsk || null);
+  }, [pendingAsk, postToChat]);
 
   useEffect(() => {
     if (!readyRef.current) return;

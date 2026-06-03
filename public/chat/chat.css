@@ -1103,3 +1103,84 @@ html, body {
   padding: 8px 10px;
   font-size: 13px;
 }
+
+.run-status-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 16px 14px;
+  margin-top: 8px;
+  background: linear-gradient(to top, var(--cursor-bg) 70%, transparent);
+  z-index: 2;
+}
+
+.run-status-line {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.codex-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.codex-step {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.assistant-stream-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.assistant-stream-content::after {
+  content: "▍";
+  animation: stream-cursor 1s step-end infinite;
+  color: var(--cursor-accent);
+  margin-left: 2px;
+}
+
+@keyframes stream-cursor {
+  50% { opacity: 0; }
+}
+
+.choice-card {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--cursor-bg-input);
+}
+
+.choice-prompt {
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.choice-option {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--cursor-bg);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.choice-option:hover {
+  border-color: var(--cursor-accent);
+}

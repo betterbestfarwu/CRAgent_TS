@@ -88,6 +88,7 @@ import {
 import { ipcPayloadForRenderer } from "./rendererSession.js";
 import { normalizeToolResult, toolResultContent } from "@shared/toolResult.js";
 import { computerUseSystemPromptSection } from "./tools/computerUseTools.js";
+import { requestAskUserChoice } from "./askBridge.js";
 
 const HOOK_LOG_LIMIT = 80;
 
@@ -101,6 +102,7 @@ export class AgentRuntime {
         this.skillLoader = skillLoader;
         this.mainWindowGetter = mainWindowGetter;
         this.busyBySession = new Map();
+        this.runStartedAtBySession = new Map();
         this.compactingSessions = new Set();
         this.pendingQueues = new Map();
         this.abortControllers = new Map();
@@ -178,9 +180,29 @@ export class AgentRuntime {
         this.emit(IPC_CHANNELS.onHookLog, { sessionId, entry, logs: list });
     }
 
+
+    llmStreamEnabled() {
+        const ui = mergeUiConfig(this.configStore.get().ui);
+        return ui.llm_stream !== false;
+    }
+
+    codexTimelineEnabled() {
+        const ui = mergeUiConfig(this.configStore.get().ui);
+        return ui.codex_timeline !== false;
+    }
+
     setBusy(sessionId, busy) {
         this.busyBySession.set(sessionId, busy);
-        this.emit(IPC_CHANNELS.onBusyChanged, { sessionId, busy });
+        if (busy) {
+            this.runStartedAtBySession.set(sessionId, new Date().toISOString());
+        } else {
+            this.runStartedAtBySession.delete(sessionId);
+        }
+        this.emit(IPC_CHANNELS.onBusyChanged, {
+            sessionId,
+            busy,
+            runStartedAt: busy ? this.runStartedAtBySession.get(sessionId) : null,
+        });
     }
 
     defaultAgent() {
@@ -380,7 +402,7 @@ export class AgentRuntime {
             messages.push(
                 ...session.messages
                     .slice(fromIndex)
-                    .filter((message) => !isContextDividerMessage(message)),
+                    .filter((message) => !isContextDividerMessage(message) && !message.streaming),
             );
         }
         return messages;
@@ -641,6 +663,21 @@ export class AgentRuntime {
                     arguments: JSON.stringify(toolInput),
                 },
             };
+        }
+
+        if (toolName === "ask_user") {
+            try {
+                const answers = await requestAskUserChoice(this.mainWindowGetter(), {
+                    questions: toolInput.questions || [],
+                });
+                return normalizeToolResult(
+                    JSON.stringify({ answers }, null, 2),
+                );
+            } catch (error) {
+                return normalizeToolResult(
+                    `Error: ${error instanceof Error ? error.message : String(error)}`,
+                );
+            }
         }
 
         let result = await this.toolRegistry.execute(call, context);
@@ -1189,13 +1226,14 @@ export class AgentRuntime {
         }
     }
 
-    requestAgentChat(sessionId, chatArgsOrFactory) {
+    requestAgentChat(sessionId, chatArgsOrFactory, streamHandlers = {}) {
         return this.requestAgentLlm(sessionId, () => {
             const chatArgs =
                 typeof chatArgsOrFactory === "function"
                     ? chatArgsOrFactory()
                     : chatArgsOrFactory;
-            return this.llmClient.chat(chatArgs);
+            const onDelta = this.llmStreamEnabled() ? streamHandlers.onDelta : undefined;
+            return this.llmClient.chat({ ...chatArgs, onDelta });
         });
     }
 
@@ -1570,16 +1608,67 @@ export class AgentRuntime {
                         toolSchemas = this.toolRegistry.schemas({ unlockedToolNames });
                     }
                 }
-                const chatResult = await this.requestAgentChat(sessionId, () => {
-                    const refreshedSession = this.sessionStore.get(sessionId);
-                    return {
-                        messages: this.messagesForLLM(refreshedSession),
-                        model,
-                        modelChain: this.modelChainForSession(refreshedSession),
-                        tools: toolSchemas,
-                        signal,
+                const streamHandlers = {};
+                let streamingMessageId = null;
+                if (this.llmStreamEnabled()) {
+                    streamingMessageId = randomUUID();
+                    const placeholder = withAssistantModel(
+                        {
+                            id: streamingMessageId,
+                            role: "assistant",
+                            content: "",
+                            streaming: true,
+                            createdAt: new Date().toISOString(),
+                            runId,
+                        },
+                        { modelId: session.meta.modelId },
+                    );
+                    session = this.sessionStore.appendMessage(sessionId, placeholder);
+                    this.emit(IPC_CHANNELS.onMessageAppended, {
+                        sessionId,
+                        message: placeholder,
+                    });
+                    this.emit(IPC_CHANNELS.onSessionChanged, session);
+                    let lastEmit = 0;
+                    streamHandlers.onDelta = ({ content }) => {
+                        if (content == null || this.wasRunCancelled(sessionId)) {
+                            return;
+                        }
+                        const now = Date.now();
+                        if (now - lastEmit < 60) {
+                            return;
+                        }
+                        lastEmit = now;
+                        session = this.sessionStore.updateMessage(sessionId, streamingMessageId, {
+                            content: String(content),
+                            streaming: true,
+                        });
+                        const updated = session.messages.find((m) => m.id === streamingMessageId);
+                        if (updated) {
+                            this.emit(IPC_CHANNELS.onMessageDelta, {
+                                sessionId,
+                                messageId: streamingMessageId,
+                                message: updated,
+                            });
+                            this.emit(IPC_CHANNELS.onSessionChanged, session);
+                        }
                     };
-                });
+                }
+
+                const chatResult = await this.requestAgentChat(
+                    sessionId,
+                    () => {
+                        const refreshedSession = this.sessionStore.get(sessionId);
+                        return {
+                            messages: this.messagesForLLM(refreshedSession),
+                            model,
+                            modelChain: this.modelChainForSession(refreshedSession),
+                            tools: toolSchemas,
+                            signal,
+                        };
+                    },
+                    streamHandlers,
+                );
                 if (this.wasRunCancelled(sessionId)) {
                     return;
                 }
@@ -1609,8 +1698,22 @@ export class AgentRuntime {
                     const note = `(已自动切换至备用模型 ${choice.usedModel.providerKey}/${choice.usedModel.modelId})\n\n`;
                     assistant = { ...assistant, content: `${note}${assistant.content || ""}` };
                 }
-                session = this.sessionStore.appendMessage(session.meta.id, assistant);
-                this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: assistant });
+                if (streamingMessageId) {
+                    const { streaming: _stream, id: _id, createdAt: _createdAt, ...rest } = assistant;
+                    session = this.sessionStore.updateMessage(sessionId, streamingMessageId, {
+                        ...rest,
+                        streaming: false,
+                    });
+                    assistant = session.messages.find((m) => m.id === streamingMessageId) || assistant;
+                    this.emit(IPC_CHANNELS.onMessageDelta, {
+                        sessionId,
+                        messageId: streamingMessageId,
+                        message: assistant,
+                    });
+                } else {
+                    session = this.sessionStore.appendMessage(session.meta.id, assistant);
+                    this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: assistant });
+                }
                 this.emit(IPC_CHANNELS.onSessionChanged, session);
 
                 const calls = assistant.toolCalls || [];
@@ -1643,6 +1746,12 @@ export class AgentRuntime {
                     if (this.wasRunCancelled(sessionId)) {
                         return;
                     }
+                    this.emit(IPC_CHANNELS.onToolStarted, {
+                        sessionId,
+                        runId,
+                        toolName: call.function.name,
+                        toolCallId: call.id,
+                    });
                     const result = await this.executeToolWithHooks(
                         call,
                         {
