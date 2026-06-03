@@ -116,7 +116,6 @@ export function App() {
   const [contextPopupOpen, setContextPopupOpen] = useState(false);
   const [contextDetail, setContextDetail] = useState(null);
   const [sessionContextUsage, setSessionContextUsage] = useState(null);
-  const [runtimeContextState, setRuntimeContextState] = useState(null);
   const [executionModeSaving, setExecutionModeSaving] = useState(false);
   const [composerQuickMenuOpen, setComposerQuickMenuOpen] = useState(false);
   const [todoRunsHideTick, setTodoRunsHideTick] = useState(0);
@@ -505,12 +504,6 @@ export function App() {
       setPage("settings");
     });
 
-    const offContextWarning = window.cragent.onContextWarningChanged?.((payload) => {
-      if (sessionIdRef.current === payload.sessionId) {
-        setRuntimeContextState(payload);
-      }
-    });
-
     const offHookLog = window.cragent.onHookLog?.((payload) => {
       if (sessionIdRef.current === payload.sessionId) {
         setHookLogs(payload.logs || []);
@@ -527,7 +520,6 @@ export function App() {
       offPlanApproval?.();
       offError();
       offSettings();
-      offContextWarning?.();
       offHookLog?.();
     };
   }, []);
@@ -557,7 +549,6 @@ export function App() {
   }, [config, currentSession]);
 
   useEffect(() => {
-    setRuntimeContextState(null);
     setContextDetail(null);
     setSessionContextUsage(null);
   }, [currentSession?.meta?.id]);
@@ -616,22 +607,16 @@ export function App() {
       skillsCatalogText,
       mcpTokens,
     });
-    const baseline =
-      sessionContextUsage?.sessionId === sessionId ? sessionContextUsage : estimated;
-    if (!runtimeContextState || runtimeContextState.sessionId !== sessionId) {
-      return baseline;
+    const storedUsage =
+      sessionContextUsage?.sessionId === sessionId ? sessionContextUsage : null;
+    if (!storedUsage?.categories?.length) {
+      return estimated;
     }
     return {
-      ...baseline,
-      percent: runtimeContextState.percent ?? baseline.percent,
-      isAboveWarningThreshold:
-        runtimeContextState.isAboveWarningThreshold ?? baseline.isAboveWarningThreshold,
-      isAboveAutoCompactThreshold:
-        runtimeContextState.isAboveAutoCompactThreshold ??
-        baseline.isAboveAutoCompactThreshold,
-      isAtBlockingLimit: runtimeContextState.isAtBlockingLimit ?? baseline.isAtBlockingLimit,
+      ...estimated,
+      categories: storedUsage.categories,
     };
-  }, [currentSession, config, skills, runtimeContextState, sessionContextUsage]);
+  }, [currentSession, config, skills, sessionContextUsage]);
 
   const refreshContextDetail = useCallback(async () => {
     const sessionId = currentSession?.meta?.id;
@@ -656,6 +641,11 @@ export function App() {
     }
   }, [currentSession?.meta?.id]);
 
+  const closeContextPopup = useCallback(() => {
+    setContextPopupOpen(false);
+    textareaRef.current?.focus();
+  }, []);
+
   useEffect(() => {
     if (!contextPopupOpen) {
       setContextDetail(null);
@@ -672,7 +662,6 @@ export function App() {
     currentSession?.meta?.contextSummary,
     currentSession?.meta?.postCompactContext,
     currentSession?.meta?.sessionMemory,
-    runtimeContextState,
     skills,
     config?.context?.compact_buffer_tokens,
     config?.agents,
@@ -1644,6 +1633,7 @@ export function App() {
                       setHookLogs([]);
                     }
                   }}
+                  onCollapse={() => textareaRef.current?.focus()}
                 />
                 <div className="composer-input-row" ref={composerInputRowRef}>
                   <ComposerSegmentedInput
@@ -1891,13 +1881,19 @@ export function App() {
                             ? "composer-context-ring-warning"
                             : ""
                       }
-                      onClick={() => setContextPopupOpen((prev) => !prev)}
+                      onClick={() => {
+                        if (contextPopupOpen) {
+                          closeContextPopup();
+                          return;
+                        }
+                        setContextPopupOpen(true);
+                      }}
                     />
                     <ComposerContextPopup
                       open={contextPopupOpen}
                       usage={contextUsageForPopup}
                       anchorRef={contextRingRef}
-                      onClose={() => setContextPopupOpen(false)}
+                      onClose={closeContextPopup}
                     />
                   </div>
                   <button

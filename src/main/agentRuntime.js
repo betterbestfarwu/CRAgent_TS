@@ -414,7 +414,7 @@ export class AgentRuntime {
         return { skillName, rest, loaded };
     }
 
-    enqueueMessage(sessionId, rawInput, images = [], atMentions = [], userText = null) {
+    enqueueMessage(sessionId, rawInput, images = [], atMentions = [], userText = null, options = {}) {
         const queue = this.pendingQueues.get(sessionId) || [];
         queue.push({
             id: randomUUID(),
@@ -422,6 +422,7 @@ export class AgentRuntime {
             images,
             atMentions: normalizeAtMentions(atMentions),
             userText,
+            options,
             createdAt: new Date().toISOString(),
         });
         this.pendingQueues.set(sessionId, queue);
@@ -462,7 +463,14 @@ export class AgentRuntime {
         if (!next) {
             return;
         }
-        await this.dispatchUserMessage(sessionId, next.input, next.images, next.atMentions, next.userText);
+        await this.dispatchUserMessage(
+            sessionId,
+            next.input,
+            next.images,
+            next.atMentions,
+            next.userText,
+            next.options || {},
+        );
     }
 
     createAbortSignal(sessionId) {
@@ -816,7 +824,14 @@ export class AgentRuntime {
         return `Sub-agent "${description}" reached tool round limit before finishing.`;
     }
 
-    async sendUserMessage(sessionId, rawInput, images = [], atMentions = [], userText = null) {
+    async sendUserMessage(
+        sessionId,
+        rawInput,
+        images = [],
+        atMentions = [],
+        userText = null,
+        options = {},
+    ) {
         const input = rawInput.trim();
         const normalizedMentions = normalizeAtMentions(atMentions);
         const storedImages = Array.isArray(images)
@@ -831,14 +846,28 @@ export class AgentRuntime {
             return;
         }
         if (this.busyBySession.get(sessionId)) {
-            this.enqueueMessage(sessionId, rawInput, storedImages, normalizedMentions, userText);
+            this.enqueueMessage(sessionId, rawInput, storedImages, normalizedMentions, userText, options);
             return { queued: true };
         }
-        await this.dispatchUserMessage(sessionId, rawInput, storedImages, normalizedMentions, userText);
+        await this.dispatchUserMessage(
+            sessionId,
+            rawInput,
+            storedImages,
+            normalizedMentions,
+            userText,
+            options,
+        );
         return { queued: false, config: this.configStore.get() };
     }
 
-    async dispatchUserMessage(sessionId, rawInput, storedImages = [], atMentions = [], userText = null) {
+    async dispatchUserMessage(
+        sessionId,
+        rawInput,
+        storedImages = [],
+        atMentions = [],
+        userText = null,
+        options = {},
+    ) {
         const normalizedMentions = normalizeAtMentions(atMentions);
         const input = rawInput.trim();
         const displayText = userText != null ? String(userText).trim() : input;
@@ -883,7 +912,9 @@ export class AgentRuntime {
                 ? expandAtMentionsToAbsolute(skillInvoke.rest, projectRoot)
                 : `请按照已加载的 skill「${skillInvoke.skillName}」执行任务。`;
         }
-        const autoPlanMode = this.maybeAutoEnterPlanMode(sessionId, displayText || input);
+        const autoPlanMode = options.skipAutoPlanMode
+            ? false
+            : this.maybeAutoEnterPlanMode(sessionId, displayText || input);
         if (autoPlanMode) {
             messageContent = [messageContent, "", PLAN_MODE_AUTO_SYSTEM_HINT].join("\n");
         }
@@ -956,7 +987,14 @@ export class AgentRuntime {
                 },
             },
         });
-        await this.sendUserMessage(sessionId, buildExitPlanModeUserMessage(content, filePath));
+        await this.sendUserMessage(
+            sessionId,
+            buildExitPlanModeUserMessage(content, filePath),
+            [],
+            [],
+            null,
+            { skipAutoPlanMode: true },
+        );
         return {
             config: this.configStore.get(),
             planFilePath: filePath,

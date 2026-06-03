@@ -612,6 +612,11 @@ html, body {
   white-space: pre-wrap;
 }
 
+/* .bubble pre overrides .code-block pre padding; reserve space for copy btn */
+.bubble .code-block pre {
+  padding: 10px 36px 10px 12px;
+}
+
 /* Collapsible Thinking sections. */
 .bubble details.thinking,
 .bubble details.thinking-group {

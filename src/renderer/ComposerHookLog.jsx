@@ -18,8 +18,13 @@ function formatCommand(command) {
     return parts[parts.length - 1] || text;
 }
 
-export function ComposerHookLog({ logs, onClear }) {
+export function ComposerHookLog({ logs, onClear, onCollapse }) {
     const [expanded, setExpanded] = useState(false);
+
+    function collapse() {
+        setExpanded(false);
+        onCollapse?.();
+    }
     const visible = useMemo(
         () => (Array.isArray(logs) ? logs.filter(Boolean) : []),
         [logs],
@@ -59,7 +64,7 @@ export function ComposerHookLog({ logs, onClear }) {
                 <button
                     type="button"
                     className="composer-hook-log-toggle"
-                    onClick={() => setExpanded(false)}
+                    onClick={collapse}
                     aria-expanded={true}
                 >
                     <span className="composer-hook-log-expand" aria-hidden="true">
@@ -73,7 +78,7 @@ export function ComposerHookLog({ logs, onClear }) {
                     className="composer-hook-log-clear"
                     onClick={() => {
                         onClear?.();
-                        setExpanded(false);
+                        collapse();
                     }}
                     title="清空 hook 日志"
                 >
