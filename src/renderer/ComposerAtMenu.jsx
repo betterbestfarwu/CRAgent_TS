@@ -84,6 +84,14 @@ function PathTreePopover({ projectName, segments }) {
     );
 }
 
+function activateAtMenuEntry(entry, onEnterDirectory, onPickFile) {
+    if (entry.kind === "dir") {
+        onEnterDirectory(entry.relativePath);
+        return;
+    }
+    onPickFile(entry.relativePath);
+}
+
 export function ComposerAtMenu({
     projectName,
     projectDirectoryPath,
@@ -167,12 +175,14 @@ export function ComposerAtMenu({
                                 role="option"
                                 aria-selected={active}
                                 className={`at-menu-item${active ? " active" : ""}`}
-                                onMouseDown={(e) => e.preventDefault()}
+                                onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    onGoParent();
+                                }}
                                 onMouseEnter={() => {
                                     onHoverIndex(index);
                                     setHoveredEntry(null);
                                 }}
-                                onClick={() => onGoParent()}
                             >
                                 <FileKindIcon name=".." kind="dir" />
                                 <div className="at-menu-item-content">
@@ -195,17 +205,13 @@ export function ComposerAtMenu({
                             role="option"
                             aria-selected={active}
                             className={`at-menu-item${active ? " active" : ""}`}
-                            onMouseDown={(e) => e.preventDefault()}
+                            onMouseDown={(e) => {
+                                e.preventDefault();
+                                activateAtMenuEntry(entry, onEnterDirectory, onPickFile);
+                            }}
                             onMouseEnter={() => {
                                 onHoverIndex(index);
                                 setHoveredEntry(entry);
-                            }}
-                            onClick={() => {
-                                if (entry.kind === "dir") {
-                                    onEnterDirectory(entry.relativePath);
-                                } else {
-                                    onPickFile(entry.relativePath);
-                                }
                             }}
                         >
                             <FileKindIcon name={entry.name} kind={entry.kind} />

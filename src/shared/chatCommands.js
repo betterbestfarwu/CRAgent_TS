@@ -43,6 +43,22 @@ export function getCommandSlashNames(command) {
   return [command.name, ...(command.aliases || [])];
 }
 
+/**
+ * Active `/` command at end of composer text.
+ * @param {string} text
+ * @returns {{ query: string, slashStart: number, slashEnd: number } | null}
+ */
+export function parseActiveSlashCommand(text) {
+  const value = String(text ?? "");
+  const match = value.match(/\/([^\s]*)$/);
+  if (!match) return null;
+  return {
+    query: match[1],
+    slashStart: value.length - match[0].length,
+    slashEnd: value.length,
+  };
+}
+
 export function matchChatCommand(input) {
   const trimmed = input.trim();
   if (!trimmed) {

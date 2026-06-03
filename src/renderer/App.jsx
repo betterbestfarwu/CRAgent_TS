@@ -24,6 +24,7 @@ import {
 import { ComposerAtMenu } from "./ComposerAtMenu.jsx";
 import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
 import {
+  appendSpaceAfterInsertAt,
   atMentionFileName,
   buildAtNavItems,
   buildInputWithAtMentions,
@@ -40,6 +41,7 @@ import { ImageViewer } from "./ImageViewer.jsx";
 import { TitleBar } from "./TitleBar.jsx";
 import { displayTitle } from "./sidebarUtils.js";
 import { isDefaultSessionTitle, titleFromFirstUserMessage } from "@shared/sessionTitle";
+import { parseActiveSlashCommand } from "@shared/chatCommands.js";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
 import { estimateSessionContextBreakdown } from "@shared/tokenEstimator";
@@ -128,6 +130,7 @@ export function App() {
   const sessionErrorTimerRef = useRef(null);
   const composerInputRowRef = useRef(null);
   const textareaRef = useRef(null);
+  const composerFocusAtEndRef = useRef(false);
   const busyBySessionRef = useRef(new Map());
   const newChatInFlightRef = useRef(false);
   const sidebarWidthRef = useRef(sidebarWidth);
@@ -326,6 +329,34 @@ export function App() {
       setPendingAtMentions(nextMentions);
     }
   }
+
+  function focusPrimaryComposerEnd() {
+    const el = textareaRef.current;
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    const pos = el.value.length;
+    el.setSelectionRange(pos, pos);
+    return true;
+  }
+
+  function requestComposerFocusAtEnd() {
+    composerFocusAtEndRef.current = true;
+  }
+
+  useLayoutEffect(() => {
+    if (!composerFocusAtEndRef.current) return;
+    if (focusPrimaryComposerEnd()) {
+      composerFocusAtEndRef.current = false;
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      if (!composerFocusAtEndRef.current) return;
+      if (focusPrimaryComposerEnd()) {
+        composerFocusAtEndRef.current = false;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [input, pendingAtMentions]);
 
   useLayoutEffect(() => {
     resizeComposer();
@@ -682,10 +713,8 @@ export function App() {
     };
   }, [contextUsage, contextDetail]);
 
-  const slashQuery = useMemo(() => {
-    const match = input.match(/^\/([^\s]*)$/);
-    return match ? match[1].toLowerCase() : null;
-  }, [input]);
+  const slashMention = useMemo(() => parseActiveSlashCommand(input), [input]);
+  const slashQuery = slashMention ? slashMention.query.toLowerCase() : null;
 
   const atMention = useMemo(() => parseActiveAtMention(input), [input]);
 
@@ -706,16 +735,29 @@ export function App() {
   const [atDirError, setAtDirError] = useState("");
   const [atMenuIndex, setAtMenuIndex] = useState(0);
   const [atMenuExpanded, setAtMenuExpanded] = useState(false);
+  const atMentionWasActiveRef = useRef(false);
+  const atPickContextRef = useRef(null);
 
   useEffect(() => {
     if (!atMention) {
       setAtBrowseRelativePath("");
       setAtDirEntries([]);
       setAtDirError("");
+      atMentionWasActiveRef.current = false;
       return;
     }
-    setAtBrowseRelativePath(atPathParts.relativePath);
-  }, [atMention, atPathParts.relativePath]);
+
+    const query = atMention.query;
+    const justOpened = !atMentionWasActiveRef.current;
+    atMentionWasActiveRef.current = true;
+
+    // Sync browse path from typed `@path/to/filter` only when the menu opens or the
+    // user types a slash path. Click-navigation updates browse state directly and
+    // must not be reset when the query is a plain filter with no `/`.
+    if (justOpened || query.includes("/")) {
+      setAtBrowseRelativePath(splitAtQueryPath(query).relativePath);
+    }
+  }, [atMention]);
 
   useEffect(() => {
     setAtMenuIndex(0);
@@ -823,6 +865,16 @@ export function App() {
   const showSlashMenu = page === "chat" && slashQuery !== null;
   const showAtMenu =
     page === "chat" && atMention !== null && Boolean(activeProject?.id) && !showSlashMenu;
+
+  useEffect(() => {
+    if (showAtMenu && atMention) {
+      atPickContextRef.current = { atMention, inputSnapshot: input };
+      return;
+    }
+    if (!showAtMenu) {
+      atPickContextRef.current = null;
+    }
+  }, [showAtMenu, atMention, input]);
   const sendButtonDisabled = !busy && !canSend;
 
   function replaceActiveAtMention(nextMentionBody) {
@@ -831,44 +883,47 @@ export function App() {
     const suffix = input.slice(atMention.mentionEnd);
     const body = String(nextMentionBody ?? "");
     setInput(`${prefix}@${body}${suffix}`);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      resizeComposer();
-    });
+    requestComposerFocusAtEnd();
   }
 
   function applyAtFilePick(relativePath) {
     const cleanPath = String(relativePath ?? "").trim();
     if (!cleanPath) return;
+
+    const pickContext = atPickContextRef.current;
+    const sourceInput = parseActiveAtMention(input) ? input : (pickContext?.inputSnapshot ?? input);
+    const activeAt =
+      parseActiveAtMention(sourceInput) ?? atMention ?? pickContext?.atMention ?? null;
+    if (!activeAt) return;
+
+    const mentionStart = activeAt.mentionStart;
+    let nextInput = `${sourceInput.slice(0, activeAt.mentionStart)}${sourceInput.slice(activeAt.mentionEnd)}`;
+    nextInput = appendSpaceAfterInsertAt(nextInput, mentionStart);
     const name = atMentionFileName(cleanPath);
-    setPendingAtMentions((prev) => {
-      if (prev.some((mention) => mention.relativePath === cleanPath)) {
-        return prev;
-      }
-      return [...prev, { id: crypto.randomUUID(), name, relativePath: cleanPath, insertAt: atMention?.mentionStart ?? input.length }];
-    });
-    if (atMention) {
-      const prefix = input.slice(0, atMention.mentionStart);
-      const suffix = input.slice(atMention.mentionEnd);
-      setInput(`${prefix}${suffix}`);
-    }
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      resizeComposer();
-    });
+    const nextMentions = pendingAtMentions.some((mention) => mention.relativePath === cleanPath)
+      ? pendingAtMentions
+      : [
+          ...pendingAtMentions,
+          { id: crypto.randomUUID(), name, relativePath: cleanPath, insertAt: mentionStart },
+        ];
+    updateComposerInput(nextInput, nextMentions);
+    atPickContextRef.current = null;
+    requestComposerFocusAtEnd();
   }
 
   function enterAtDirectory(relativePath) {
-    const next = relativePath ? `${relativePath}/` : "";
-    replaceActiveAtMention(next);
     setAtBrowseRelativePath(relativePath);
+    if (atMention?.query) {
+      replaceActiveAtMention("");
+    }
   }
 
   function goAtParentDirectory() {
     const parent = parentRelativePath(atBrowseRelativePath);
-    const next = parent ? `${parent}/` : "";
-    replaceActiveAtMention(next);
     setAtBrowseRelativePath(parent);
+    if (atMention?.query) {
+      replaceActiveAtMention("");
+    }
   }
 
   function activateAtMenuItem(item) {
@@ -886,12 +941,12 @@ export function App() {
   }
 
   function applySlashPick(name) {
-    const next = `/${name} `;
+    const replacement = `/${name} `;
+    const next = slashMention
+      ? `${input.slice(0, slashMention.slashStart)}${replacement}${input.slice(slashMention.slashEnd)}`
+      : replacement;
     setInput(next);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      resizeComposer();
-    });
+    requestComposerFocusAtEnd();
   }
 
   function activateSlashMenuItem(item) {
@@ -1675,7 +1730,10 @@ export function App() {
                   }}
                   onCollapse={() => textareaRef.current?.focus()}
                 />
-                <div className="composer-input-row" ref={composerInputRowRef}>
+                <div
+                  className={`composer-input-row${pendingAtMentions.length ? " has-at-mentions" : ""}`}
+                  ref={composerInputRowRef}
+                >
                   <ComposerSegmentedInput
                     input={input}
                     onInputChange={updateComposerInput}
@@ -1725,7 +1783,9 @@ export function App() {
                       }
                       if (e.key === "Escape") {
                         e.preventDefault();
-                        setInput("");
+                        if (slashMention) {
+                          setInput(input.slice(0, slashMention.slashStart) + input.slice(slashMention.slashEnd));
+                        }
                         return;
                       }
                       if (e.key === "Tab" || (e.key === "Enter" && !e.altKey && !e.shiftKey)) {

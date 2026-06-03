@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+    appendSpaceAfterInsertAt,
     buildAtNavItems,
     buildComposerSegments,
     buildPathTreeSegments,
@@ -36,6 +37,17 @@ describe("splitAtQueryPath", () => {
             relativePath: "src/renderer",
             filter: "App",
         });
+    });
+});
+
+describe("appendSpaceAfterInsertAt", () => {
+    it("adds a space after the mention position", () => {
+        assert.equal(appendSpaceAfterInsertAt("", 0), " ");
+        assert.equal(appendSpaceAfterInsertAt("hello ", 6), "hello  ");
+    });
+
+    it("does not duplicate an existing space", () => {
+        assert.equal(appendSpaceAfterInsertAt(" ", 0), " ");
     });
 });
 

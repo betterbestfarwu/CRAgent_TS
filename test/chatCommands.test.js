@@ -4,8 +4,39 @@ import {
     buildComputerUsePrompt,
     filterSlashCommands,
     matchChatCommand,
+    parseActiveSlashCommand,
     parseComputerUseInvocation,
 } from "../src/shared/chatCommands.js";
+
+describe("parseActiveSlashCommand", () => {
+    it("detects slash at start of input", () => {
+        assert.deepEqual(parseActiveSlashCommand("/help"), {
+            query: "help",
+            slashStart: 0,
+            slashEnd: 5,
+        });
+    });
+
+    it("detects trailing slash after other text", () => {
+        assert.deepEqual(parseActiveSlashCommand("hello /he"), {
+            query: "he",
+            slashStart: 6,
+            slashEnd: 9,
+        });
+    });
+
+    it("detects slash after a space", () => {
+        assert.deepEqual(parseActiveSlashCommand(" /"), {
+            query: "",
+            slashStart: 1,
+            slashEnd: 2,
+        });
+    });
+
+    it("returns null when slash is not active at end", () => {
+        assert.equal(parseActiveSlashCommand("/help more"), null);
+    });
+});
 
 describe("chatCommands computer use", () => {
     it("lists computer use in slash menu filter", () => {
