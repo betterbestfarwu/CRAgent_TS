@@ -573,6 +573,21 @@ body.app-sidebar-resizing {
   min-width: 0;
 }
 
+.project-node-content {
+  margin-top: 0.5px;
+}
+
+.project-node-content .session-row {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.project-node-content .sidebar-see-more {
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+}
+
 .project-node-surface {
   display: flex;
   align-items: center;
@@ -627,8 +642,7 @@ body.app-sidebar-resizing {
 }
 
 .session-node-content,
-.project-node-list,
-.project-node-content {
+.project-node-list {
   padding-left: var(--sidebar-tree-indent, 10px);
 }
 
@@ -683,8 +697,8 @@ body.app-sidebar-resizing {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   color: var(--sidebar-muted);
 }
 
