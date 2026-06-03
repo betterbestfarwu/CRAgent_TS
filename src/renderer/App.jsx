@@ -95,6 +95,7 @@ function sessionMessagesEqual(left, right) {
 export function App() {
   const [projects, setProjects] = useState([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState([]);
+  const [focusedProjectId, setFocusedProjectId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [currentSession, setCurrentSession] = useState(null);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -252,6 +253,7 @@ export function App() {
         messageLimit: DEFAULT_UI_MESSAGE_PAGE,
       });
       setCurrentSession(session);
+      setFocusedProjectId(session?.meta?.projectId ?? null);
       ensureProjectExpanded(session?.meta?.projectId);
     } catch (err) {
       showSessionError(err instanceof Error ? err.message : String(err));
@@ -392,6 +394,7 @@ export function App() {
     const offSession = window.cragent.onSessionChanged((session) => {
       clearSessionError();
       ensureProjectExpanded(session?.meta?.projectId);
+      setFocusedProjectId(session?.meta?.projectId ?? null);
       setCurrentSession((prev) => {
         if (
           prev?.meta.id === session.meta.id &&
@@ -1084,11 +1087,11 @@ export function App() {
       const resolvedProjectId =
         projectId !== undefined
           ? projectId || null
-          : expandedProjectIds.length === 1
-            ? expandedProjectIds[0]
-            : null;
+          : focusedProjectId
+            ?? (expandedProjectIds.length === 1 ? expandedProjectIds[0] : null);
       const next = await window.cragent.newSession({ projectId: resolvedProjectId });
       setCurrentSession(next);
+      setFocusedProjectId(next?.meta?.projectId ?? null);
       ensureProjectExpanded(next?.meta?.projectId);
       setSessions((prev) => {
         const has = prev.some((s) => s.id === next.meta.id);
@@ -1103,7 +1106,11 @@ export function App() {
   }
 
   function handleSelectProject(projectId) {
-    if (projectId === null) return;
+    if (projectId === null) {
+      setFocusedProjectId(null);
+      return;
+    }
+    setFocusedProjectId(projectId);
     toggleProjectExpanded(projectId);
   }
 
@@ -1114,6 +1121,7 @@ export function App() {
     });
     startTransition(() => {
       setCurrentSession(session);
+      setFocusedProjectId(session?.meta?.projectId ?? null);
       ensureProjectExpanded(session?.meta?.projectId);
       setBusy(busyBySessionRef.current.get(sessionId) ?? false);
       setPage("chat");
@@ -1148,6 +1156,7 @@ export function App() {
     });
     if (currentSession?.meta.id === meta.id) {
       setCurrentSession(session);
+      setFocusedProjectId(session?.meta?.projectId ?? null);
       ensureProjectExpanded(session?.meta?.projectId);
       setPage("chat");
     }
