@@ -62,6 +62,10 @@ import { resolveHooksConfig } from "./hooks/hookPaths.js";
 import { attachContextCategoryPreviews } from "./contextDetailPreviews.js";
 import { mergeUiConfig } from "@shared/uiConfig.js";
 import {
+    detectClarificationNeeded,
+    formatClarificationAnswers,
+} from "@shared/userClarification.js";
+import {
     buildExitPlanModeUserMessage,
     buildPlanRejectionUserMessage,
     buildPlanModeSystemPrompt,
@@ -93,7 +97,8 @@ import { requestAskUserChoice } from "./askBridge.js";
 const HOOK_LOG_LIMIT = 80;
 
 const ASK_USER_SYSTEM_PROMPT = `<ask_user_tool>
-When you need the user to choose among options (architecture, scope, platform, etc.), call the \`ask_user\` tool with a \`questions\` array. Each question needs \`prompt\` and \`options\` (\`id\`, \`label\`). Do not guess—wait for the user's selection before continuing.
+当用户需求含糊（例如「创建打卡/小程序」但未说明平台或范围）时，必须先调用 \`ask_user\` 工具，再执行写文件或 bash。
+questions 为数组，每项含 prompt 与 options（id、label）。不要替用户做选择。
 </ask_user_tool>`;
 
 export class AgentRuntime {
@@ -193,6 +198,89 @@ export class AgentRuntime {
     codexTimelineEnabled() {
         const ui = mergeUiConfig(this.configStore.get().ui);
         return ui.codex_timeline !== false;
+    }
+
+    async runAskUserInteraction(sessionId, runId, questions) {
+        const askId = randomUUID();
+        const list = Array.isArray(questions) ? questions : [];
+        const previewLines = list.map((question, index) => {
+            const prompt = question.prompt || question.question || `问题 ${index + 1}`;
+            const optionLabels = (question.options || [])
+                .map((option) => option.label || option.id)
+                .filter(Boolean)
+                .join(" · ");
+            return optionLabels ? `${prompt}\n（${optionLabels}）` : prompt;
+        });
+        const sessionMeta = this.sessionStore.get(sessionId).meta;
+        const askNotice = withAssistantModel(
+            {
+                id: randomUUID(),
+                role: "assistant",
+                content: previewLines.length
+                    ? `需要你确认：\n\n${previewLines.join("\n\n")}`
+                    : "需要你确认选项后继续。",
+                interactive: {
+                    type: "choice",
+                    askId,
+                    questions: list,
+                    resolved: false,
+                },
+                createdAt: new Date().toISOString(),
+                runId,
+            },
+            { modelId: sessionMeta.modelId },
+        );
+        let session = this.sessionStore.appendMessage(sessionId, askNotice);
+        this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: askNotice });
+        this.emit(IPC_CHANNELS.onSessionChanged, session);
+
+        const answers = await requestAskUserChoice(this.mainWindowGetter(), {
+            id: askId,
+            questions: list,
+        });
+        session = this.sessionStore.updateMessage(sessionId, askNotice.id, {
+            interactive: { ...askNotice.interactive, resolved: true, answers },
+        });
+        this.emit(IPC_CHANNELS.onSessionChanged, session);
+        return answers;
+    }
+
+    async maybeRunStartupClarification(sessionId, runId, userText) {
+        if (this.executionMode() === "plan") {
+            return;
+        }
+        const clarification = detectClarificationNeeded(userText);
+        if (!clarification?.questions?.length) {
+            return;
+        }
+        this.setBusy(sessionId, true);
+        try {
+            const answers = await this.runAskUserInteraction(
+                sessionId,
+                runId,
+                clarification.questions,
+            );
+            const summary = formatClarificationAnswers(clarification.questions, answers);
+            const choiceMessage = {
+                id: randomUUID(),
+                role: "user",
+                content: `[用户选择]\n${summary}`,
+                createdAt: new Date().toISOString(),
+                runId,
+            };
+            let session = this.sessionStore.appendMessage(sessionId, choiceMessage);
+            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: choiceMessage });
+            this.emit(IPC_CHANNELS.onSessionChanged, session);
+        } catch (error) {
+            if (error?.name === "AbortError" || this.cancelledRuns.has(sessionId)) {
+                throw error;
+            }
+            console.warn("[CRAgent] startup clarification skipped:", error.message);
+        } finally {
+            if (!this.busyBySession.get(sessionId)) {
+                this.setBusy(sessionId, false);
+            }
+        }
     }
 
     setBusy(sessionId, busy) {
@@ -673,48 +761,13 @@ export class AgentRuntime {
         }
 
         if (toolName === "ask_user") {
-            const askId = randomUUID();
             const questions = Array.isArray(toolInput.questions) ? toolInput.questions : [];
-            const previewLines = questions.map((question, index) => {
-                const prompt = question.prompt || question.question || `问题 ${index + 1}`;
-                const optionLabels = (question.options || [])
-                    .map((option) => option.label || option.id)
-                    .filter(Boolean)
-                    .join(" · ");
-                return optionLabels ? `${prompt}\n（${optionLabels}）` : prompt;
-            });
-            const sessionMeta = this.sessionStore.get(sessionId).meta;
-            const askNotice = withAssistantModel(
-                {
-                    id: randomUUID(),
-                    role: "assistant",
-                    content: previewLines.length
-                        ? `需要你确认：\n\n${previewLines.join("\n\n")}`
-                        : "需要你确认选项后继续。",
-                    interactive: {
-                        type: "choice",
-                        askId,
-                        questions,
-                        resolved: false,
-                    },
-                    createdAt: new Date().toISOString(),
-                    runId: context.runId,
-                },
-                { modelId: sessionMeta.modelId },
-            );
-            let askSession = this.sessionStore.appendMessage(sessionId, askNotice);
-            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: askNotice });
-            this.emit(IPC_CHANNELS.onSessionChanged, askSession);
-
             try {
-                const answers = await requestAskUserChoice(this.mainWindowGetter(), {
-                    id: askId,
+                const answers = await this.runAskUserInteraction(
+                    sessionId,
+                    context.runId,
                     questions,
-                });
-                askSession = this.sessionStore.updateMessage(sessionId, askNotice.id, {
-                    interactive: { ...askNotice.interactive, resolved: true, answers },
-                });
-                this.emit(IPC_CHANNELS.onSessionChanged, askSession);
+                );
                 return normalizeToolResult(JSON.stringify({ answers }, null, 2));
             } catch (error) {
                 return normalizeToolResult(
@@ -1059,6 +1112,8 @@ export class AgentRuntime {
         }
         this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: userMessage });
         this.emit(IPC_CHANNELS.onSessionChanged, session);
+
+        await this.maybeRunStartupClarification(sessionId, runId, displayText || input);
 
         await this.runLoop(session, runId);
         await this.processQueue(sessionId);

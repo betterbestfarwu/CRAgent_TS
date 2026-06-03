@@ -902,8 +902,8 @@
       container.appendChild(footer);
     }
     function renderElapsed() {
-      var label = '正在思考';
-      if (busyState.runStartedAt) {
+      var label = pendingAsk ? '等待你的确认' : '正在思考';
+      if (!pendingAsk && busyState.runStartedAt) {
         try {
           var sec = Math.max(0, Math.floor((Date.now() - new Date(busyState.runStartedAt).getTime()) / 1000));
           label = '已处理 ' + sec + 's · 正在思考';
