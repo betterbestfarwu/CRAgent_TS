@@ -621,6 +621,35 @@
 
   var COLLAPSED_MAX_HEIGHT = 320;
 
+  function shouldExpandMessageContent(msgEl) {
+    return Boolean(msgEl && msgEl.dataset.expandContent === '1');
+  }
+
+  function setBubbleCollapseExpanded(wrap, expanded) {
+    if (!wrap) return;
+    if (expanded) {
+      wrap.classList.remove('is-collapsed');
+    } else {
+      wrap.classList.add('is-collapsed');
+    }
+    var toggle = wrap.querySelector('.bubble-collapse-toggle');
+    if (toggle) {
+      toggle.textContent = expanded ? '收起' : '展开全文';
+      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+  }
+
+  function applyDefaultExpandToLastMessage() {
+    var allMsgs = container.querySelectorAll('.msg');
+    allMsgs.forEach(function (el) {
+      delete el.dataset.expandContent;
+    });
+    var last = allMsgs[allMsgs.length - 1];
+    if (!last) return;
+    last.dataset.expandContent = '1';
+    setBubbleCollapseExpanded(last.querySelector('.bubble-collapse.is-collapsed'), true);
+  }
+
   function setupCollapsibleContent(contentEl) {
     if (!contentEl) return;
 
@@ -628,8 +657,11 @@
       if (contentEl.closest('.bubble-collapse')) return;
       if (contentEl.scrollHeight <= COLLAPSED_MAX_HEIGHT) return;
 
+      var msgEl = contentEl.closest('.msg');
+      var expandByDefault = shouldExpandMessageContent(msgEl);
+
       var wrap = document.createElement('div');
-      wrap.className = 'bubble-collapse is-collapsed';
+      wrap.className = 'bubble-collapse' + (expandByDefault ? '' : ' is-collapsed');
       var parent = contentEl.parentNode;
       parent.insertBefore(wrap, contentEl);
       wrap.appendChild(contentEl);
@@ -638,8 +670,8 @@
       var toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'bubble-collapse-toggle';
-      toggle.textContent = '展开全文';
-      toggle.setAttribute('aria-expanded', 'false');
+      toggle.textContent = expandByDefault ? '收起' : '展开全文';
+      toggle.setAttribute('aria-expanded', expandByDefault ? 'true' : 'false');
       toggle.addEventListener('click', function () {
         var collapsed = wrap.classList.toggle('is-collapsed');
         toggle.textContent = collapsed ? '展开全文' : '收起';
@@ -1252,6 +1284,7 @@
       patchInProgressRunTurn(turn, collected.runId, collected.runMessages);
     }
 
+    applyDefaultExpandToLastMessage();
     afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
   }
 
@@ -1340,6 +1373,7 @@
       container.appendChild(buildBubble(msg));
       index += 1;
     }
+    applyDefaultExpandToLastMessage();
     } finally {
       batchPostProcess = false;
       requestAnimationFrame(function () {
@@ -1357,6 +1391,7 @@
     appendMessage: function (m) {
       var anchor = captureScrollAnchor();
       container.appendChild(isContextDivider(m) ? buildContextDivider(m) : buildBubble(m));
+      applyDefaultExpandToLastMessage();
       afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
     },
     removeMessage: function (id) {
