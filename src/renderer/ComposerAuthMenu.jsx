@@ -32,7 +32,7 @@ export function ComposerAuthMenu({ authMode, onChange }) {
   }, [open]);
 
   return (
-    <div className="composer-auth-wrap" ref={wrapRef}>
+    <div className={`composer-auth-wrap composer-auth-wrap--${current.id}`} ref={wrapRef}>
       <button
         type="button"
         className={`composer-auth-btn${open ? " is-open" : ""}`}

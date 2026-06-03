@@ -1115,6 +1115,18 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
                 checked={Boolean(uiDraft.verbose_thinking)}
                 onChange={(checked) => updateUi({ verbose_thinking: checked })}
               />
+              <SettingsToggleRow
+                title="Codex 时间线"
+                description="以平铺中文步骤展示工具进度（关闭则使用折叠 Thinking 摘要）。"
+                checked={uiDraft.codex_timeline !== false}
+                onChange={(checked) => updateUi({ codex_timeline: checked })}
+              />
+              <SettingsToggleRow
+                title="LLM 流式输出"
+                description="模型回复边生成边显示（需 API 支持 SSE stream）。"
+                checked={uiDraft.llm_stream !== false}
+                onChange={(checked) => updateUi({ llm_stream: checked })}
+              />
             </SettingsGroup>
 
             <SettingsGroup label="Hooks">

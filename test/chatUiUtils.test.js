@@ -4,6 +4,9 @@ import {
     GROUPABLE_TOOLS,
     buildThinkingSummary,
     collapseAdjacentThinkingItems,
+    formatCodexStepLine,
+    buildCodexTimeline,
+    formatToolRunningLine,
     formatThinkingSummaryLine,
     getCurrentInProgressTodo,
     sortTodosForDisplay,
@@ -216,5 +219,35 @@ describe("todo display helpers", () => {
             { id: "2", content: "B", activeForm: "Building", status: "in_progress" },
         ]);
         assert.equal(current?.id, "2");
+    });
+});
+
+describe("formatToolRunningLine", () => {
+    it("shows bash command while running", () => {
+        assert.match(
+            formatToolRunningLine("bash", { command: "pwd && ls" }),
+            /正在运行 pwd/,
+        );
+    });
+});
+
+describe("formatCodexStepLine", () => {
+    it("renders Chinese labels for common tools", () => {
+        assert.match(
+            formatCodexStepLine({
+                kind: "tool-result",
+                name: "read_file",
+                content: "ok",
+            }),
+            /已探索/,
+        );
+        assert.match(
+            formatCodexStepLine({
+                kind: "tool-call",
+                name: "bash",
+                arguments: JSON.stringify({ command: "pwd" }),
+            }),
+            /正在运行/,
+        );
     });
 });

@@ -873,7 +873,10 @@ test("exitPlanMode switches to goal and queues implementation prompt", async () 
             },
         },
     });
-    const result = await runtime.exitPlanMode(session.meta.id, "# Approved plan\n\nDo it.");
+    const result = await runtime.exitPlanMode(
+        session.meta.id,
+        "# Approved plan\n\n1. 实现用户登录功能\n2. 添加 API 接口",
+    );
     assert.equal(result.config.agents.default.execution_mode, "goal");
     assert.equal(configStore.get().agents.default.execution_mode, "goal");
 });
@@ -910,4 +913,7 @@ test("getSessionContextDetail exposes system prompt preview and full-session bre
     const conversation = detail.categories.find((category) => category.id === "conversation");
     assert.ok(conversation);
     assert.match(conversation.previewText, /hello/);
+
+    const categorizedTotal = detail.categories.reduce((sum, category) => sum + category.tokens, 0);
+    assert.equal(categorizedTotal, detail.tokens);
 });

@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PLAN_REJECTION_PREFIX } from "@shared/planMessages.js";
+import {
+    PLAN_REJECTION_FEEDBACK_MARKER,
+    PLAN_REJECTION_FOOTER,
+    PLAN_REJECTION_PREFIX,
+} from "@shared/planMessages.js";
 import { classifyBashCommand } from "./bashSafety.js";
 
 export { PLAN_REJECTION_PREFIX } from "@shared/planMessages.js";
@@ -18,6 +22,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
     "load_skill",
     "tool_search",
     "write_file",
+    "ask_user",
 ]);
 
 const PLAN_MODE_BLOCKED_TOOLS = new Set([
@@ -82,6 +87,23 @@ export function writePlanFile(workspace, sessionId, content) {
     const filePath = getPlanFilePath(workspace, sessionId);
     fs.writeFileSync(filePath, String(content ?? ""), "utf-8");
     return filePath;
+}
+
+/** Heuristic for auto-entering plan mode from goal mode on delivery-style requests. */
+export function shouldStartInPlanMode(input) {
+    const text = String(input ?? "").trim();
+    if (text.length < 10 || text.startsWith("/")) {
+        return false;
+    }
+    const deliveryAction =
+        /(?:开发|实现|搭建|创建|做一个|编写|设计|落地|重构|迁移|集成|build|implement|create|develop|scaffold)/i.test(
+            text,
+        );
+    const deliveryTarget =
+        /(?:小程序|应用|网站|系统|项目|功能|模块|服务|接口|app|application|website|service|api|feature|platform)/i.test(
+            text,
+        );
+    return deliveryAction && deliveryTarget;
 }
 
 export function readPlanApprovalDraft(workspace, sessionId) {
@@ -186,10 +208,9 @@ export function buildPlanRejectionUserMessage(planContent, feedback) {
     let message = `${PLAN_REJECTION_PREFIX}${plan}`;
     const trimmedFeedback = feedback?.trim();
     if (trimmedFeedback) {
-        message += `\n\nUser feedback:\n${trimmedFeedback}`;
+        message += `${PLAN_REJECTION_FEEDBACK_MARKER}${trimmedFeedback}`;
     }
-    message +=
-        "\n\nStay in plan mode. Update the plan file to address the feedback. Do not implement code changes until the user approves execution.";
+    message += PLAN_REJECTION_FOOTER;
     return message;
 }
 

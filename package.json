@@ -4,8 +4,7 @@
   "description": "CRAgent Electron port (macOS 10.14+, Windows 10+)",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "npm run build:chat-ui && env -u ELECTRON_RUN_AS_NODE electron-vite dev",
-    "prebuild": "npm run build:chat-ui",
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
     "build": "env -u ELECTRON_RUN_AS_NODE electron-vite build",
     "build:web": "vite build --config vite.web.config.mjs",
     "start": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
@@ -13,22 +12,15 @@
     "cap:sync:ios": "npm run build:web && npx cap sync ios",
     "cap:open:ios": "npx cap open ios",
     "pack:ios": "npm run cap:sync:ios && npm run cap:open:ios",
-    "pack:ipad": "bash scripts/build-ios.sh",
     "pack": "bash scripts/build-dmg.sh",
     "pack:win": "bash scripts/build-win.sh",
-    "build:chat-ui": "node scripts/build-chat-ui-utils.mjs",
-    "validate:imports": "node scripts/validate-imports.mjs",
-    "pretest": "npm run build:chat-ui && npm run validate:imports",
-    "test": "node --import ./test/register-test.mjs --test test/*.test.js",
-    "test:hooks": "node --import ./test/register-test.mjs scripts/test-hooks.mjs --unit",
-    "test:hooks:live": "node --import ./test/register-test.mjs scripts/test-hooks.mjs"
+    "test": "node --test test/*.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@capacitor/core": "^8.3.4",
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "uuid": "^14.0.0",
@@ -45,9 +37,7 @@
     "cross-env": "^10.1.0",
     "electron": "^26.6.10",
     "electron-builder": "^26.8.1",
-    "electron-vite": "^4.0.0",
-    "highlight.js": "^11.11.1",
-    "mermaid": "^10.9.3",
+    "electron-vite": "^6.0.0-beta.1",
     "typescript": "^6.0.3",
     "vite": "^8.0.14",
     "vite-plugin-electron": "^0.29.1",
@@ -72,11 +62,7 @@
         "dmg"
       ],
       "minimumSystemVersion": "10.14.0",
-      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
-      "identity": "Sand Studio (S7VFHSY63S)",
-      "hardenedRuntime": true,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "dmg": {
       "title": "${productName} ${version}",

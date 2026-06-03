@@ -18,10 +18,39 @@
   var ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
   var ICON_EXPAND = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
 
+  var ICON_CHEVRON_UP = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>';
+
   var todoRunsById = {};
   var chatUi = window.CRAgentChatUtils || {};
   var verboseThinking = false;
+  var codexTimeline = true;
+  var busyState = { busy: false, runStartedAt: null };
+  var pendingAsk = null;
+  var activeTool = null;
+  var runStatusTimer = null;
   var planContext = { active: false };
+  var planPreviewTarget = { messageId: null, runId: null };
+  var PLAN_PREVIEW_MAX_HEIGHT = 280;
+
+  function planPreviewMessage(msg) {
+    return {
+      plan_file_path: (msg && msg.plan_file_path) || planContext.displayPath || '',
+      plan_session_id: (msg && msg.plan_session_id) || planContext.sessionId || '',
+    };
+  }
+
+  function hasPlanPreviewContent() {
+    return Boolean(planContext.active && planContext.content && String(planContext.content).trim());
+  }
+
+  function shouldShowPlanPreview(msg, runId) {
+    if (!hasPlanPreviewContent()) return false;
+    if (msg && msg.plan_file_path) {
+      if (planPreviewTarget.messageId && msg.id === planPreviewTarget.messageId) return true;
+    }
+    if (runId && planPreviewTarget.runId && runId === planPreviewTarget.runId) return true;
+    return false;
+  }
 
   function renderPlanFileBannerElement(msg) {
     if (!msg || !msg.plan_file_path) {
@@ -39,11 +68,158 @@
     return wrap;
   }
 
-  function prependPlanBanner(bubble, msg) {
+  function setupPlanPreviewTruncation(card) {
+    if (!card || card.classList.contains('is-card-collapsed')) return;
+    var bodyWrap = card.querySelector('.plan-preview-body-wrap');
+    var body = card.querySelector('.plan-preview-body');
+    var expandBtn = card.querySelector('.plan-preview-expand-btn');
+    if (!bodyWrap || !body || !expandBtn) return;
+
+    bodyWrap.classList.remove('is-truncated');
+    expandBtn.hidden = true;
+    if (body.scrollHeight > PLAN_PREVIEW_MAX_HEIGHT) {
+      bodyWrap.classList.add('is-truncated');
+      expandBtn.hidden = false;
+    }
+  }
+
+  function buildPlanPreviewCard(msg, content) {
+    var planMsg = planPreviewMessage(msg);
+    var wrap = document.createElement('div');
+    wrap.className = 'plan-preview-card';
+    wrap.dataset.planSession = planMsg.plan_session_id || '';
+
+    var header = document.createElement('div');
+    header.className = 'plan-preview-header';
+    header.innerHTML =
+      '<span class="plan-preview-title">编写计划</span>' +
+      '<div class="plan-preview-header-actions">' +
+        (planMsg.plan_file_path
+          ? '<button type="button" class="plan-preview-file-link" data-action="open-plan" data-session-id="' +
+            escapeAttr(planMsg.plan_session_id || '') +
+            '" title="在编辑器中打开计划文件">' +
+            escapeText(planMsg.plan_file_path) +
+            '</button>'
+          : '') +
+        '<button type="button" class="plan-preview-collapse-btn" aria-expanded="true" aria-label="收起计划">' +
+          ICON_CHEVRON_UP +
+        '</button>' +
+      '</div>';
+
+    var bodyWrap = document.createElement('div');
+    bodyWrap.className = 'plan-preview-body-wrap';
+
+    var body = document.createElement('div');
+    body.className = 'plan-preview-body';
+    body.innerHTML = window.MD.render(content || '');
+    bodyWrap.appendChild(body);
+
+    var expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'plan-preview-expand-btn';
+    expandBtn.textContent = '展开计划';
+    expandBtn.hidden = true;
+    bodyWrap.appendChild(expandBtn);
+
+    wrap.appendChild(header);
+    wrap.appendChild(bodyWrap);
+
+    header.querySelector('.plan-preview-collapse-btn').addEventListener('click', function () {
+      var collapsed = wrap.classList.toggle('is-card-collapsed');
+      var btn = header.querySelector('.plan-preview-collapse-btn');
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.setAttribute('aria-label', collapsed ? '展开计划卡片' : '收起计划');
+    });
+
+    expandBtn.addEventListener('click', function () {
+      bodyWrap.classList.remove('is-truncated');
+      expandBtn.hidden = true;
+    });
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        setupPlanPreviewTruncation(wrap);
+      });
+    });
+
+    return wrap;
+  }
+
+  function prependPlanSection(bubble, msg, options) {
+    options = options || {};
+    var showPreview = options.showPreview && hasPlanPreviewContent();
+    if (showPreview) {
+      bubble.insertBefore(buildPlanPreviewCard(msg, planContext.content), bubble.firstChild);
+      return;
+    }
     var banner = renderPlanFileBannerElement(msg);
     if (banner) {
       bubble.insertBefore(banner, bubble.firstChild);
     }
+  }
+
+  function prependPlanBanner(bubble, msg) {
+    prependPlanSection(bubble, msg, { showPreview: false });
+  }
+
+  function findPlanPreviewTarget(messages) {
+    var lastUserRunIndex = findLastActiveRunUserIndex(messages);
+    if (lastUserRunIndex >= 0) {
+      var collected = collectRunMessagesForUser(messages, lastUserRunIndex);
+      var split = splitRunMessages(collected.runMessages);
+      return {
+        messageId: split.finalReply && split.finalReply.id ? split.finalReply.id : null,
+        runId: collected.runId || null,
+      };
+    }
+    for (var i = messages.length - 1; i >= 0; i -= 1) {
+      var msg = messages[i];
+      if (
+        msg.role === 'assistant' &&
+        msg.plan_file_path &&
+        String(msg.content || '').trim()
+      ) {
+        return { messageId: msg.id, runId: msg.run_id || null };
+      }
+    }
+    return { messageId: null, runId: null };
+  }
+
+  function refreshPlanPreviewCards() {
+    if (!hasPlanPreviewContent()) {
+      container.querySelectorAll('.plan-preview-card').forEach(function (card) {
+        card.remove();
+      });
+      return;
+    }
+
+    var cards = container.querySelectorAll('.plan-preview-card');
+    if (cards.length) {
+      cards.forEach(function (card) {
+        var body = card.querySelector('.plan-preview-body');
+        if (body) {
+          body.innerHTML = window.MD.render(planContext.content || '');
+          postProcessRenderedContent(body);
+        }
+        setupPlanPreviewTruncation(card);
+      });
+      return;
+    }
+
+    var turns = container.querySelectorAll('.assistant-turn');
+    if (!turns.length) return;
+    var turn = turns[turns.length - 1];
+    var bubble = turn.querySelector('.bubble');
+    if (!bubble) return;
+
+    var banner = bubble.querySelector('.plan-file-banner');
+    if (banner) banner.remove();
+
+    bubble.insertBefore(
+      buildPlanPreviewCard(planPreviewMessage(null), planContext.content),
+      bubble.firstChild,
+    );
+    postProcessRenderedContent(bubble);
   }
   var hljsLoadPromise = null;
   var katexLoadPromise = null;
@@ -450,6 +626,35 @@
 
   var COLLAPSED_MAX_HEIGHT = 320;
 
+  function shouldExpandMessageContent(msgEl) {
+    return Boolean(msgEl && msgEl.dataset.expandContent === '1');
+  }
+
+  function setBubbleCollapseExpanded(wrap, expanded) {
+    if (!wrap) return;
+    if (expanded) {
+      wrap.classList.remove('is-collapsed');
+    } else {
+      wrap.classList.add('is-collapsed');
+    }
+    var toggle = wrap.querySelector('.bubble-collapse-toggle');
+    if (toggle) {
+      toggle.textContent = expanded ? '收起' : '展开全文';
+      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+  }
+
+  function applyDefaultExpandToLastMessage() {
+    var allMsgs = container.querySelectorAll('.msg');
+    allMsgs.forEach(function (el) {
+      delete el.dataset.expandContent;
+    });
+    var last = allMsgs[allMsgs.length - 1];
+    if (!last) return;
+    last.dataset.expandContent = '1';
+    setBubbleCollapseExpanded(last.querySelector('.bubble-collapse.is-collapsed'), true);
+  }
+
   function setupCollapsibleContent(contentEl) {
     if (!contentEl) return;
 
@@ -457,8 +662,11 @@
       if (contentEl.closest('.bubble-collapse')) return;
       if (contentEl.scrollHeight <= COLLAPSED_MAX_HEIGHT) return;
 
+      var msgEl = contentEl.closest('.msg');
+      var expandByDefault = shouldExpandMessageContent(msgEl);
+
       var wrap = document.createElement('div');
-      wrap.className = 'bubble-collapse is-collapsed';
+      wrap.className = 'bubble-collapse' + (expandByDefault ? '' : ' is-collapsed');
       var parent = contentEl.parentNode;
       parent.insertBefore(wrap, contentEl);
       wrap.appendChild(contentEl);
@@ -467,8 +675,8 @@
       var toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'bubble-collapse-toggle';
-      toggle.textContent = '展开全文';
-      toggle.setAttribute('aria-expanded', 'false');
+      toggle.textContent = expandByDefault ? '收起' : '展开全文';
+      toggle.setAttribute('aria-expanded', expandByDefault ? 'true' : 'false');
       toggle.addEventListener('click', function () {
         var collapsed = wrap.classList.toggle('is-collapsed');
         toggle.textContent = collapsed ? '展开全文' : '收起';
@@ -494,6 +702,9 @@
   }
 
   function buildRunThinking(messages) {
+    if (codexTimeline && chatUi.buildCodexTimeline) {
+      return chatUi.buildCodexTimeline(messages, { verbose: verboseThinking });
+    }
     if (chatUi.buildThinkingSummary) {
       return chatUi.buildThinkingSummary(messages, { verbose: verboseThinking });
     }
@@ -562,7 +773,7 @@
       if (
         candidate.role === 'assistant' &&
         !isProcessMessage(candidate) &&
-        hasVisibleAssistantContent(candidate)
+(hasVisibleAssistantContent(candidate) || candidate.streaming)
       ) {
         finalIndex = j;
         break;
@@ -653,9 +864,164 @@
     }
   }
 
+
+  function renderCodexTimelineHtml(thinking) {
+    var lines = thinking && thinking.lines ? thinking.lines : [];
+    if (!lines.length && thinking && thinking.items && thinking.items.length) {
+      lines = thinking.items.map(function (item) {
+        return chatUi.formatCodexStepLine ? chatUi.formatCodexStepLine(item) : '';
+      }).filter(Boolean);
+    }
+    if (!lines.length) {
+      return '';
+    }
+    return (
+      '<div class="codex-timeline">' +
+      lines.map(function (line) {
+        return '<div class="codex-step">' + escapeText(line) + '</div>';
+      }).join('') +
+      '</div>'
+    );
+  }
+
+  function renderRunStatusFooter() {
+    var existing = document.getElementById('run-status-footer');
+    if (!busyState.busy) {
+      if (existing) existing.remove();
+      if (runStatusTimer) {
+        clearInterval(runStatusTimer);
+        runStatusTimer = null;
+      }
+      return;
+    }
+    var footer = existing;
+    if (!footer) {
+      footer = document.createElement('div');
+      footer.id = 'run-status-footer';
+      footer.className = 'run-status-footer';
+      container.appendChild(footer);
+    }
+    function renderElapsed() {
+      var label = pendingAsk ? '等待你的确认' : '正在思考';
+      if (!pendingAsk && busyState.runStartedAt) {
+        try {
+          var sec = Math.max(0, Math.floor((Date.now() - new Date(busyState.runStartedAt).getTime()) / 1000));
+          label = '已处理 ' + sec + 's · 正在思考';
+        } catch (_) {}
+      }
+      var toolLine = '';
+      if (activeTool && activeTool.toolName) {
+        var running =
+          chatUi.formatToolRunningLine &&
+          chatUi.formatToolRunningLine(activeTool.toolName, activeTool.toolInput || {});
+        if (running) {
+          toolLine = '<div class="run-status-tool">' + escapeText(running) + '</div>';
+        }
+      }
+      var askHtml = '';
+      if (pendingAsk && pendingAsk.questions && pendingAsk.questions.length) {
+        askHtml =
+          '<div class="run-status-hint">请在对话区点击选项确认</div>' +
+          renderAskChoiceCard(pendingAsk);
+      }
+      footer.innerHTML =
+        '<div class="run-status-line">' + escapeText(label) + '</div>' +
+        toolLine +
+        askHtml;
+    }
+    renderElapsed();
+    if (!runStatusTimer) {
+      runStatusTimer = setInterval(renderElapsed, 1000);
+    }
+  }
+
+  function renderAskChoiceCard(ask, options) {
+    var opts = options || {};
+    var resolved = Boolean(opts.resolved);
+    var questions = ask.questions || [];
+    return questions
+      .map(function (q, qi) {
+        var prompt = escapeText(q.prompt || q.question || '请选择');
+        var options = (q.options || []).map(function (opt, oi) {
+          var id = opt.id || String(oi + 1);
+          var label = escapeText(opt.label || opt.id || '');
+          return (
+            '<button type="button" class="choice-option"' +
+            (resolved ? ' disabled' : '') +
+            ' data-ask-id="' +
+            escapeAttr(ask.id || ask.askId || '') +
+            '" data-question-index="' +
+            qi +
+            '" data-option-id="' +
+            escapeAttr(id) +
+            '">' +
+            label +
+            '</button>'
+          );
+        }).join('');
+        return (
+          '<div class="choice-card" data-question-index="' +
+          qi +
+          '"><div class="choice-prompt">' +
+          prompt +
+          '</div><div class="choice-options">' +
+          options +
+          '</div></div>'
+        );
+      })
+      .join('');
+  }
+
+  function appendInteractiveChoice(bubble, msg) {
+    var interactive = msg && msg.interactive;
+    if (!interactive || interactive.type !== 'choice') return;
+    var card = document.createElement('div');
+    card.className = 'choice-card-host';
+    card.innerHTML = renderAskChoiceCard(
+      { id: interactive.askId, questions: interactive.questions },
+      { resolved: interactive.resolved },
+    );
+    bubble.appendChild(card);
+    if (!interactive.resolved) {
+      requestAnimationFrame(function () {
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+  }
+
+  function patchStreamingMessage(message) {
+    if (!message || !message.id) return;
+    var el =
+      container.querySelector('.msg[data-id="' + message.id + '"]') ||
+      container.querySelector('.assistant-turn[data-id="' + message.id + '"]');
+    if (!el) {
+      return false;
+    }
+    var body = el.querySelector('.assistant-turn-content') || el.querySelector('.bubble-collapse-body');
+    if (!body) {
+      var bubble = el.querySelector('.bubble');
+      if (!bubble) return false;
+      body = document.createElement('div');
+      body.className = message.streaming ? 'assistant-stream-content' : 'assistant-turn-content';
+      bubble.appendChild(body);
+    }
+    body.className = message.streaming ? 'assistant-stream-content' : 'assistant-turn-content';
+    if (message.streaming) {
+      body.textContent = message.content || '';
+    } else {
+      body.innerHTML = window.MD.render(message.content || '');
+      postProcessRenderedContent(body);
+      setupCollapsibleContent(body);
+    }
+    return true;
+  }
+
   function renderThinkingBlockHtml(thinking) {
     var items = thinking && thinking.items ? thinking.items : thinking;
     if (!items || !items.length) return '';
+    if (codexTimeline) {
+      return '<div class="thinking-block">' + renderCodexTimelineHtml(thinking) + '</div>';
+    }
     var summary =
       (thinking && thinking.summaryLine) ||
       ('Thinking · ' + items.length + ' step' + (items.length === 1 ? '' : 's'));
@@ -703,13 +1069,22 @@
     bubble.className = 'bubble';
     bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking);
     if (contentMsg) {
-      prependPlanBanner(bubble, contentMsg);
+      prependPlanSection(bubble, contentMsg, {
+        showPreview: shouldShowPlanPreview(contentMsg, runId),
+      });
       var contentWrap = document.createElement('div');
-      contentWrap.className = 'assistant-turn-content';
-      contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
+      contentWrap.className = contentMsg.streaming ? 'assistant-stream-content' : 'assistant-turn-content';
+      if (contentMsg.streaming) {
+        contentWrap.textContent = contentMsg.content || '';
+      } else {
+        contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
+      }
       bubble.appendChild(contentWrap);
+      appendInteractiveChoice(bubble, contentMsg);
       postProcessRenderedContent(bubble);
       setupCollapsibleContent(contentWrap);
+    } else if (shouldShowPlanPreview(null, runId)) {
+      prependPlanSection(bubble, null, { showPreview: true });
     }
     wrap.appendChild(bubble);
 
@@ -799,9 +1174,22 @@
     });
   }
 
+  function appendSystemHintBlock(bubble, systemHint) {
+    var hintText = String(systemHint || '').trim();
+    if (!hintText) return;
+    var bodyText = hintText.replace(/^系统提示[：:]\s*/, '');
+    var hint = document.createElement('div');
+    hint.className = 'msg-system-hint';
+    hint.innerHTML =
+      '<div class="msg-system-hint-label">系统提示</div>' +
+      '<div class="msg-system-hint-body">' + escapeText(bodyText) + '</div>';
+    bubble.appendChild(hint);
+  }
+
   function appendUserBubbleContent(bubble, msg) {
     var mentions = msg.at_mentions || [];
     var userText = String(msg.user_text || msg.content || '').trim();
+    var systemHint = String(msg.system_hint || '').trim();
 
     if (mentions.length) {
       var body = document.createElement('div');
@@ -818,11 +1206,12 @@
         var chip = document.createElement('span');
         chip.className = 'msg-at-chip';
         chip.title = mention.relative_path || mention.name || '';
-        chip.textContent = '@' + (mention.name || '');
+        chip.textContent = String(mention.name || '').replace(/^@+/, '');
         chips.appendChild(chip);
       });
       body.appendChild(chips);
       bubble.appendChild(body);
+      appendSystemHintBlock(bubble, systemHint);
       return;
     }
 
@@ -833,6 +1222,7 @@
       bubble.appendChild(plain);
       postProcessRenderedContent(plain);
     }
+    appendSystemHintBlock(bubble, systemHint);
   }
 
   function buildBubble(msg) {
@@ -845,19 +1235,39 @@
 
     if (msg.role !== 'tool') {
       if (msg.role === 'assistant') {
-        prependPlanBanner(bubble, msg);
+        prependPlanSection(bubble, msg, {
+          showPreview: shouldShowPlanPreview(msg, msg.run_id || ''),
+        });
         var body = document.createElement('div');
         body.className = 'bubble-collapse-body';
         body.innerHTML = window.MD.render(msg.content || '');
         bubble.appendChild(body);
+        appendInteractiveChoice(bubble, msg);
         postProcessRenderedContent(body);
         setupCollapsibleContent(body);
       } else if (msg.role === 'user' && msg.plan_rejection) {
         var rejectionBody = document.createElement('div');
         rejectionBody.className = 'plan-rejection-body';
-        rejectionBody.innerHTML =
-          '<div class="plan-rejection-title">计划未批准 · 继续规划</div>' +
-          '<pre class="plan-rejection-plan">' + escapeText(msg.content || '') + '</pre>';
+        var rejectionTitle = document.createElement('div');
+        rejectionTitle.className = 'plan-rejection-title';
+        rejectionTitle.textContent = '计划未批准 · 继续规划';
+        rejectionBody.appendChild(rejectionTitle);
+        var planEl = document.createElement('div');
+        planEl.className = 'plan-rejection-plan';
+        planEl.innerHTML = window.MD.render(msg.plan_rejection_plan || msg.content || '');
+        rejectionBody.appendChild(planEl);
+        postProcessRenderedContent(planEl);
+        if (msg.plan_rejection_feedback) {
+          var feedbackLabel = document.createElement('div');
+          feedbackLabel.className = 'plan-rejection-feedback-label';
+          feedbackLabel.textContent = '你的反馈';
+          rejectionBody.appendChild(feedbackLabel);
+          var feedbackEl = document.createElement('div');
+          feedbackEl.className = 'plan-rejection-feedback';
+          feedbackEl.innerHTML = window.MD.render(msg.plan_rejection_feedback);
+          rejectionBody.appendChild(feedbackEl);
+          postProcessRenderedContent(feedbackEl);
+        }
         bubble.appendChild(rejectionBody);
       } else if (msg.role === 'user') {
         appendUserBubbleContent(bubble, msg);
@@ -956,6 +1366,13 @@
 
     bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking);
 
+    if (shouldShowPlanPreview(null, runId)) {
+      bubble.insertBefore(
+        buildPlanPreviewCard(planPreviewMessage(null), planContext.content),
+        bubble.firstChild,
+      );
+    }
+
     thinkingGroup = bubble.querySelector('.thinking-group');
     if (thinkingGroup && wasOpen) {
       thinkingGroup.open = true;
@@ -1000,6 +1417,7 @@
 
   function patchActiveRun(payload) {
     var messages = payload && payload.messages ? payload.messages : [];
+    planPreviewTarget = findPlanPreviewTarget(messages);
     todoRunsById = (payload && payload.todoRuns) || {};
     var anchor = captureScrollAnchor();
     var userIndex = findLastActiveRunUserIndex(messages);
@@ -1035,6 +1453,7 @@
       patchInProgressRunTurn(turn, collected.runId, collected.runMessages);
     }
 
+    applyDefaultExpandToLastMessage();
     afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
   }
 
@@ -1044,6 +1463,7 @@
     container.innerHTML = '';
     var messages = Array.isArray(payload) ? payload : (payload && payload.messages) || [];
     todoRunsById = (!Array.isArray(payload) && payload && payload.todoRuns) || {};
+    planPreviewTarget = findPlanPreviewTarget(messages);
     var index = 0;
     try {
     while (index < messages.length) {
@@ -1080,6 +1500,7 @@
           }
           continue;
         }
+        index += 1;
         continue;
       }
       if (isProcessMessage(msg)) {
@@ -1121,6 +1542,7 @@
       container.appendChild(buildBubble(msg));
       index += 1;
     }
+    applyDefaultExpandToLastMessage();
     } finally {
       batchPostProcess = false;
       requestAnimationFrame(function () {
@@ -1138,6 +1560,7 @@
     appendMessage: function (m) {
       var anchor = captureScrollAnchor();
       container.appendChild(isContextDivider(m) ? buildContextDivider(m) : buildBubble(m));
+      applyDefaultExpandToLastMessage();
       afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
     },
     removeMessage: function (id) {
@@ -1153,12 +1576,52 @@
     },
     updateTodoRuns: updateTodoRuns,
     patchActiveRun: patchActiveRun,
-    setBusy: function () {},
+    setBusy: function (payload) {
+      if (payload && typeof payload === 'object') {
+        busyState.busy = Boolean(payload.busy);
+        busyState.runStartedAt = payload.runStartedAt || null;
+      } else {
+        busyState.busy = Boolean(payload);
+      }
+      renderRunStatusFooter();
+    },
+    setCodexTimeline: function (value) {
+      codexTimeline = value !== false;
+    },
+    setPendingAsk: function (value) {
+      pendingAsk = value && typeof value === 'object' ? value : null;
+      renderRunStatusFooter();
+      if (pendingAsk) {
+        requestAnimationFrame(function () {
+          var footer = document.getElementById('run-status-footer');
+          if (footer) {
+            footer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        });
+      }
+    },
+    setActiveTool: function (value) {
+      activeTool = value && typeof value === 'object' ? value : null;
+      renderRunStatusFooter();
+    },
+    patchMessageDelta: function (payload) {
+      var message = payload && payload.message;
+      if (!message) return;
+      if (!patchStreamingMessage(message)) {
+        patchActiveRun(payload);
+      }
+      var anchor = captureScrollAnchor();
+      afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
+    },
     setVerboseThinking: function (value) {
       verboseThinking = Boolean(value);
     },
     setPlanContext: function (value) {
+      var prevContent = planContext && planContext.content;
       planContext = value && typeof value === 'object' ? value : { active: false };
+      if (planContext.content !== prevContent) {
+        refreshPlanPreviewCards();
+      }
     },
   };
 

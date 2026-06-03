@@ -211,6 +211,26 @@ export function atMentionFileName(relativePath) {
 }
 
 /**
+ * Visible chip label (no leading @).
+ * @param {string} name
+ */
+export function atChipDisplayName(name) {
+    return String(name ?? "").replace(/^@+/, "");
+}
+
+/**
+ * Insert a single space in plain text immediately after a mention insert position.
+ * @param {string} text
+ * @param {number} insertAt
+ */
+export function appendSpaceAfterInsertAt(text, insertAt) {
+    const value = String(text ?? "");
+    const at = Math.max(0, Math.min(insertAt, value.length));
+    if (value.slice(at).startsWith(" ")) return value;
+    return `${value.slice(0, at)} ${value.slice(at)}`;
+}
+
+/**
  * @param {string} text
  * @param {AtMentionRef[]} mentions
  * @returns {string}

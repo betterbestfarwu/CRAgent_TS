@@ -20,8 +20,9 @@ import { createMcpTools } from "./mcp/mcpTools.js";
 import { mcpToolRegistryName } from "@shared/mcpConfig.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
 import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
+import { registerAskBridge } from "./askBridge.js";
 import { registerPlanApprovalBridge, requestPlanApproval } from "./planApprovalBridge.js";
-import { readPlanApprovalDraft, ensurePlansDirectory, getPlanFilePath, writePlanFile } from "./planMode.js";
+import { readPlanApprovalDraft, ensurePlansDirectory, getPlanFilePath, getPlanDisplayPath, readPlanFile, writePlanFile } from "./planMode.js";
 import { createPlanModeTools } from "./tools/planModeTools.js";
 import { createComputerUseTools } from "./tools/computerUseTools.js";
 import fs from "node:fs";
@@ -187,6 +188,9 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.addProject, (_event, directoryPath) =>
         sessionStore.addProject(directoryPath),
     );
+    ipcMain.handle(IPC_CHANNELS.removeProject, (_event, projectId) =>
+        sessionStore.removeProject(projectId),
+    );
     ipcMain.handle(IPC_CHANNELS.pickProjectDirectory, async () => {
         const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
             title: "选择项目目录",
@@ -196,6 +200,21 @@ function registerIpc() {
             return null;
         }
         return result.filePaths[0];
+    });
+    ipcMain.handle(IPC_CHANNELS.openProjectDirectory, async (_event, projectId) => {
+        const id = String(projectId || "").trim();
+        if (!id) {
+            throw new Error("缺少 projectId");
+        }
+        const project = sessionStore.listProjects().find((item) => item.id === id);
+        if (!project?.directoryPath) {
+            throw new Error("未找到项目");
+        }
+        const error = await shell.openPath(project.directoryPath);
+        if (error) {
+            throw new Error(error);
+        }
+        return { ok: true, directoryPath: project.directoryPath };
     });
     ipcMain.handle(IPC_CHANNELS.listProjectDirectory, async (_event, args = {}) => {
         const projectId = String(args.projectId || "").trim();
@@ -250,12 +269,15 @@ function registerIpc() {
         const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
         const draft = readPlanApprovalDraft(workspace, sessionId);
         const approval = await requestPlanApproval(mainWindow, draft);
-        if (!approval.approved) {
+        if (approval.dismissed || approval.cancelled) {
+            return { dismissed: true };
+        }
+        if (approval.rejected || !approval.approved) {
             const rejected = await runtime.rejectPlanMode(sessionId, {
                 planContent: approval.content ?? draft.content,
                 feedback: approval.feedback,
             });
-            return { cancelled: true, session: sessionForRenderer(rejected.session) };
+            return { rejected: true, session: sessionForRenderer(rejected.session) };
         }
         return runtime.exitPlanMode(sessionId, approval.content);
     });
@@ -272,6 +294,14 @@ function registerIpc() {
         }
         return { filePath };
     });
+    ipcMain.handle(IPC_CHANNELS.readPlanContent, (_event, sessionId) => {
+        const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
+        const { content } = readPlanFile(workspace, sessionId);
+        return {
+            content: content ?? "",
+            displayPath: getPlanDisplayPath(workspace, sessionId),
+        };
+    });
     ipcMain.handle(IPC_CHANNELS.cancelRun, (_event, sessionId) => runtime.cancelRun(sessionId));
     ipcMain.handle(IPC_CHANNELS.getHookLogs, (_event, sessionId) => runtime.getHookLogs(sessionId));
     ipcMain.handle(IPC_CHANNELS.clearHookLogs, (_event, sessionId) => {
@@ -282,6 +312,14 @@ function registerIpc() {
     );
     ipcMain.handle(IPC_CHANNELS.updateAuthMode, (_event, args) => {
         const session = sessionStore.updateAuthMode(args.sessionId, args.authMode);
+        mainWindow?.webContents.send(
+            IPC_CHANNELS.onSessionChanged,
+            sessionForRenderer(session),
+        );
+        return sessionForRenderer(session);
+    });
+    ipcMain.handle(IPC_CHANNELS.updateSessionProject, (_event, args) => {
+        const session = sessionStore.updateProject(args.sessionId, args.projectId);
         mainWindow?.webContents.send(
             IPC_CHANNELS.onSessionChanged,
             sessionForRenderer(session),
@@ -375,6 +413,7 @@ function registerIpc() {
 
 function bootstrap() {
     registerConfirmBridge();
+    registerAskBridge();
     registerPlanApprovalBridge();
     const appPaths = getAppPaths();
     configStore = new ConfigStore(appPaths.configFile);

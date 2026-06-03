@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, ipcMain } from "electron";
 import path from "node:path";
 import { IPC_CHANNELS } from "@shared/ipc";
 import { getAppPaths } from "./appPaths";
@@ -7,13 +7,9 @@ import { SessionStore } from "./sessionStore";
 import { LlmClient } from "./llmClient";
 import { ToolRegistry } from "./toolRegistry";
 import { AgentRuntime } from "./agentRuntime";
-import { sessionForRenderer } from "./rendererSession.js";
-import { resolveSessionWorkspace } from "./workspacePaths.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
-const isDev =
-    !app.isPackaged &&
-    (Boolean(devServerUrl) || process.env.NODE_ENV === "development");
+const isDev = Boolean(devServerUrl) || process.env.NODE_ENV === "development";
 const projectRoot = process.cwd();
 
 let mainWindow = null;
@@ -54,7 +50,7 @@ function createWindow() {
             preload: path.join(__dirname, "../preload/index.js"),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: false,
+            sandbox: true,
         },
     });
     if (isDev && devServerUrl) {
@@ -83,11 +79,8 @@ function buildMenu() {
                     label: "New Chat",
                     accelerator: "CmdOrCtrl+N",
                     click: () => {
-                        const session = sessionStore.openNewSession();
-                        mainWindow?.webContents.send(
-                            IPC_CHANNELS.onSessionChanged,
-                            sessionForRenderer(session),
-                        );
+                        const session = sessionStore.newSession();
+                        mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
                     },
                 },
             ],
@@ -111,64 +104,19 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.getSnapshot, () => {
         const sessions = sessionStore.listMetas();
         return {
-            projects: sessionStore.listProjects(),
             sessions,
             currentSessionId: sessions[0]?.id ?? "",
             config: configStore.get(),
         };
     });
-    ipcMain.handle(IPC_CHANNELS.listProjects, () => sessionStore.listProjects());
-    ipcMain.handle(IPC_CHANNELS.addProject, (_event, directoryPath) =>
-        sessionStore.addProject(directoryPath),
-    );
-    ipcMain.handle(IPC_CHANNELS.pickProjectDirectory, async () => {
-        const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
-            title: "选择项目目录",
-            properties: ["openDirectory", "createDirectory"],
-        });
-        if (result.canceled || !result.filePaths?.length) {
-            return null;
-        }
-        return result.filePaths[0];
-    });
-    ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId, options = {}) =>
-        sessionForRenderer(
-            sessionStore.get(sessionId, { hydrateImages: false, ...options }),
-        ),
-    );
-    ipcMain.handle(IPC_CHANNELS.newSession, (_event, args = {}) =>
-        sessionForRenderer(sessionStore.openNewSession(args)),
-    );
+    ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId) => sessionStore.get(sessionId));
+    ipcMain.handle(IPC_CHANNELS.newSession, () => sessionStore.newSession());
     ipcMain.handle(IPC_CHANNELS.sendChat, (_event, request) =>
-        runtime.sendUserMessage(
-            request.sessionId,
-            request.userInput,
-            request.images,
-            request.atMentions,
-            request.userText,
-        ),
+        runtime.sendUserMessage(request.sessionId, request.userInput),
     );
-    ipcMain.handle(IPC_CHANNELS.exitPlanMode, async (_event, sessionId) => {
-        const { readPlanApprovalDraft } = await import("./planMode.js");
-        const { requestPlanApproval } = await import("./planApprovalBridge.js");
-        const workspace = resolveSessionWorkspace(sessionStore, configStore, sessionId);
-        const draft = readPlanApprovalDraft(workspace, sessionId);
-        const approval = await requestPlanApproval(mainWindow, draft);
-        if (!approval.approved) {
-            const rejected = await runtime.rejectPlanMode(sessionId, {
-                planContent: approval.content ?? draft.content,
-                feedback: approval.feedback,
-            });
-            return { cancelled: true, session: sessionForRenderer(rejected.session) };
-        }
-        return runtime.exitPlanMode(sessionId, approval.content);
-    });
     ipcMain.handle(IPC_CHANNELS.updateModel, (_event, args) => {
         const session = sessionStore.updateModel(args.sessionId, args.providerKey, args.modelId);
-        mainWindow?.webContents.send(
-            IPC_CHANNELS.onSessionChanged,
-            sessionForRenderer(session),
-        );
+        mainWindow?.webContents.send(IPC_CHANNELS.onSessionChanged, session);
     });
     ipcMain.handle(IPC_CHANNELS.updateConfig, (_event, next) => configStore.update(next));
 }
@@ -177,7 +125,7 @@ function bootstrap() {
     const appPaths = getAppPaths();
     configStore = new ConfigStore(appPaths.configFile);
     const primary = configStore.resolvePrimaryRef();
-    sessionStore = new SessionStore(appPaths.sessionsDir, primary, appPaths.projectsFile);
+    sessionStore = new SessionStore(appPaths.sessionsDir, primary);
     const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey]);
     const toolRegistry = new ToolRegistry(appPaths.memoryFile);
     runtime = new AgentRuntime(sessionStore, configStore, llmClient, toolRegistry, () => mainWindow);

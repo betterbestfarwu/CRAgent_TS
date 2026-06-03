@@ -5,6 +5,8 @@ export const DEFAULT_UI_CONFIG = {
     verbose_thinking: false,
     /** When false, hooks.json command hooks are not executed. */
     hooks_enabled: true,
+    codex_timeline: true,
+    llm_stream: true,
 };
 
 export function mergeUiConfig(partial = {}) {

@@ -10,6 +10,7 @@ import {
     classifyBashForPlanMode,
     filterToolsForPlanMode,
     getPlanFilePath,
+    shouldStartInPlanMode,
     validatePlanModeToolCall,
     writePlanFile,
 } from "../src/main/planMode.js";
@@ -31,8 +32,10 @@ test("filterToolsForPlanMode keeps read tools and write_file", () => {
         { name: "Task" },
         { name: "mcp_foo" },
     ];
-    const names = filterToolsForPlanMode(tools).map((t) => t.name);
-    assert.deepEqual(names.sort(), ["read_file", "write_file"].sort());
+    const names = filterToolsForPlanMode(
+        [...tools, { name: "ask_user" }],
+    ).map((t) => t.name);
+    assert.deepEqual(names.sort(), ["ask_user", "read_file", "write_file"].sort());
 });
 
 test("validatePlanModeToolCall blocks writes outside plan file", () => {
@@ -67,6 +70,18 @@ test("buildExitPlanModeUserMessage includes plan body", () => {
     assert.match(msg, /已批准的计划/);
     assert.match(msg, /step 1/);
     assert.match(msg, /\/tmp\/plan\.md/);
+});
+
+test("buildExitPlanModeUserMessage matches delivery heuristics used by auto plan mode", () => {
+    const msg = buildExitPlanModeUserMessage(
+        "# Plan\n\n1. 实现用户登录功能\n2. 添加 API 接口",
+        "/tmp/plan.md",
+    );
+    assert.equal(
+        shouldStartInPlanMode(msg),
+        true,
+        "exit-plan prompt should match delivery heuristics so callers must skip auto plan mode",
+    );
 });
 
 test("writePlanFile persists markdown plan", () => {

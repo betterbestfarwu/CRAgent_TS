@@ -612,6 +612,11 @@ html, body {
   white-space: pre-wrap;
 }
 
+/* .bubble pre overrides .code-block pre padding; reserve space for copy btn */
+.bubble .code-block pre {
+  padding: 10px 36px 10px 12px;
+}
+
 /* Collapsible Thinking sections. */
 .bubble details.thinking,
 .bubble details.thinking-group {
@@ -744,6 +749,153 @@ html, body {
   color: #1e3a8a;
 }
 
+.plan-preview-card {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+}
+
+.plan-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-preview-title {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.plan-preview-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plan-preview-file-link {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--link);
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: right;
+  word-break: break-all;
+  min-width: 0;
+}
+
+.plan-preview-file-link:hover {
+  opacity: 0.85;
+}
+
+.plan-preview-collapse-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 2px;
+  margin: 0;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
+.plan-preview-collapse-btn:hover {
+  color: var(--bubble-fg);
+}
+
+.plan-preview-card.is-card-collapsed .plan-preview-body-wrap {
+  display: none;
+}
+
+.plan-preview-card.is-card-collapsed .plan-preview-collapse-btn svg {
+  transform: rotate(180deg);
+}
+
+.plan-preview-body-wrap {
+  position: relative;
+  padding: 0 12px 12px;
+}
+
+.plan-preview-body {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.plan-preview-body-wrap.is-truncated .plan-preview-body {
+  max-height: 280px;
+  overflow: hidden;
+}
+
+.plan-preview-body-wrap.is-truncated::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  height: 56px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.04));
+}
+
+@media (prefers-color-scheme: dark) {
+  .plan-preview-card {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .plan-preview-body-wrap.is-truncated::after {
+    background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.05));
+  }
+}
+
+.plan-preview-expand-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 1;
+  appearance: none;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  background: #111;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.plan-preview-expand-btn:hover {
+  background: #333;
+}
+
+@media (prefers-color-scheme: dark) {
+  .plan-preview-expand-btn {
+    background: #e5e5e5;
+    color: #111;
+  }
+
+  .plan-preview-expand-btn:hover {
+    background: #fff;
+  }
+}
+
 .msg.user .plan-rejection-body {
   font-size: 13px;
   line-height: 1.45;
@@ -761,12 +913,25 @@ html, body {
   border-radius: 8px;
   background: rgba(180, 83, 9, 0.06);
   border: 1px solid rgba(180, 83, 9, 0.2);
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: 13px;
   max-height: 280px;
   overflow: auto;
+}
+
+.plan-rejection-feedback-label {
+  margin-top: 10px;
+  font-weight: 600;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.plan-rejection-feedback {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(180, 83, 9, 0.04);
+  border: 1px solid rgba(180, 83, 9, 0.12);
+  font-size: 13px;
 }
 
 .msg.context_divider {
@@ -829,6 +994,26 @@ html, body {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+}
+
+.msg-system-hint {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.msg-system-hint-label {
+  font-weight: 600;
+  font-size: 11px;
+  color: #b45309;
+  margin-bottom: 4px;
+}
+
+.msg-system-hint-body {
+  color: var(--muted);
 }
 
 .msg-at-chips {
@@ -917,4 +1102,108 @@ html, body {
 .thinking-assistant-text {
   padding: 8px 10px;
   font-size: 13px;
+}
+
+.run-status-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 16px 14px;
+  margin-top: 8px;
+  background: linear-gradient(to top, var(--cursor-bg) 70%, transparent);
+  z-index: 2;
+}
+
+.run-status-line {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.run-status-tool {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.run-status-hint {
+  color: var(--cursor-accent);
+  font-size: 13px;
+  margin-top: 6px;
+  margin-bottom: 4px;
+}
+
+.codex-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.codex-step {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.assistant-stream-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.assistant-stream-content::after {
+  content: "▍";
+  animation: stream-cursor 1s step-end infinite;
+  color: var(--cursor-accent);
+  margin-left: 2px;
+}
+
+@keyframes stream-cursor {
+  50% { opacity: 0; }
+}
+
+.choice-card-host {
+  margin-top: 12px;
+}
+
+.choice-card-host .choice-card {
+  border-color: var(--cursor-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cursor-accent) 25%, transparent);
+}
+
+.choice-card {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--cursor-bg-input);
+}
+
+.choice-prompt {
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.choice-option {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--cursor-bg);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.choice-option:hover {
+  border-color: var(--cursor-accent);
 }

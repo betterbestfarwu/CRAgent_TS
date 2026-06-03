@@ -22,9 +22,12 @@ var CRAgentChatUtils = (() => {
   __export(chatUiUtils_exports, {
     GROUPABLE_TOOLS: () => GROUPABLE_TOOLS,
     MAX_TODO_INLINE_DISPLAY: () => MAX_TODO_INLINE_DISPLAY,
+    buildCodexTimeline: () => buildCodexTimeline,
     buildThinkingSummary: () => buildThinkingSummary,
     collapseAdjacentThinkingItems: () => collapseAdjacentThinkingItems,
+    formatCodexStepLine: () => formatCodexStepLine,
     formatThinkingSummaryLine: () => formatThinkingSummaryLine,
+    formatToolRunningLine: () => formatToolRunningLine,
     getCurrentInProgressTodo: () => getCurrentInProgressTodo,
     parseToolArguments: () => parseToolArguments,
     sortTodosForDisplay: () => sortTodosForDisplay,
@@ -98,7 +101,7 @@ var CRAgentChatUtils = (() => {
     return msg?.role === "assistant" && Boolean(msg.tool_calls?.length);
   }
   function hasVisibleAssistantContent(msg) {
-    return msg?.role === "assistant" && String(msg.content || "").trim().length > 0;
+    return msg?.role === "assistant" && (Boolean(msg.streaming) || String(msg.content || "").trim().length > 0);
   }
   function recordToolCallStats(call, stats) {
     const category = categorizeToolName(call.name);
@@ -394,6 +397,78 @@ var CRAgentChatUtils = (() => {
   }
   function getCurrentInProgressTodo(todos) {
     return sortTodosForDisplay(todos).find((item) => item.status === "in_progress") || null;
+  }
+  var TOOL_NAME_ZH = {
+    read_file: "\u8BFB\u53D6\u6587\u4EF6",
+    write_file: "\u5199\u5165\u6587\u4EF6",
+    list_dir: "\u5217\u51FA\u76EE\u5F55",
+    glob_file_search: "\u641C\u7D22\u6587\u4EF6",
+    grep: "\u641C\u7D22\u5185\u5BB9",
+    bash: "\u8FD0\u884C\u547D\u4EE4",
+    web_search: "\u7F51\u7EDC\u641C\u7D22",
+    fetch_url: "\u83B7\u53D6\u7F51\u9875",
+    ask_user: "\u8BE2\u95EE\u7528\u6237"
+  };
+  function formatCodexStepLine(item) {
+    if (!item) {
+      return "";
+    }
+    if (item.kind === "assistant-text") {
+      const snippet = String(item.content || "").trim().split("\n")[0];
+      return snippet ? snippet.slice(0, 120) : "\u63A8\u7406\u4E2D";
+    }
+    if (item.kind === "tool-call" || item.kind === "tool-call-group") {
+      const name = item.name || "tool";
+      const label = TOOL_NAME_ZH[name] || name;
+      const count = item.kind === "tool-call-group" ? item.calls?.length || 0 : 1;
+      if (name === "bash" && item.kind === "tool-call") {
+        try {
+          const args = parseToolArguments(item.arguments);
+          const cmd = String(args.command || "").trim();
+          if (cmd) {
+            return `\u6B63\u5728\u8FD0\u884C ${cmd.length > 80 ? `${cmd.slice(0, 80)}\u2026` : cmd}`;
+          }
+        } catch {
+        }
+      }
+      return count > 1 ? `\u5DF2${label} \xD7 ${count}` : `\u5DF2${label}`;
+    }
+    if (item.kind === "tool-result" || item.kind === "tool-result-group") {
+      const name = item.name || "tool";
+      const label = TOOL_NAME_ZH[name] || name;
+      const count = item.kind === "tool-result-group" ? item.results?.length || 0 : 1;
+      if (name === "read_file") {
+        return count > 1 ? `\u5DF2\u63A2\u7D22 ${count} \u4E2A\u6587\u4EF6` : "\u5DF2\u63A2\u7D22 1 \u4E2A\u6587\u4EF6";
+      }
+      if (name === "list_dir") {
+        return "\u5DF2\u5217\u51FA\u6587\u4EF6";
+      }
+      if (name === "bash") {
+        return count > 1 ? `\u5DF2\u8FD0\u884C ${count} \u6761\u547D\u4EE4` : "\u5DF2\u8FD0\u884C 1 \u6761\u547D\u4EE4";
+      }
+      if (name === "grep" || name === "glob_file_search") {
+        return count > 1 ? `\u5DF2\u641C\u7D22 ${count} \u6B21` : "\u5DF2\u641C\u7D22";
+      }
+      return count > 1 ? `\u5DF2\u5B8C\u6210 ${label} \xD7 ${count}` : `\u5DF2\u5B8C\u6210 ${label}`;
+    }
+    return "";
+  }
+  function buildCodexTimeline(thinkingMessages, options = {}) {
+    const verbose = Boolean(options.verbose);
+    const built = buildThinkingSummary(thinkingMessages, { verbose });
+    const lines = (built.items || []).map((item) => formatCodexStepLine(item)).filter(Boolean);
+    return { ...built, lines };
+  }
+  function formatToolRunningLine(toolName, toolInput = {}) {
+    const name = String(toolName || "tool");
+    if (name === "bash") {
+      const cmd = String(toolInput.command || "").trim();
+      if (cmd) {
+        return `\u6B63\u5728\u8FD0\u884C ${cmd.length > 80 ? `${cmd.slice(0, 80)}\u2026` : cmd}`;
+      }
+    }
+    const label = TOOL_NAME_ZH[name] || name;
+    return `\u6B63\u5728${label}\u2026`;
   }
   return __toCommonJS(chatUiUtils_exports);
 })();

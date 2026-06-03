@@ -122,6 +122,31 @@ export class SessionStore {
         return project;
     }
 
+    removeProject(projectId) {
+        const id = normalizeProjectId(projectId);
+        if (!id) {
+            throw new Error("缺少 projectId");
+        }
+        const projects = this.listProjects();
+        if (!projects.some((item) => item.id === id)) {
+            throw new Error("未找到项目");
+        }
+        this.persistProjects(projects.filter((item) => item.id !== id));
+        const detachedSessionIds = [];
+        for (const meta of this.listMetas()) {
+            if (normalizeProjectId(meta.projectId) !== id) {
+                continue;
+            }
+            this.ensureMigrated(meta.id);
+            const updated = readMeta(this.sessionsDir, meta.id);
+            updated.projectId = null;
+            updated.updatedAt = nowIso();
+            writeMeta(this.sessionsDir, updated);
+            detachedSessionIds.push(meta.id);
+        }
+        return { projectId: id, detachedSessionIds };
+    }
+
     listMetas() {
         const metas = [];
         for (const entry of listSessionEntries(this.sessionsDir)) {
@@ -284,11 +309,28 @@ export class SessionStore {
             hasUserMessages: meta.hasUserMessages || message.role === "user",
         };
         if (message.role === "user" && isDefaultSessionTitle(meta.title)) {
-            const derived = titleFromFirstUserMessage(message.content);
+            const derived = titleFromFirstUserMessage(message.userText || message.content);
             if (derived) {
                 meta.title = derived;
             }
         }
+        writeMeta(this.sessionsDir, meta);
+        return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
+    }
+
+    updateMessage(sessionId, messageId, patch) {
+        const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
+        const index = session.messages.findIndex((message) => message.id === messageId);
+        if (index < 0) {
+            return session;
+        }
+        session.messages[index] = { ...session.messages[index], ...patch };
+        const prepared = externalizeSessionImages(session, this.sessionsDir);
+        rewriteMessages(this.sessionsDir, sessionId, prepared.messages);
+        const meta = {
+            ...prepared.meta,
+            updatedAt: nowIso(),
+        };
         writeMeta(this.sessionsDir, meta);
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
@@ -336,6 +378,22 @@ export class SessionStore {
         this.ensureMigrated(sessionId);
         const meta = readMeta(this.sessionsDir, sessionId);
         meta.authMode = authMode;
+        meta.updatedAt = nowIso();
+        writeMeta(this.sessionsDir, meta);
+        return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
+    }
+
+    updateProject(sessionId, projectId) {
+        this.ensureMigrated(sessionId);
+        const normalized = normalizeProjectId(projectId);
+        if (normalized) {
+            const exists = this.listProjects().some((item) => item.id === normalized);
+            if (!exists) {
+                throw new Error("未找到项目");
+            }
+        }
+        const meta = readMeta(this.sessionsDir, sessionId);
+        meta.projectId = normalized;
         meta.updatedAt = nowIso();
         writeMeta(this.sessionsDir, meta);
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });

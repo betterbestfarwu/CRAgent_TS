@@ -62,7 +62,6 @@ export function estimateSessionContextUsage(session, model, options = {}) {
     const compactBuffer = options.compactBufferTokens ?? DEFAULT_COMPACT_BUFFER;
     const autoCompactThreshold = Math.max(0, effectiveWindow - compactBuffer);
     const warningThreshold = Math.max(0, autoCompactThreshold - CONTEXT_WARNING_TOKENS);
-    const blockingLimit = Math.max(0, effectiveWindow - 3000);
 
     return {
         tokens,
@@ -70,14 +69,12 @@ export function estimateSessionContextUsage(session, model, options = {}) {
         effectiveWindow,
         autoCompactThreshold,
         warningThreshold,
-        blockingLimit,
         percent: contextWindow ? Math.round((tokens * 100) / contextWindow) : 0,
         percentLeft: contextWindow
             ? Math.max(0, Math.round(((contextWindow - tokens) * 100) / contextWindow))
             : 100,
         isAboveWarningThreshold: tokens >= warningThreshold,
         isAboveAutoCompactThreshold: autoCompactThreshold > 0 && tokens >= autoCompactThreshold,
-        isAtBlockingLimit: blockingLimit > 0 && tokens >= blockingLimit,
     };
 }
 
@@ -131,7 +128,7 @@ function estimateToolDefinitionsTokens(agentTools = {}) {
     return count * TOKENS_PER_TOOL_SCHEMA;
 }
 
-function reconcileBreakdownCategories(categories, targetTotal) {
+export function reconcileContextBreakdownCategories(categories, targetTotal) {
     const order = CONTEXT_BREAKDOWN_CATEGORIES.map((category) => category.id);
     const sorted = [...categories].sort(
         (left, right) => order.indexOf(left.id) - order.indexOf(right.id),
@@ -225,7 +222,7 @@ export function estimateSessionContextBreakdown(session, model, options = {}) {
         conversation: conversationTokens,
     };
 
-    const categories = reconcileBreakdownCategories(
+    const categories = reconcileContextBreakdownCategories(
         CONTEXT_BREAKDOWN_CATEGORIES.map((category) => ({
             ...category,
             tokens: byId[category.id] ?? 0,

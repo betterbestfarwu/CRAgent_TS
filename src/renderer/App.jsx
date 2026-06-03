@@ -22,8 +22,10 @@ import {
   filterSlashSkills,
 } from "./ComposerSlashMenu.jsx";
 import { ComposerAtMenu } from "./ComposerAtMenu.jsx";
+import { ComposerProjectPicker } from "./ComposerProjectPicker.jsx";
 import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
 import {
+  appendSpaceAfterInsertAt,
   atMentionFileName,
   buildAtNavItems,
   buildInputWithAtMentions,
@@ -39,10 +41,18 @@ import { PlanApprovalDialog } from "./PlanApprovalDialog.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { TitleBar } from "./TitleBar.jsx";
 import { displayTitle } from "./sidebarUtils.js";
-import { isDefaultSessionTitle, titleFromFirstUserMessage } from "@shared/sessionTitle";
+import {
+  isDefaultSessionTitle,
+  sessionHasUserMessages,
+  titleFromFirstUserMessage,
+} from "@shared/sessionTitle";
+import { parseActiveSlashCommand } from "@shared/chatCommands.js";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
-import { estimateSessionContextBreakdown } from "@shared/tokenEstimator";
+import {
+  estimateSessionContextBreakdown,
+  reconcileContextBreakdownCategories,
+} from "@shared/tokenEstimator";
 import {
     estimateMcpToolDefinitionTokens,
     getEnabledMcpServers,
@@ -50,13 +60,6 @@ import {
 import { formatModelRef } from "@shared/modelRef.js";
 import { filterVisibleTodoRuns, msUntilTodoRunsHide } from "@shared/todoRunsDisplay.js";
 import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
-
-const SUGGESTIONS = [
-  "总结当前项目结构",
-  "帮我写一段 README",
-  "解释最近这段代码逻辑",
-  "重构最近改动",
-];
 
 const COMPOSER_LINE_HEIGHT = 24;
 const COMPOSER_MIN_HEIGHT = COMPOSER_LINE_HEIGHT;
@@ -95,6 +98,7 @@ function sessionMessagesEqual(left, right) {
 export function App() {
   const [projects, setProjects] = useState([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState([]);
+  const [focusedProjectId, setFocusedProjectId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [currentSession, setCurrentSession] = useState(null);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -106,7 +110,11 @@ export function App() {
   const [pendingAtMentions, setPendingAtMentions] = useState([]);
   const [composerDragOver, setComposerDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [runStartedAt, setRunStartedAt] = useState(null);
+  const [pendingAsk, setPendingAsk] = useState(null);
+  const [activeTool, setActiveTool] = useState(null);
   const [busyBySession, setBusyBySession] = useState({});
+  const [unreadBySession, setUnreadBySession] = useState({});
   const [page, setPage] = useState("chat");
   const [sessionError, setSessionError] = useState(null);
   const [compactLayout, setCompactLayout] = useState(false);
@@ -120,18 +128,20 @@ export function App() {
   const [queuePanelOpen, setQueuePanelOpen] = useState(false);
   const [contextPopupOpen, setContextPopupOpen] = useState(false);
   const [contextDetail, setContextDetail] = useState(null);
-  const [runtimeContextState, setRuntimeContextState] = useState(null);
+  const [sessionContextUsage, setSessionContextUsage] = useState(null);
   const [executionModeSaving, setExecutionModeSaving] = useState(false);
   const [composerQuickMenuOpen, setComposerQuickMenuOpen] = useState(false);
   const [todoRunsHideTick, setTodoRunsHideTick] = useState(0);
   const contextRingRef = useRef(null);
   const contextDetailRequestRef = useRef(0);
+  const sessionContextUsageRequestRef = useRef(0);
   const composerQuickMenuRef = useRef(null);
   const filePickerRef = useRef(null);
   const sessionIdRef = useRef(null);
   const sessionErrorTimerRef = useRef(null);
   const composerInputRowRef = useRef(null);
   const textareaRef = useRef(null);
+  const composerFocusAtEndRef = useRef(false);
   const busyBySessionRef = useRef(new Map());
   const newChatInFlightRef = useRef(false);
   const sidebarWidthRef = useRef(sidebarWidth);
@@ -252,6 +262,7 @@ export function App() {
         messageLimit: DEFAULT_UI_MESSAGE_PAGE,
       });
       setCurrentSession(session);
+      setFocusedProjectId(session?.meta?.projectId ?? null);
       ensureProjectExpanded(session?.meta?.projectId);
     } catch (err) {
       showSessionError(err instanceof Error ? err.message : String(err));
@@ -330,6 +341,34 @@ export function App() {
     }
   }
 
+  function focusPrimaryComposerEnd() {
+    const el = textareaRef.current;
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    const pos = el.value.length;
+    el.setSelectionRange(pos, pos);
+    return true;
+  }
+
+  function requestComposerFocusAtEnd() {
+    composerFocusAtEndRef.current = true;
+  }
+
+  useLayoutEffect(() => {
+    if (!composerFocusAtEndRef.current) return;
+    if (focusPrimaryComposerEnd()) {
+      composerFocusAtEndRef.current = false;
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      if (!composerFocusAtEndRef.current) return;
+      if (focusPrimaryComposerEnd()) {
+        composerFocusAtEndRef.current = false;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [input, pendingAtMentions, currentSession?.meta?.id]);
+
   useLayoutEffect(() => {
     resizeComposer();
   }, [input, page, pendingImages.length, pendingFiles.length, pendingAtMentions.length]);
@@ -368,7 +407,15 @@ export function App() {
     const offMessage = window.cragent.onMessageAppended(({ sessionId, message }) => {
       setCurrentSession((prev) => {
         if (!prev || prev.meta.id !== sessionId) return prev;
-        return { ...prev, messages: [...prev.messages, message] };
+        const messages = [...prev.messages, message];
+        return {
+          ...prev,
+          messages,
+          meta:
+            message.role === "user"
+              ? { ...prev.meta, hasUserMessages: true }
+              : prev.meta,
+        };
       });
       setSessions((prev) =>
         sortSessions(
@@ -389,9 +436,27 @@ export function App() {
       );
     });
 
+
+    const offMessageDelta = window.cragent.onMessageDelta?.(({ sessionId, message }) => {
+      setCurrentSession((prev) => {
+        if (!prev || prev.meta.id !== sessionId) return prev;
+        const messages = prev.messages.map((entry) =>
+          entry.id === message.id ? { ...entry, ...message } : entry,
+        );
+        return { ...prev, messages };
+      });
+    });
+
+    const offAskUser = window.cragent.onAskUserRequest?.((payload) => {
+      if (sessionIdRef.current) {
+        setPendingAsk(payload);
+      }
+    });
+
     const offSession = window.cragent.onSessionChanged((session) => {
       clearSessionError();
       ensureProjectExpanded(session?.meta?.projectId);
+      setFocusedProjectId(session?.meta?.projectId ?? null);
       setCurrentSession((prev) => {
         if (
           prev?.meta.id === session.meta.id &&
@@ -413,13 +478,32 @@ export function App() {
       });
     });
 
-    const offBusy = window.cragent.onBusyChanged(({ sessionId, busy: nextBusy }) => {
+    const offBusy = window.cragent.onBusyChanged(({ sessionId, busy: nextBusy, runStartedAt: startedAt }) => {
       busyBySessionRef.current.set(sessionId, nextBusy);
-      setBusyBySession((prev) => ({ ...prev, [sessionId]: nextBusy }));
+      setBusyBySession((prev) => {
+        const wasBusy = prev[sessionId];
+        if (wasBusy && !nextBusy && sessionIdRef.current !== sessionId) {
+          setUnreadBySession((unread) => ({ ...unread, [sessionId]: true }));
+        }
+        return { ...prev, [sessionId]: nextBusy };
+      });
       if (sessionIdRef.current === sessionId) {
         setBusy(nextBusy);
+        setRunStartedAt(nextBusy ? startedAt || new Date().toISOString() : null);
+        if (!nextBusy) {
+          setPendingAsk(null);
+          setActiveTool(null);
+        }
       }
     });
+
+    const offToolStarted = window.cragent.onToolStarted?.(
+      ({ sessionId, toolName, toolInput }) => {
+        if (sessionIdRef.current === sessionId) {
+          setActiveTool({ toolName, toolInput: toolInput || {} });
+        }
+      },
+    );
 
     const offTodos = window.cragent.onTodosChanged?.(({ sessionId, todoRuns, todos }) => {
       setCurrentSession((prev) => {
@@ -465,6 +549,9 @@ export function App() {
           window.cragent.respondPlanApproval?.({
             id: payload.id,
             approved: Boolean(result?.approved),
+            cancelled: Boolean(result?.cancelled),
+            dismissed: Boolean(result?.dismissed),
+            rejected: Boolean(result?.rejected),
             content: result?.content,
             feedback: result?.feedback,
           });
@@ -478,7 +565,13 @@ export function App() {
       }
       if (sessionId) {
         busyBySessionRef.current.set(sessionId, false);
-        setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
+        setBusyBySession((prev) => {
+          const wasBusy = prev[sessionId];
+          if (wasBusy && sessionIdRef.current !== sessionId) {
+            setUnreadBySession((unread) => ({ ...unread, [sessionId]: true }));
+          }
+          return { ...prev, [sessionId]: false };
+        });
         if (sessionIdRef.current === sessionId) {
           setBusy(false);
         }
@@ -491,12 +584,6 @@ export function App() {
       setPage("settings");
     });
 
-    const offContextWarning = window.cragent.onContextWarningChanged?.((payload) => {
-      if (sessionIdRef.current === payload.sessionId) {
-        setRuntimeContextState(payload);
-      }
-    });
-
     const offHookLog = window.cragent.onHookLog?.((payload) => {
       if (sessionIdRef.current === payload.sessionId) {
         setHookLogs(payload.logs || []);
@@ -505,6 +592,9 @@ export function App() {
 
     return () => {
       offMessage();
+      offMessageDelta?.();
+      offAskUser?.();
+      offToolStarted?.();
       offSession();
       offBusy();
       offTodos?.();
@@ -513,7 +603,6 @@ export function App() {
       offPlanApproval?.();
       offError();
       offSettings();
-      offContextWarning?.();
       offHookLog?.();
     };
   }, []);
@@ -543,12 +632,43 @@ export function App() {
   }, [config, currentSession]);
 
   useEffect(() => {
-    setRuntimeContextState(null);
     setContextDetail(null);
+    setSessionContextUsage(null);
   }, [currentSession?.meta?.id]);
+
+  useEffect(() => {
+    const sessionId = currentSession?.meta?.id;
+    if (!sessionId || !window.cragent?.getSessionContextDetail) {
+      return undefined;
+    }
+
+    const requestId = ++sessionContextUsageRequestRef.current;
+    void window.cragent.getSessionContextDetail(sessionId).then((detail) => {
+      if (
+        requestId !== sessionContextUsageRequestRef.current ||
+        sessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
+      setSessionContextUsage({ sessionId, ...detail });
+    }).catch(() => {
+      if (
+        requestId === sessionContextUsageRequestRef.current &&
+        sessionIdRef.current === sessionId
+      ) {
+        setSessionContextUsage(null);
+      }
+    });
+    return undefined;
+  }, [
+    currentSession?.meta?.id,
+    currentSession?.meta?.providerKey,
+    currentSession?.meta?.modelId,
+  ]);
 
   const contextUsage = useMemo(() => {
     if (!currentSession || !config) return null;
+    const sessionId = currentSession.meta.id;
     const model = config.models[currentSession.meta.providerKey]?.models.find(
       (m) => m.id === currentSession.meta.modelId,
     );
@@ -570,23 +690,19 @@ export function App() {
       skillsCatalogText,
       mcpTokens,
     });
-    if (
-      !runtimeContextState ||
-      runtimeContextState.sessionId !== currentSession.meta.id
-    ) {
+    const storedUsage =
+      sessionContextUsage?.sessionId === sessionId ? sessionContextUsage : null;
+    if (!storedUsage?.categories?.length) {
       return estimated;
     }
     return {
       ...estimated,
-      percent: runtimeContextState.percent ?? estimated.percent,
-      isAboveWarningThreshold:
-        runtimeContextState.isAboveWarningThreshold ?? estimated.isAboveWarningThreshold,
-      isAboveAutoCompactThreshold:
-        runtimeContextState.isAboveAutoCompactThreshold ??
-        estimated.isAboveAutoCompactThreshold,
-      isAtBlockingLimit: runtimeContextState.isAtBlockingLimit ?? estimated.isAtBlockingLimit,
+      categories: reconcileContextBreakdownCategories(
+        storedUsage.categories,
+        estimated.tokens,
+      ),
     };
-  }, [currentSession, config, skills, runtimeContextState]);
+  }, [currentSession, config, skills, sessionContextUsage]);
 
   const refreshContextDetail = useCallback(async () => {
     const sessionId = currentSession?.meta?.id;
@@ -603,12 +719,18 @@ export function App() {
         return;
       }
       setContextDetail(detail);
+      setSessionContextUsage({ sessionId, ...detail });
     } catch {
       if (requestId === contextDetailRequestRef.current) {
         setContextDetail(null);
       }
     }
   }, [currentSession?.meta?.id]);
+
+  const closeContextPopup = useCallback(() => {
+    setContextPopupOpen(false);
+    textareaRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     if (!contextPopupOpen) {
@@ -626,7 +748,6 @@ export function App() {
     currentSession?.meta?.contextSummary,
     currentSession?.meta?.postCompactContext,
     currentSession?.meta?.sessionMemory,
-    runtimeContextState,
     skills,
     config?.context?.compact_buffer_tokens,
     config?.agents,
@@ -647,10 +768,8 @@ export function App() {
     };
   }, [contextUsage, contextDetail]);
 
-  const slashQuery = useMemo(() => {
-    const match = input.match(/^\/([^\s]*)$/);
-    return match ? match[1].toLowerCase() : null;
-  }, [input]);
+  const slashMention = useMemo(() => parseActiveSlashCommand(input), [input]);
+  const slashQuery = slashMention ? slashMention.query.toLowerCase() : null;
 
   const atMention = useMemo(() => parseActiveAtMention(input), [input]);
 
@@ -659,6 +778,27 @@ export function App() {
     if (!projectId) return null;
     return projects.find((project) => project.id === projectId) || null;
   }, [currentSession?.meta?.projectId, projects]);
+
+  const active = Boolean(currentSession && currentSession.messages.length > 0);
+  const hasComposerDraft =
+    input.length > 0 ||
+    pendingImages.length > 0 ||
+    pendingFiles.length > 0 ||
+    pendingAtMentions.length > 0;
+
+  const showComposerProjectPicker = useMemo(() => {
+    if (!currentSession || page !== "chat") return false;
+    if (!isDefaultSessionTitle(currentSession.meta.title)) return false;
+    if (currentSession.meta.hasUserMessages) return false;
+    if (sessionHasUserMessages(currentSession.messages)) return false;
+    if (hasComposerDraft || busy) return false;
+    return true;
+  }, [currentSession, page, hasComposerDraft, busy]);
+
+  const composerProjectLabel = useMemo(() => {
+    if (activeProject?.name) return activeProject.name;
+    return "选择项目";
+  }, [activeProject?.name]);
 
   const atPathParts = useMemo(() => {
     if (!atMention) return { relativePath: "", filter: "" };
@@ -671,16 +811,29 @@ export function App() {
   const [atDirError, setAtDirError] = useState("");
   const [atMenuIndex, setAtMenuIndex] = useState(0);
   const [atMenuExpanded, setAtMenuExpanded] = useState(false);
+  const atMentionWasActiveRef = useRef(false);
+  const atPickContextRef = useRef(null);
 
   useEffect(() => {
     if (!atMention) {
       setAtBrowseRelativePath("");
       setAtDirEntries([]);
       setAtDirError("");
+      atMentionWasActiveRef.current = false;
       return;
     }
-    setAtBrowseRelativePath(atPathParts.relativePath);
-  }, [atMention, atPathParts.relativePath]);
+
+    const query = atMention.query;
+    const justOpened = !atMentionWasActiveRef.current;
+    atMentionWasActiveRef.current = true;
+
+    // Sync browse path from typed `@path/to/filter` only when the menu opens or the
+    // user types a slash path. Click-navigation updates browse state directly and
+    // must not be reset when the query is a plain filter with no `/`.
+    if (justOpened || query.includes("/")) {
+      setAtBrowseRelativePath(splitAtQueryPath(query).relativePath);
+    }
+  }, [atMention]);
 
   useEffect(() => {
     setAtMenuIndex(0);
@@ -788,6 +941,16 @@ export function App() {
   const showSlashMenu = page === "chat" && slashQuery !== null;
   const showAtMenu =
     page === "chat" && atMention !== null && Boolean(activeProject?.id) && !showSlashMenu;
+
+  useEffect(() => {
+    if (showAtMenu && atMention) {
+      atPickContextRef.current = { atMention, inputSnapshot: input };
+      return;
+    }
+    if (!showAtMenu) {
+      atPickContextRef.current = null;
+    }
+  }, [showAtMenu, atMention, input]);
   const sendButtonDisabled = !busy && !canSend;
 
   function replaceActiveAtMention(nextMentionBody) {
@@ -796,44 +959,47 @@ export function App() {
     const suffix = input.slice(atMention.mentionEnd);
     const body = String(nextMentionBody ?? "");
     setInput(`${prefix}@${body}${suffix}`);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      resizeComposer();
-    });
+    requestComposerFocusAtEnd();
   }
 
   function applyAtFilePick(relativePath) {
     const cleanPath = String(relativePath ?? "").trim();
     if (!cleanPath) return;
+
+    const pickContext = atPickContextRef.current;
+    const sourceInput = parseActiveAtMention(input) ? input : (pickContext?.inputSnapshot ?? input);
+    const activeAt =
+      parseActiveAtMention(sourceInput) ?? atMention ?? pickContext?.atMention ?? null;
+    if (!activeAt) return;
+
+    const mentionStart = activeAt.mentionStart;
+    let nextInput = `${sourceInput.slice(0, activeAt.mentionStart)}${sourceInput.slice(activeAt.mentionEnd)}`;
+    nextInput = appendSpaceAfterInsertAt(nextInput, mentionStart);
     const name = atMentionFileName(cleanPath);
-    setPendingAtMentions((prev) => {
-      if (prev.some((mention) => mention.relativePath === cleanPath)) {
-        return prev;
-      }
-      return [...prev, { id: crypto.randomUUID(), name, relativePath: cleanPath, insertAt: atMention?.mentionStart ?? input.length }];
-    });
-    if (atMention) {
-      const prefix = input.slice(0, atMention.mentionStart);
-      const suffix = input.slice(atMention.mentionEnd);
-      setInput(`${prefix}${suffix}`);
-    }
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      resizeComposer();
-    });
+    const nextMentions = pendingAtMentions.some((mention) => mention.relativePath === cleanPath)
+      ? pendingAtMentions
+      : [
+          ...pendingAtMentions,
+          { id: crypto.randomUUID(), name, relativePath: cleanPath, insertAt: mentionStart },
+        ];
+    updateComposerInput(nextInput, nextMentions);
+    atPickContextRef.current = null;
+    requestComposerFocusAtEnd();
   }
 
   function enterAtDirectory(relativePath) {
-    const next = relativePath ? `${relativePath}/` : "";
-    replaceActiveAtMention(next);
     setAtBrowseRelativePath(relativePath);
+    if (atMention?.query) {
+      replaceActiveAtMention("");
+    }
   }
 
   function goAtParentDirectory() {
     const parent = parentRelativePath(atBrowseRelativePath);
-    const next = parent ? `${parent}/` : "";
-    replaceActiveAtMention(next);
     setAtBrowseRelativePath(parent);
+    if (atMention?.query) {
+      replaceActiveAtMention("");
+    }
   }
 
   function activateAtMenuItem(item) {
@@ -851,12 +1017,12 @@ export function App() {
   }
 
   function applySlashPick(name) {
-    const next = `/${name} `;
+    const replacement = `/${name} `;
+    const next = slashMention
+      ? `${input.slice(0, slashMention.slashStart)}${replacement}${input.slice(slashMention.slashEnd)}`
+      : replacement;
     setInput(next);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      resizeComposer();
-    });
+    requestComposerFocusAtEnd();
   }
 
   function activateSlashMenuItem(item) {
@@ -928,7 +1094,7 @@ export function App() {
 
   async function handleAddProjectDirectory(directoryPath) {
     const cleanPath = String(directoryPath || "").trim();
-    if (!cleanPath) return;
+    if (!cleanPath) return null;
     try {
       const project = await window.cragent.addProject(cleanPath);
       setProjects((prev) => {
@@ -938,6 +1104,47 @@ export function App() {
         return [...prev, project].sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
       });
       ensureProjectExpanded(project.id);
+      return project;
+    } catch (err) {
+      showSessionError(err instanceof Error ? err.message : String(err), currentSession?.meta?.id);
+      return null;
+    }
+  }
+
+  async function handleRemoveProject(project) {
+    const name = project?.name || "此项目";
+    const confirmed = await askConfirm({
+      message: `移除「${name}」？`,
+      detail: "项目将从侧栏移除，相关会话会保留并移到「会话」分组。",
+      confirmLabel: "移除",
+      cancelLabel: "取消",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    if (!window.cragent?.removeProject) {
+      showSessionError("无法移除项目，请完全退出并重启 CRAgent。", currentSession?.meta?.id);
+      return;
+    }
+    try {
+      const result = await window.cragent.removeProject(project.id);
+      const detachedIds = new Set(result?.detachedSessionIds || []);
+      setProjects((prev) => prev.filter((item) => item.id !== project.id));
+      setExpandedProjectIds((prev) => prev.filter((id) => id !== project.id));
+      if (focusedProjectId === project.id) {
+        setFocusedProjectId(null);
+      }
+      setSessions((prev) =>
+        prev.map((meta) =>
+          meta.projectId === project.id || detachedIds.has(meta.id)
+            ? { ...meta, projectId: null }
+            : meta,
+        ),
+      );
+      if (currentSession?.meta?.projectId === project.id) {
+        setCurrentSession((prev) =>
+          prev ? { ...prev, meta: { ...prev.meta, projectId: null } } : prev,
+        );
+      }
     } catch (err) {
       showSessionError(err instanceof Error ? err.message : String(err), currentSession?.meta?.id);
     }
@@ -1051,6 +1258,19 @@ export function App() {
     }
   }
 
+
+  async function handleAskUserChoice(data) {
+    if (!data?.askId || !currentSession) return;
+    const answers = {
+      [String(data.questionIndex ?? 0)]: data.optionId,
+    };
+    setPendingAsk(null);
+    await window.cragent.respondAskUser?.({
+      id: data.askId,
+      answers,
+    });
+  }
+
   async function handleCancelRun() {
     if (!currentSession || !busy) return;
     await window.cragent.cancelRun?.(currentSession.meta.id);
@@ -1084,11 +1304,16 @@ export function App() {
       const resolvedProjectId =
         projectId !== undefined
           ? projectId || null
-          : expandedProjectIds.length === 1
-            ? expandedProjectIds[0]
-            : null;
+          : focusedProjectId != null
+            ? focusedProjectId
+            : page === "chat" && currentSession
+              ? (currentSession.meta?.projectId ?? null)
+              : expandedProjectIds.length === 1
+                ? expandedProjectIds[0]
+                : null;
       const next = await window.cragent.newSession({ projectId: resolvedProjectId });
       setCurrentSession(next);
+      setFocusedProjectId(next?.meta?.projectId ?? null);
       ensureProjectExpanded(next?.meta?.projectId);
       setSessions((prev) => {
         const has = prev.some((s) => s.id === next.meta.id);
@@ -1097,23 +1322,35 @@ export function App() {
       });
       setPage("chat");
       if (compactLayout) setSidebarOpen(false);
+      requestComposerFocusAtEnd();
     } finally {
       newChatInFlightRef.current = false;
     }
   }
 
   function handleSelectProject(projectId) {
-    if (projectId === null) return;
+    if (projectId === null) {
+      setFocusedProjectId(null);
+      return;
+    }
+    setFocusedProjectId(projectId);
     toggleProjectExpanded(projectId);
   }
 
   async function handleSwitchSession(sessionId) {
     clearSessionError();
+    setUnreadBySession((prev) => {
+      if (!prev[sessionId]) return prev;
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
     const session = await window.cragent.getSession(sessionId, {
       messageLimit: DEFAULT_UI_MESSAGE_PAGE,
     });
     startTransition(() => {
       setCurrentSession(session);
+      setFocusedProjectId(session?.meta?.projectId ?? null);
       ensureProjectExpanded(session?.meta?.projectId);
       setBusy(busyBySessionRef.current.get(sessionId) ?? false);
       setPage("chat");
@@ -1138,6 +1375,12 @@ export function App() {
     if (!confirmed) {
       return;
     }
+    setUnreadBySession((prev) => {
+      if (!prev[meta.id]) return prev;
+      const next = { ...prev };
+      delete next[meta.id];
+      return next;
+    });
     const session = await window.cragent.deleteSession(meta.id);
     setSessions((prev) => {
       const next = prev.filter((s) => s.id !== meta.id);
@@ -1148,6 +1391,7 @@ export function App() {
     });
     if (currentSession?.meta.id === meta.id) {
       setCurrentSession(session);
+      setFocusedProjectId(session?.meta?.projectId ?? null);
       ensureProjectExpanded(session?.meta?.projectId);
       setPage("chat");
     }
@@ -1167,6 +1411,37 @@ export function App() {
   const executionMode =
     config?.agents?.default?.execution_mode === "plan" ? "plan" : "goal";
 
+  const [planFileContent, setPlanFileContent] = useState(null);
+
+  useEffect(() => {
+    const sessionId = currentSession?.meta?.id;
+    if (executionMode !== "plan" || !sessionId || !window.cragent?.readPlanContent) {
+      setPlanFileContent(null);
+      return;
+    }
+    let cancelled = false;
+    void window.cragent
+      .readPlanContent(sessionId)
+      .then((result) => {
+        if (!cancelled) {
+          setPlanFileContent(result?.content ?? null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPlanFileContent(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    executionMode,
+    currentSession?.meta?.id,
+    currentSession?.meta?.updatedAt,
+    busy,
+  ]);
+
   const planContext = useMemo(() => {
     if (executionMode !== "plan" || !currentSession?.meta?.id) {
       return { active: false };
@@ -1175,14 +1450,18 @@ export function App() {
       active: true,
       sessionId: currentSession.meta.id,
       displayPath: `.cragent/plans/${currentSession.meta.id}.md`,
+      content: planFileContent,
     };
-  }, [executionMode, currentSession?.meta?.id]);
+  }, [executionMode, currentSession?.meta?.id, planFileContent]);
 
   async function handleExitPlanMode() {
     if (!currentSession || busy || executionMode !== "plan") return;
     try {
       const result = await window.cragent.exitPlanMode(currentSession.meta.id);
-      if (result?.cancelled) {
+      if (result?.dismissed) {
+        return;
+      }
+      if (result?.rejected) {
         if (result.session) setCurrentSession(result.session);
         return;
       }
@@ -1246,7 +1525,7 @@ export function App() {
     }
   }
 
-  const active = Boolean(currentSession && currentSession.messages.length > 0);
+  const chatWelcomeLayout = !active && !hasComposerDraft && !busy;
   const onSettingsPage = page === "settings";
 
   const titleBarLabel = useMemo(() => {
@@ -1319,6 +1598,7 @@ export function App() {
         sessions={sessions}
         currentSessionId={currentSession?.meta.id}
         busyBySession={busyBySession}
+        unreadBySession={unreadBySession}
         settingsActive={onSettingsPage}
         onSelectProject={handleSelectProject}
         onAddProject={async () => {
@@ -1329,6 +1609,7 @@ export function App() {
         }}
         onAddProjectByPath={(directoryPath) => void handleAddProjectDirectory(directoryPath)}
         onNewProjectChat={(projectId) => void handleNewChat(projectId)}
+        onRemoveProject={(project) => void handleRemoveProject(project)}
         onSelect={(sessionId) => void handleSwitchSession(sessionId)}
         onDelete={(meta) => void handleDeleteSession(meta)}
         onNewChat={() => void handleNewChat()}
@@ -1380,18 +1661,13 @@ export function App() {
           />
         ) : (
           <div className="chat-layout">
-            <div className="chat-content-column">
+            <div
+              className={`chat-content-column${chatWelcomeLayout ? " chat-content-column--welcome" : ""}`}
+            >
             <div className="chat-history">
               {!active ? (
                 <div className="empty-state">
                   <h1>有什么我能帮你的吗？</h1>
-                  <div className="suggestions">
-                    {SUGGESTIONS.map((s) => (
-                      <button key={s} type="button" onClick={() => void handleSend(s)}>
-                        {s}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               ) : (
                 <>
@@ -1412,11 +1688,16 @@ export function App() {
                     messages={currentSession.messages}
                     todoRuns={visibleTodoRuns}
                     busy={busy}
+                    runStartedAt={runStartedAt}
+                    codexTimeline={config?.ui?.codex_timeline !== false}
+                    pendingAsk={pendingAsk}
+                    activeTool={activeTool}
                     verboseThinking={verboseThinking}
                     planContext={planContext}
                     onDelete={handleDeleteMessage}
                     onOpenImage={(image) => setViewerImage(image)}
                     onOpenPlanFile={(sessionId) => window.cragent.openPlanFile?.(sessionId)}
+                    onAskUserChoice={handleAskUserChoice}
                   />
                 </>
               )}
@@ -1432,7 +1713,7 @@ export function App() {
             </div>
 
             <div className="composer">
-              <div className="composer-shell">
+              <div className={`composer-shell${showComposerProjectPicker ? " has-project-picker" : ""}`}>
                 {showSlashMenu ? (
                   <ComposerSlashMenu
                     skills={skills}
@@ -1470,7 +1751,7 @@ export function App() {
                   </div>
                 ) : null}
                 <div
-                  className={`composer-box${composerDragOver ? " composer-drag-over" : ""}${messageQueue.length ? " has-queue-toggle" : ""}`}
+                  className={`composer-box${composerDragOver ? " composer-drag-over" : ""}${messageQueue.length ? " has-queue-toggle" : ""}${showComposerProjectPicker ? " has-project-picker" : ""}`}
                   onDragEnter={(e) => {
                     if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return;
                     e.preventDefault();
@@ -1543,8 +1824,12 @@ export function App() {
                       setHookLogs([]);
                     }
                   }}
+                  onCollapse={() => textareaRef.current?.focus()}
                 />
-                <div className="composer-input-row" ref={composerInputRowRef}>
+                <div
+                  className={`composer-input-row${pendingAtMentions.length ? " has-at-mentions" : ""}`}
+                  ref={composerInputRowRef}
+                >
                   <ComposerSegmentedInput
                     input={input}
                     onInputChange={updateComposerInput}
@@ -1594,7 +1879,9 @@ export function App() {
                       }
                       if (e.key === "Escape") {
                         e.preventDefault();
-                        setInput("");
+                        if (slashMention) {
+                          setInput(input.slice(0, slashMention.slashStart) + input.slice(slashMention.slashEnd));
+                        }
                         return;
                       }
                       if (e.key === "Tab" || (e.key === "Enter" && !e.altKey && !e.shiftKey)) {
@@ -1790,13 +2077,19 @@ export function App() {
                             ? "composer-context-ring-warning"
                             : ""
                       }
-                      onClick={() => setContextPopupOpen((prev) => !prev)}
+                      onClick={() => {
+                        if (contextPopupOpen) {
+                          closeContextPopup();
+                          return;
+                        }
+                        setContextPopupOpen(true);
+                      }}
                     />
                     <ComposerContextPopup
                       open={contextPopupOpen}
                       usage={contextUsageForPopup}
                       anchorRef={contextRingRef}
-                      onClose={() => setContextPopupOpen(false)}
+                      onClose={closeContextPopup}
                     />
                   </div>
                   <button
@@ -1843,6 +2136,22 @@ export function App() {
                   </div>
                 </div>
                 </div>
+                {showComposerProjectPicker ? (
+                  <ComposerProjectPicker
+                    projects={projects}
+                    selectedProjectId={currentSession?.meta?.projectId ?? null}
+                    displayLabel={composerProjectLabel}
+                    onSelectProject={(projectId) => void handleNewChat(projectId ?? null)}
+                    onAddProject={async () => {
+                      const directoryPath = await window.cragent.pickProjectDirectory?.();
+                      if (!directoryPath) return;
+                      const project = await handleAddProjectDirectory(directoryPath);
+                      if (project?.id) {
+                        await handleNewChat(project.id);
+                      }
+                    }}
+                  />
+                ) : null}
               </div>
             </div>
             </div>

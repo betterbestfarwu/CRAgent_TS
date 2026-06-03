@@ -199,8 +199,11 @@ export function installWebBridge() {
 
   const listeners = {
     messageAppended: new Set(),
+    messageDelta: new Set(),
     sessionChanged: new Set(),
     busyChanged: new Set(),
+    toolStarted: new Set(),
+    askUserRequest: new Set(),
     error: new Set(),
     openSettings: new Set(),
   };
@@ -284,8 +287,16 @@ export function installWebBridge() {
       throw new Error("Web 演示模式暂不支持添加项目目录。");
     },
 
+    async removeProject() {
+      throw new Error("Web 演示模式暂不支持移除项目。");
+    },
+
     async pickProjectDirectory() {
       return null;
+    },
+
+    async openProjectDirectory() {
+      return { ok: false, error: "Web 演示模式暂不支持打开本地项目文件夹。" };
     },
 
     async listProjectDirectory() {
@@ -541,6 +552,25 @@ export function installWebBridge() {
       emit(listeners.sessionChanged, session);
     },
 
+    async updateSessionProject({ sessionId, projectId }) {
+      const normalized =
+        typeof projectId === "string" && projectId.trim() ? projectId.trim() : null;
+      const next = updateState((state) => {
+        const sessions = state.sessions.map((item) =>
+          item.meta.id === sessionId
+            ? {
+                ...item,
+                meta: { ...item.meta, projectId: normalized, updatedAt: nowIso() },
+              }
+            : item,
+        );
+        return { ...state, sessions };
+      });
+      const session = next.sessions.find((item) => item.meta.id === sessionId);
+      emit(listeners.sessionChanged, session);
+      return session;
+    },
+
     async updateConfig(nextConfig) {
       updateState((state) => ({ ...state, config: nextConfig }));
       return nextConfig;
@@ -592,6 +622,18 @@ export function installWebBridge() {
     },
     onBusyChanged(callback) {
       return subscribe(listeners.busyChanged, callback);
+    },
+    onMessageDelta(callback) {
+      return subscribe(listeners.messageDelta, callback);
+    },
+    onToolStarted(callback) {
+      return subscribe(listeners.toolStarted, callback);
+    },
+    onAskUserRequest(callback) {
+      return subscribe(listeners.askUserRequest, callback);
+    },
+    respondAskUser(payload) {
+      return Promise.resolve({ ok: false, error: "ask_user is not available in web preview" });
     },
     onError(callback) {
       return subscribe(listeners.error, callback);

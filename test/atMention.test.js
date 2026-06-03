@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+    appendSpaceAfterInsertAt,
     buildAtNavItems,
     buildComposerSegments,
     buildPathTreeSegments,
@@ -12,6 +13,10 @@ import {
     splitAtQueryPath,
 } from "@shared/atMention.js";
 import { expandAtMentionsToAbsolute } from "../src/main/atMentionExpand.js";
+import {
+    COMPOSER_CARET_ZWSP,
+    normalizeComposerEditorText,
+} from "@shared/composerEditor.js";
 
 describe("parseActiveAtMention", () => {
     it("detects trailing @ mention", () => {
@@ -32,6 +37,17 @@ describe("splitAtQueryPath", () => {
             relativePath: "src/renderer",
             filter: "App",
         });
+    });
+});
+
+describe("appendSpaceAfterInsertAt", () => {
+    it("adds a space after the mention position", () => {
+        assert.equal(appendSpaceAfterInsertAt("", 0), " ");
+        assert.equal(appendSpaceAfterInsertAt("hello ", 6), "hello  ");
+    });
+
+    it("does not duplicate an existing space", () => {
+        assert.equal(appendSpaceAfterInsertAt(" ", 0), " ");
     });
 });
 
@@ -126,6 +142,12 @@ describe("buildInputWithAtMentions", () => {
             buildInputWithAtMentions("", [{ name: "App.jsx", relativePath: "src/App.jsx" }]),
             "@src/App.jsx",
         );
+    });
+});
+
+describe("normalizeComposerEditorText", () => {
+    it("strips invisible caret anchors", () => {
+        assert.equal(normalizeComposerEditorText(`hello${COMPOSER_CARET_ZWSP}`), "hello");
     });
 });
 

@@ -62,6 +62,10 @@ import { resolveHooksConfig } from "./hooks/hookPaths.js";
 import { attachContextCategoryPreviews } from "./contextDetailPreviews.js";
 import { mergeUiConfig } from "@shared/uiConfig.js";
 import {
+    detectClarificationNeeded,
+    formatClarificationAnswers,
+} from "@shared/userClarification.js";
+import {
     buildExitPlanModeUserMessage,
     buildPlanRejectionUserMessage,
     buildPlanModeSystemPrompt,
@@ -70,9 +74,11 @@ import {
     getPlanFilePath,
     planFileExists,
     readPlanFile,
+    shouldStartInPlanMode,
     validatePlanModeToolCall,
     writePlanFile,
 } from "./planMode.js";
+import { PLAN_MODE_AUTO_SYSTEM_HINT } from "@shared/planMessages.js";
 import {
     estimateMcpToolDefinitionTokens,
     getEnabledMcpServers,
@@ -81,12 +87,19 @@ import {
     CONTEXT_BREAKDOWN_CATEGORIES,
     estimateSessionContextBreakdown,
     estimateTextTokens,
+    reconcileContextBreakdownCategories,
 } from "@shared/tokenEstimator.js";
 import { ipcPayloadForRenderer } from "./rendererSession.js";
 import { normalizeToolResult, toolResultContent } from "@shared/toolResult.js";
 import { computerUseSystemPromptSection } from "./tools/computerUseTools.js";
+import { requestAskUserChoice } from "./askBridge.js";
 
 const HOOK_LOG_LIMIT = 80;
+
+const ASK_USER_SYSTEM_PROMPT = `<ask_user_tool>
+当用户需求含糊（例如「创建打卡/小程序」但未说明平台或范围）时，必须先调用 \`ask_user\` 工具，再执行写文件或 bash。
+questions 为数组，每项含 prompt 与 options（id、label）。不要替用户做选择。
+</ask_user_tool>`;
 
 export class AgentRuntime {
     constructor(sessionStore, configStore, llmClient, toolRegistry, workspaceMemory, skillLoader, mainWindowGetter) {
@@ -98,6 +111,7 @@ export class AgentRuntime {
         this.skillLoader = skillLoader;
         this.mainWindowGetter = mainWindowGetter;
         this.busyBySession = new Map();
+        this.runStartedAtBySession = new Map();
         this.compactingSessions = new Set();
         this.pendingQueues = new Map();
         this.abortControllers = new Map();
@@ -175,9 +189,112 @@ export class AgentRuntime {
         this.emit(IPC_CHANNELS.onHookLog, { sessionId, entry, logs: list });
     }
 
+
+    llmStreamEnabled() {
+        const ui = mergeUiConfig(this.configStore.get().ui);
+        return ui.llm_stream !== false;
+    }
+
+    codexTimelineEnabled() {
+        const ui = mergeUiConfig(this.configStore.get().ui);
+        return ui.codex_timeline !== false;
+    }
+
+    async runAskUserInteraction(sessionId, runId, questions) {
+        const askId = randomUUID();
+        const list = Array.isArray(questions) ? questions : [];
+        const previewLines = list.map((question, index) => {
+            const prompt = question.prompt || question.question || `问题 ${index + 1}`;
+            const optionLabels = (question.options || [])
+                .map((option) => option.label || option.id)
+                .filter(Boolean)
+                .join(" · ");
+            return optionLabels ? `${prompt}\n（${optionLabels}）` : prompt;
+        });
+        const sessionMeta = this.sessionStore.get(sessionId).meta;
+        const askNotice = withAssistantModel(
+            {
+                id: randomUUID(),
+                role: "assistant",
+                content: previewLines.length
+                    ? `需要你确认：\n\n${previewLines.join("\n\n")}`
+                    : "需要你确认选项后继续。",
+                interactive: {
+                    type: "choice",
+                    askId,
+                    questions: list,
+                    resolved: false,
+                },
+                createdAt: new Date().toISOString(),
+                runId,
+            },
+            { modelId: sessionMeta.modelId },
+        );
+        let session = this.sessionStore.appendMessage(sessionId, askNotice);
+        this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: askNotice });
+        this.emit(IPC_CHANNELS.onSessionChanged, session);
+
+        const answers = await requestAskUserChoice(this.mainWindowGetter(), {
+            id: askId,
+            questions: list,
+        });
+        session = this.sessionStore.updateMessage(sessionId, askNotice.id, {
+            interactive: { ...askNotice.interactive, resolved: true, answers },
+        });
+        this.emit(IPC_CHANNELS.onSessionChanged, session);
+        return answers;
+    }
+
+    async maybeRunStartupClarification(sessionId, runId, userText) {
+        if (this.executionMode() === "plan") {
+            return;
+        }
+        const clarification = detectClarificationNeeded(userText);
+        if (!clarification?.questions?.length) {
+            return;
+        }
+        this.setBusy(sessionId, true);
+        try {
+            const answers = await this.runAskUserInteraction(
+                sessionId,
+                runId,
+                clarification.questions,
+            );
+            const summary = formatClarificationAnswers(clarification.questions, answers);
+            const choiceMessage = {
+                id: randomUUID(),
+                role: "user",
+                content: `[用户选择]\n${summary}`,
+                createdAt: new Date().toISOString(),
+                runId,
+            };
+            let session = this.sessionStore.appendMessage(sessionId, choiceMessage);
+            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: choiceMessage });
+            this.emit(IPC_CHANNELS.onSessionChanged, session);
+        } catch (error) {
+            if (error?.name === "AbortError" || this.cancelledRuns.has(sessionId)) {
+                throw error;
+            }
+            console.warn("[CRAgent] startup clarification skipped:", error.message);
+        } finally {
+            if (!this.busyBySession.get(sessionId)) {
+                this.setBusy(sessionId, false);
+            }
+        }
+    }
+
     setBusy(sessionId, busy) {
         this.busyBySession.set(sessionId, busy);
-        this.emit(IPC_CHANNELS.onBusyChanged, { sessionId, busy });
+        if (busy) {
+            this.runStartedAtBySession.set(sessionId, new Date().toISOString());
+        } else {
+            this.runStartedAtBySession.delete(sessionId);
+        }
+        this.emit(IPC_CHANNELS.onBusyChanged, {
+            sessionId,
+            busy,
+            runStartedAt: busy ? this.runStartedAtBySession.get(sessionId) : null,
+        });
     }
 
     defaultAgent() {
@@ -190,6 +307,26 @@ export class AgentRuntime {
     executionMode() {
         const mode = this.configStore.get().agents?.default?.execution_mode;
         return mode === "plan" ? "plan" : "goal";
+    }
+
+    maybeAutoEnterPlanMode(sessionId, input) {
+        if (this.executionMode() === "plan" || !shouldStartInPlanMode(input)) {
+            return false;
+        }
+        const workspace = resolveSessionWorkspace(this.sessionStore, this.configStore, sessionId);
+        ensurePlansDirectory(workspace);
+        const config = this.configStore.get();
+        this.configStore.update({
+            ...config,
+            agents: {
+                ...config.agents,
+                default: {
+                    ...(config.agents?.default || {}),
+                    execution_mode: "plan",
+                },
+            },
+        });
+        return true;
     }
 
     buildSystemPromptContent(session) {
@@ -212,6 +349,9 @@ export class AgentRuntime {
             parts.push(workspace);
         }
         const agent = this.defaultAgent();
+        if (agent?.tools?.enable_tools !== false) {
+            parts.push(ASK_USER_SYSTEM_PROMPT);
+        }
         if (agent?.tools?.enable_skills !== false) {
             parts.push(this.skillLoader.systemPromptSection());
         }
@@ -277,16 +417,30 @@ export class AgentRuntime {
             systemPromptText,
             categories: breakdown.categories,
         });
-        if (systemPromptText && !categories.some((category) => category.id === "systemPrompt")) {
-            const definition = CONTEXT_BREAKDOWN_CATEGORIES.find(
+        if (systemPromptText) {
+            const systemTokens = estimateTextTokens(systemPromptText);
+            const systemDefinition = CONTEXT_BREAKDOWN_CATEGORIES.find(
                 (category) => category.id === "systemPrompt",
             );
-            categories.unshift({
-                ...definition,
-                tokens: estimateTextTokens(systemPromptText),
-                previewText: systemPromptText,
-            });
+            const existingIndex = categories.findIndex((category) => category.id === "systemPrompt");
+            if (existingIndex >= 0) {
+                categories[existingIndex] = {
+                    ...categories[existingIndex],
+                    tokens: systemTokens,
+                    previewText: systemPromptText,
+                };
+            } else if (systemDefinition) {
+                categories.unshift({
+                    ...systemDefinition,
+                    tokens: systemTokens,
+                    previewText: systemPromptText,
+                });
+            }
         }
+        categories = reconcileContextBreakdownCategories(
+            categories.filter((category) => category.tokens > 0),
+            breakdown.tokens,
+        );
         return { ...breakdown, categories, systemPromptText };
     }
 
@@ -343,7 +497,7 @@ export class AgentRuntime {
             messages.push(
                 ...session.messages
                     .slice(fromIndex)
-                    .filter((message) => !isContextDividerMessage(message)),
+                    .filter((message) => !isContextDividerMessage(message) && !message.streaming),
             );
         }
         return messages;
@@ -392,7 +546,7 @@ export class AgentRuntime {
         return { skillName, rest, loaded };
     }
 
-    enqueueMessage(sessionId, rawInput, images = [], atMentions = [], userText = null) {
+    enqueueMessage(sessionId, rawInput, images = [], atMentions = [], userText = null, options = {}) {
         const queue = this.pendingQueues.get(sessionId) || [];
         queue.push({
             id: randomUUID(),
@@ -400,6 +554,7 @@ export class AgentRuntime {
             images,
             atMentions: normalizeAtMentions(atMentions),
             userText,
+            options,
             createdAt: new Date().toISOString(),
         });
         this.pendingQueues.set(sessionId, queue);
@@ -440,7 +595,14 @@ export class AgentRuntime {
         if (!next) {
             return;
         }
-        await this.dispatchUserMessage(sessionId, next.input, next.images, next.atMentions, next.userText);
+        await this.dispatchUserMessage(
+            sessionId,
+            next.input,
+            next.images,
+            next.atMentions,
+            next.userText,
+            next.options || {},
+        );
     }
 
     createAbortSignal(sessionId) {
@@ -596,6 +758,22 @@ export class AgentRuntime {
                     arguments: JSON.stringify(toolInput),
                 },
             };
+        }
+
+        if (toolName === "ask_user") {
+            const questions = Array.isArray(toolInput.questions) ? toolInput.questions : [];
+            try {
+                const answers = await this.runAskUserInteraction(
+                    sessionId,
+                    context.runId,
+                    questions,
+                );
+                return normalizeToolResult(JSON.stringify({ answers }, null, 2));
+            } catch (error) {
+                return normalizeToolResult(
+                    `Error: ${error instanceof Error ? error.message : String(error)}`,
+                );
+            }
         }
 
         let result = await this.toolRegistry.execute(call, context);
@@ -794,7 +972,14 @@ export class AgentRuntime {
         return `Sub-agent "${description}" reached tool round limit before finishing.`;
     }
 
-    async sendUserMessage(sessionId, rawInput, images = [], atMentions = [], userText = null) {
+    async sendUserMessage(
+        sessionId,
+        rawInput,
+        images = [],
+        atMentions = [],
+        userText = null,
+        options = {},
+    ) {
         const input = rawInput.trim();
         const normalizedMentions = normalizeAtMentions(atMentions);
         const storedImages = Array.isArray(images)
@@ -809,13 +994,28 @@ export class AgentRuntime {
             return;
         }
         if (this.busyBySession.get(sessionId)) {
-            this.enqueueMessage(sessionId, rawInput, storedImages, normalizedMentions, userText);
+            this.enqueueMessage(sessionId, rawInput, storedImages, normalizedMentions, userText, options);
             return { queued: true };
         }
-        await this.dispatchUserMessage(sessionId, rawInput, storedImages, normalizedMentions, userText);
+        await this.dispatchUserMessage(
+            sessionId,
+            rawInput,
+            storedImages,
+            normalizedMentions,
+            userText,
+            options,
+        );
+        return { queued: false, config: this.configStore.get() };
     }
 
-    async dispatchUserMessage(sessionId, rawInput, storedImages = [], atMentions = [], userText = null) {
+    async dispatchUserMessage(
+        sessionId,
+        rawInput,
+        storedImages = [],
+        atMentions = [],
+        userText = null,
+        options = {},
+    ) {
         const normalizedMentions = normalizeAtMentions(atMentions);
         const input = rawInput.trim();
         const displayText = userText != null ? String(userText).trim() : input;
@@ -860,6 +1060,12 @@ export class AgentRuntime {
                 ? expandAtMentionsToAbsolute(skillInvoke.rest, projectRoot)
                 : `请按照已加载的 skill「${skillInvoke.skillName}」执行任务。`;
         }
+        const autoPlanMode = options.skipAutoPlanMode
+            ? false
+            : this.maybeAutoEnterPlanMode(sessionId, displayText || input);
+        if (autoPlanMode) {
+            messageContent = [messageContent, "", PLAN_MODE_AUTO_SYSTEM_HINT].join("\n");
+        }
 
         const promptHook = await this.runUserPromptSubmitHook(sessionId, messageContent);
         if (promptHook.blocked) {
@@ -881,9 +1087,10 @@ export class AgentRuntime {
             content: messageContent,
             createdAt: new Date().toISOString(),
             runId,
-            ...(normalizedMentions.length
-                ? { atMentions: normalizedMentions, userText: displayText }
+            ...(normalizedMentions.length || autoPlanMode
+                ? { userText: displayText, ...(normalizedMentions.length ? { atMentions: normalizedMentions } : {}) }
                 : {}),
+            ...(autoPlanMode ? { systemHint: PLAN_MODE_AUTO_SYSTEM_HINT } : {}),
             ...(skillInvoke
                 ? { skillName: skillInvoke.skillName, skillLoaded: true }
                 : {}),
@@ -905,6 +1112,8 @@ export class AgentRuntime {
         }
         this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: userMessage });
         this.emit(IPC_CHANNELS.onSessionChanged, session);
+
+        await this.maybeRunStartupClarification(sessionId, runId, displayText || input);
 
         await this.runLoop(session, runId);
         await this.processQueue(sessionId);
@@ -928,7 +1137,14 @@ export class AgentRuntime {
                 },
             },
         });
-        await this.sendUserMessage(sessionId, buildExitPlanModeUserMessage(content, filePath));
+        await this.sendUserMessage(
+            sessionId,
+            buildExitPlanModeUserMessage(content, filePath),
+            [],
+            [],
+            null,
+            { skipAutoPlanMode: true },
+        );
         return {
             config: this.configStore.get(),
             planFilePath: filePath,
@@ -1108,8 +1324,15 @@ export class AgentRuntime {
         }
     }
 
-    requestAgentChat(sessionId, chatArgs) {
-        return this.requestAgentLlm(sessionId, () => this.llmClient.chat(chatArgs));
+    requestAgentChat(sessionId, chatArgsOrFactory, streamHandlers = {}) {
+        return this.requestAgentLlm(sessionId, () => {
+            const chatArgs =
+                typeof chatArgsOrFactory === "function"
+                    ? chatArgsOrFactory()
+                    : chatArgsOrFactory;
+            const onDelta = this.llmStreamEnabled() ? streamHandlers.onDelta : undefined;
+            return this.llmClient.chat({ ...chatArgs, onDelta });
+        });
     }
 
     async prepareSubAgentContext(sessionId, messages, model) {
@@ -1483,13 +1706,77 @@ export class AgentRuntime {
                         toolSchemas = this.toolRegistry.schemas({ unlockedToolNames });
                     }
                 }
-                const chatResult = await this.requestAgentChat(sessionId, {
-                    messages: this.messagesForLLM(session),
-                    model,
-                    modelChain: this.modelChainForSession(session),
-                    tools: toolSchemas,
-                    signal,
-                });
+                const streamHandlers = {};
+                let streamingMessageId = null;
+                if (this.llmStreamEnabled()) {
+                    streamingMessageId = randomUUID();
+                    const placeholder = withAssistantModel(
+                        {
+                            id: streamingMessageId,
+                            role: "assistant",
+                            content: "",
+                            streaming: true,
+                            createdAt: new Date().toISOString(),
+                            runId,
+                        },
+                        { modelId: session.meta.modelId },
+                    );
+                    session = this.sessionStore.appendMessage(sessionId, placeholder);
+                    this.emit(IPC_CHANNELS.onMessageAppended, {
+                        sessionId,
+                        message: placeholder,
+                    });
+                    this.emit(IPC_CHANNELS.onSessionChanged, session);
+                    let lastEmit = 0;
+                    const emitStreamDelta = (content, force = false) => {
+                        if (content == null || this.wasRunCancelled(sessionId)) {
+                            return;
+                        }
+                        const now = Date.now();
+                        if (!force && now - lastEmit < 60) {
+                            return;
+                        }
+                        lastEmit = now;
+                        session = this.sessionStore.updateMessage(sessionId, streamingMessageId, {
+                            content: String(content),
+                            streaming: true,
+                        });
+                        const updated = session.messages.find((m) => m.id === streamingMessageId);
+                        if (updated) {
+                            this.emit(IPC_CHANNELS.onMessageDelta, {
+                                sessionId,
+                                messageId: streamingMessageId,
+                                message: updated,
+                            });
+                            this.emit(IPC_CHANNELS.onSessionChanged, session);
+                        }
+                    };
+                    streamHandlers.onDelta = ({ content }) => emitStreamDelta(content);
+                    streamHandlers.flushDelta = (content) => emitStreamDelta(content, true);
+                }
+
+                const chatResult = await this.requestAgentChat(
+                    sessionId,
+                    () => {
+                        const refreshedSession = this.sessionStore.get(sessionId);
+                        return {
+                            messages: this.messagesForLLM(refreshedSession),
+                            model,
+                            modelChain: this.modelChainForSession(refreshedSession),
+                            tools: toolSchemas,
+                            signal,
+                        };
+                    },
+                    streamHandlers,
+                );
+                if (streamingMessageId && streamHandlers.flushDelta) {
+                    const streamed = this.sessionStore
+                        .get(sessionId)
+                        .messages.find((m) => m.id === streamingMessageId);
+                    if (streamed?.content != null) {
+                        streamHandlers.flushDelta(streamed.content);
+                    }
+                }
                 if (this.wasRunCancelled(sessionId)) {
                     return;
                 }
@@ -1519,8 +1806,22 @@ export class AgentRuntime {
                     const note = `(已自动切换至备用模型 ${choice.usedModel.providerKey}/${choice.usedModel.modelId})\n\n`;
                     assistant = { ...assistant, content: `${note}${assistant.content || ""}` };
                 }
-                session = this.sessionStore.appendMessage(session.meta.id, assistant);
-                this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: assistant });
+                if (streamingMessageId) {
+                    const { streaming: _stream, id: _id, createdAt: _createdAt, ...rest } = assistant;
+                    session = this.sessionStore.updateMessage(sessionId, streamingMessageId, {
+                        ...rest,
+                        streaming: false,
+                    });
+                    assistant = session.messages.find((m) => m.id === streamingMessageId) || assistant;
+                    this.emit(IPC_CHANNELS.onMessageDelta, {
+                        sessionId,
+                        messageId: streamingMessageId,
+                        message: assistant,
+                    });
+                } else {
+                    session = this.sessionStore.appendMessage(session.meta.id, assistant);
+                    this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: assistant });
+                }
                 this.emit(IPC_CHANNELS.onSessionChanged, session);
 
                 const calls = assistant.toolCalls || [];
@@ -1553,6 +1854,19 @@ export class AgentRuntime {
                     if (this.wasRunCancelled(sessionId)) {
                         return;
                     }
+                    let toolInput = {};
+                    try {
+                        toolInput = JSON.parse(call.function.arguments || "{}");
+                    } catch {
+                        toolInput = {};
+                    }
+                    this.emit(IPC_CHANNELS.onToolStarted, {
+                        sessionId,
+                        runId,
+                        toolName: call.function.name,
+                        toolCallId: call.id,
+                        toolInput,
+                    });
                     const result = await this.executeToolWithHooks(
                         call,
                         {
