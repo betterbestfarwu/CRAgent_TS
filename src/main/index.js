@@ -317,6 +317,14 @@ function registerIpc() {
         );
         return sessionForRenderer(session);
     });
+    ipcMain.handle(IPC_CHANNELS.updateSessionProject, (_event, args) => {
+        const session = sessionStore.updateProject(args.sessionId, args.projectId);
+        mainWindow?.webContents.send(
+            IPC_CHANNELS.onSessionChanged,
+            sessionForRenderer(session),
+        );
+        return sessionForRenderer(session);
+    });
     ipcMain.handle(IPC_CHANNELS.updateModel, (_event, args) => {
         const session = sessionStore.updateModel(args.sessionId, args.providerKey, args.modelId);
         mainWindow?.webContents.send(

@@ -22,6 +22,7 @@ import {
   filterSlashSkills,
 } from "./ComposerSlashMenu.jsx";
 import { ComposerAtMenu } from "./ComposerAtMenu.jsx";
+import { ComposerProjectPicker } from "./ComposerProjectPicker.jsx";
 import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
 import {
   appendSpaceAfterInsertAt,
@@ -40,7 +41,11 @@ import { PlanApprovalDialog } from "./PlanApprovalDialog.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { TitleBar } from "./TitleBar.jsx";
 import { displayTitle } from "./sidebarUtils.js";
-import { isDefaultSessionTitle, titleFromFirstUserMessage } from "@shared/sessionTitle";
+import {
+  isDefaultSessionTitle,
+  sessionHasUserMessages,
+  titleFromFirstUserMessage,
+} from "@shared/sessionTitle";
 import { parseActiveSlashCommand } from "@shared/chatCommands.js";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
@@ -724,6 +729,18 @@ export function App() {
     return projects.find((project) => project.id === projectId) || null;
   }, [currentSession?.meta?.projectId, projects]);
 
+  const showComposerProjectPicker = useMemo(() => {
+    if (!currentSession || page !== "chat") return false;
+    if (!isDefaultSessionTitle(currentSession.meta.title)) return false;
+    if (currentSession.meta.hasUserMessages) return false;
+    return !sessionHasUserMessages(currentSession.messages);
+  }, [currentSession, page]);
+
+  const composerProjectLabel = useMemo(() => {
+    if (activeProject?.name) return activeProject.name;
+    return "选择项目";
+  }, [activeProject?.name]);
+
   const atPathParts = useMemo(() => {
     if (!atMention) return { relativePath: "", filter: "" };
     return splitAtQueryPath(atMention.query);
@@ -1018,7 +1035,7 @@ export function App() {
 
   async function handleAddProjectDirectory(directoryPath) {
     const cleanPath = String(directoryPath || "").trim();
-    if (!cleanPath) return;
+    if (!cleanPath) return null;
     try {
       const project = await window.cragent.addProject(cleanPath);
       setProjects((prev) => {
@@ -1028,8 +1045,10 @@ export function App() {
         return [...prev, project].sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
       });
       ensureProjectExpanded(project.id);
+      return project;
     } catch (err) {
       showSessionError(err instanceof Error ? err.message : String(err), currentSession?.meta?.id);
+      return null;
     }
   }
 
@@ -1617,7 +1636,7 @@ export function App() {
             </div>
 
             <div className="composer">
-              <div className="composer-shell">
+              <div className={`composer-shell${showComposerProjectPicker ? " has-project-picker" : ""}`}>
                 {showSlashMenu ? (
                   <ComposerSlashMenu
                     skills={skills}
@@ -1655,7 +1674,7 @@ export function App() {
                   </div>
                 ) : null}
                 <div
-                  className={`composer-box${composerDragOver ? " composer-drag-over" : ""}${messageQueue.length ? " has-queue-toggle" : ""}`}
+                  className={`composer-box${composerDragOver ? " composer-drag-over" : ""}${messageQueue.length ? " has-queue-toggle" : ""}${showComposerProjectPicker ? " has-project-picker" : ""}`}
                   onDragEnter={(e) => {
                     if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return;
                     e.preventDefault();
@@ -2040,6 +2059,22 @@ export function App() {
                   </div>
                 </div>
                 </div>
+                {showComposerProjectPicker ? (
+                  <ComposerProjectPicker
+                    projects={projects}
+                    selectedProjectId={currentSession?.meta?.projectId ?? null}
+                    displayLabel={composerProjectLabel}
+                    onSelectProject={(projectId) => void handleNewChat(projectId ?? null)}
+                    onAddProject={async () => {
+                      const directoryPath = await window.cragent.pickProjectDirectory?.();
+                      if (!directoryPath) return;
+                      const project = await handleAddProjectDirectory(directoryPath);
+                      if (project?.id) {
+                        await handleNewChat(project.id);
+                      }
+                    }}
+                  />
+                ) : null}
               </div>
             </div>
             </div>

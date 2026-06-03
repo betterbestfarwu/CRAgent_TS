@@ -549,6 +549,25 @@ export function installWebBridge() {
       emit(listeners.sessionChanged, session);
     },
 
+    async updateSessionProject({ sessionId, projectId }) {
+      const normalized =
+        typeof projectId === "string" && projectId.trim() ? projectId.trim() : null;
+      const next = updateState((state) => {
+        const sessions = state.sessions.map((item) =>
+          item.meta.id === sessionId
+            ? {
+                ...item,
+                meta: { ...item.meta, projectId: normalized, updatedAt: nowIso() },
+              }
+            : item,
+        );
+        return { ...state, sessions };
+      });
+      const session = next.sessions.find((item) => item.meta.id === sessionId);
+      emit(listeners.sessionChanged, session);
+      return session;
+    },
+
     async updateConfig(nextConfig) {
       updateState((state) => ({ ...state, config: nextConfig }));
       return nextConfig;

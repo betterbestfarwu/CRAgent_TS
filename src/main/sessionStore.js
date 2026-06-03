@@ -366,6 +366,22 @@ export class SessionStore {
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
     }
 
+    updateProject(sessionId, projectId) {
+        this.ensureMigrated(sessionId);
+        const normalized = normalizeProjectId(projectId);
+        if (normalized) {
+            const exists = this.listProjects().some((item) => item.id === normalized);
+            if (!exists) {
+                throw new Error("未找到项目");
+            }
+        }
+        const meta = readMeta(this.sessionsDir, sessionId);
+        meta.projectId = normalized;
+        meta.updatedAt = nowIso();
+        writeMeta(this.sessionsDir, meta);
+        return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
+    }
+
     persist(session) {
         this.ensureMigrated(session.meta.id);
         const payload = externalizeSessionImages(session, this.sessionsDir);
