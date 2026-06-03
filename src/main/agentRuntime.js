@@ -92,6 +92,10 @@ import { requestAskUserChoice } from "./askBridge.js";
 
 const HOOK_LOG_LIMIT = 80;
 
+const ASK_USER_SYSTEM_PROMPT = `<ask_user_tool>
+When you need the user to choose among options (architecture, scope, platform, etc.), call the \`ask_user\` tool with a \`questions\` array. Each question needs \`prompt\` and \`options\` (\`id\`, \`label\`). Do not guess—wait for the user's selection before continuing.
+</ask_user_tool>`;
+
 export class AgentRuntime {
     constructor(sessionStore, configStore, llmClient, toolRegistry, workspaceMemory, skillLoader, mainWindowGetter) {
         this.sessionStore = sessionStore;
@@ -257,6 +261,9 @@ export class AgentRuntime {
             parts.push(workspace);
         }
         const agent = this.defaultAgent();
+        if (agent?.tools?.enable_tools !== false) {
+            parts.push(ASK_USER_SYSTEM_PROMPT);
+        }
         if (agent?.tools?.enable_skills !== false) {
             parts.push(this.skillLoader.systemPromptSection());
         }
@@ -666,13 +673,49 @@ export class AgentRuntime {
         }
 
         if (toolName === "ask_user") {
+            const askId = randomUUID();
+            const questions = Array.isArray(toolInput.questions) ? toolInput.questions : [];
+            const previewLines = questions.map((question, index) => {
+                const prompt = question.prompt || question.question || `问题 ${index + 1}`;
+                const optionLabels = (question.options || [])
+                    .map((option) => option.label || option.id)
+                    .filter(Boolean)
+                    .join(" · ");
+                return optionLabels ? `${prompt}\n（${optionLabels}）` : prompt;
+            });
+            const sessionMeta = this.sessionStore.get(sessionId).meta;
+            const askNotice = withAssistantModel(
+                {
+                    id: randomUUID(),
+                    role: "assistant",
+                    content: previewLines.length
+                        ? `需要你确认：\n\n${previewLines.join("\n\n")}`
+                        : "需要你确认选项后继续。",
+                    interactive: {
+                        type: "choice",
+                        askId,
+                        questions,
+                        resolved: false,
+                    },
+                    createdAt: new Date().toISOString(),
+                    runId: context.runId,
+                },
+                { modelId: sessionMeta.modelId },
+            );
+            let askSession = this.sessionStore.appendMessage(sessionId, askNotice);
+            this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: askNotice });
+            this.emit(IPC_CHANNELS.onSessionChanged, askSession);
+
             try {
                 const answers = await requestAskUserChoice(this.mainWindowGetter(), {
-                    questions: toolInput.questions || [],
+                    id: askId,
+                    questions,
                 });
-                return normalizeToolResult(
-                    JSON.stringify({ answers }, null, 2),
-                );
+                askSession = this.sessionStore.updateMessage(sessionId, askNotice.id, {
+                    interactive: { ...askNotice.interactive, resolved: true, answers },
+                });
+                this.emit(IPC_CHANNELS.onSessionChanged, askSession);
+                return normalizeToolResult(JSON.stringify({ answers }, null, 2));
             } catch (error) {
                 return normalizeToolResult(
                     `Error: ${error instanceof Error ? error.message : String(error)}`,

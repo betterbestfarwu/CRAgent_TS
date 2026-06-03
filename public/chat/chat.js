@@ -920,7 +920,9 @@
       }
       var askHtml = '';
       if (pendingAsk && pendingAsk.questions && pendingAsk.questions.length) {
-        askHtml = renderAskChoiceCard(pendingAsk);
+        askHtml =
+          '<div class="run-status-hint">请在对话区点击选项确认</div>' +
+          renderAskChoiceCard(pendingAsk);
       }
       footer.innerHTML =
         '<div class="run-status-line">' + escapeText(label) + '</div>' +
@@ -933,7 +935,9 @@
     }
   }
 
-  function renderAskChoiceCard(ask) {
+  function renderAskChoiceCard(ask, options) {
+    var opts = options || {};
+    var resolved = Boolean(opts.resolved);
     var questions = ask.questions || [];
     return questions
       .map(function (q, qi) {
@@ -942,8 +946,10 @@
           var id = opt.id || String(oi + 1);
           var label = escapeText(opt.label || opt.id || '');
           return (
-            '<button type="button" class="choice-option" data-ask-id="' +
-            escapeAttr(ask.id || '') +
+            '<button type="button" class="choice-option"' +
+            (resolved ? ' disabled' : '') +
+            ' data-ask-id="' +
+            escapeAttr(ask.id || ask.askId || '') +
             '" data-question-index="' +
             qi +
             '" data-option-id="' +
@@ -964,6 +970,23 @@
         );
       })
       .join('');
+  }
+
+  function appendInteractiveChoice(bubble, msg) {
+    var interactive = msg && msg.interactive;
+    if (!interactive || interactive.type !== 'choice') return;
+    var card = document.createElement('div');
+    card.className = 'choice-card-host';
+    card.innerHTML = renderAskChoiceCard(
+      { id: interactive.askId, questions: interactive.questions },
+      { resolved: interactive.resolved },
+    );
+    bubble.appendChild(card);
+    if (!interactive.resolved) {
+      requestAnimationFrame(function () {
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
   }
 
   function patchStreamingMessage(message) {
@@ -1057,6 +1080,7 @@
         contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
       }
       bubble.appendChild(contentWrap);
+      appendInteractiveChoice(bubble, contentMsg);
       postProcessRenderedContent(bubble);
       setupCollapsibleContent(contentWrap);
     } else if (shouldShowPlanPreview(null, runId)) {
@@ -1218,6 +1242,7 @@
         body.className = 'bubble-collapse-body';
         body.innerHTML = window.MD.render(msg.content || '');
         bubble.appendChild(body);
+        appendInteractiveChoice(bubble, msg);
         postProcessRenderedContent(body);
         setupCollapsibleContent(body);
       } else if (msg.role === 'user' && msg.plan_rejection) {
@@ -1566,6 +1591,14 @@
     setPendingAsk: function (value) {
       pendingAsk = value && typeof value === 'object' ? value : null;
       renderRunStatusFooter();
+      if (pendingAsk) {
+        requestAnimationFrame(function () {
+          var footer = document.getElementById('run-status-footer');
+          if (footer) {
+            footer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        });
+      }
     },
     setActiveTool: function (value) {
       activeTool = value && typeof value === 'object' ? value : null;

@@ -51,6 +51,7 @@ function toWireMessage(message, planContext) {
     ...(getMessageModelId(message) ? { model_id: getMessageModelId(message) } : {}),
     ...(message.runId ? { run_id: message.runId } : {}),
     ...(message.streaming ? { streaming: true } : {}),
+    ...(message.interactive ? { interactive: message.interactive } : {}),
     ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
     ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
     ...(message.name ? { name: message.name } : {}),

@@ -6,9 +6,6 @@ export function createAuthAwareConfirm(baseConfirm, getAuthMode) {
     if (mode === "fullAccess") {
       return true;
     }
-    if (mode === "autoReview") {
-      return true;
-    }
     return baseConfirm(toolName, details);
   };
 }
@@ -21,9 +18,6 @@ export function shouldRequireToolConfirmation(tool, getAuthMode) {
   if (mode === "fullAccess") {
     return false;
   }
-  if (mode === "autoReview") {
-    return false;
-  }
   return true;
 }
 
@@ -32,7 +26,7 @@ export function shouldRequireBashConfirmation(safety, getAuthMode) {
     return false;
   }
   const mode = normalizeAuthMode(getAuthMode());
-  if (mode === "fullAccess" || mode === "autoReview") {
+  if (mode === "fullAccess") {
     return false;
   }
   return true;
@@ -40,5 +34,5 @@ export function shouldRequireBashConfirmation(safety, getAuthMode) {
 
 export function shouldRequireNetworkConfirmation(getAuthMode) {
   const mode = normalizeAuthMode(getAuthMode());
-  return mode === "default";
+  return mode !== "fullAccess";
 }

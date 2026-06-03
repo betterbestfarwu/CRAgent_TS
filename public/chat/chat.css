@@ -1126,6 +1126,13 @@ html, body {
   margin-top: 4px;
 }
 
+.run-status-hint {
+  color: var(--cursor-accent);
+  font-size: 13px;
+  margin-top: 6px;
+  margin-bottom: 4px;
+}
+
 .codex-timeline {
   display: flex;
   flex-direction: column;
@@ -1155,6 +1162,15 @@ html, body {
 
 @keyframes stream-cursor {
   50% { opacity: 0; }
+}
+
+.choice-card-host {
+  margin-top: 12px;
+}
+
+.choice-card-host .choice-card {
+  border-color: var(--cursor-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cursor-accent) 25%, transparent);
 }
 
 .choice-card {
