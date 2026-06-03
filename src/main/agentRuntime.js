@@ -83,6 +83,7 @@ import {
     CONTEXT_BREAKDOWN_CATEGORIES,
     estimateSessionContextBreakdown,
     estimateTextTokens,
+    reconcileContextBreakdownCategories,
 } from "@shared/tokenEstimator.js";
 import { ipcPayloadForRenderer } from "./rendererSession.js";
 import { normalizeToolResult, toolResultContent } from "@shared/toolResult.js";
@@ -299,16 +300,30 @@ export class AgentRuntime {
             systemPromptText,
             categories: breakdown.categories,
         });
-        if (systemPromptText && !categories.some((category) => category.id === "systemPrompt")) {
-            const definition = CONTEXT_BREAKDOWN_CATEGORIES.find(
+        if (systemPromptText) {
+            const systemTokens = estimateTextTokens(systemPromptText);
+            const systemDefinition = CONTEXT_BREAKDOWN_CATEGORIES.find(
                 (category) => category.id === "systemPrompt",
             );
-            categories.unshift({
-                ...definition,
-                tokens: estimateTextTokens(systemPromptText),
-                previewText: systemPromptText,
-            });
+            const existingIndex = categories.findIndex((category) => category.id === "systemPrompt");
+            if (existingIndex >= 0) {
+                categories[existingIndex] = {
+                    ...categories[existingIndex],
+                    tokens: systemTokens,
+                    previewText: systemPromptText,
+                };
+            } else if (systemDefinition) {
+                categories.unshift({
+                    ...systemDefinition,
+                    tokens: systemTokens,
+                    previewText: systemPromptText,
+                });
+            }
         }
+        categories = reconcileContextBreakdownCategories(
+            categories.filter((category) => category.tokens > 0),
+            breakdown.tokens,
+        );
         return { ...breakdown, categories, systemPromptText };
     }
 

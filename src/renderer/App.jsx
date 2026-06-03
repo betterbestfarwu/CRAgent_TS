@@ -49,7 +49,10 @@ import {
 import { parseActiveSlashCommand } from "@shared/chatCommands.js";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
-import { estimateSessionContextBreakdown } from "@shared/tokenEstimator";
+import {
+  estimateSessionContextBreakdown,
+  reconcileContextBreakdownCategories,
+} from "@shared/tokenEstimator";
 import {
     estimateMcpToolDefinitionTokens,
     getEnabledMcpServers,
@@ -658,7 +661,10 @@ export function App() {
     }
     return {
       ...estimated,
-      categories: storedUsage.categories,
+      categories: reconcileContextBreakdownCategories(
+        storedUsage.categories,
+        estimated.tokens,
+      ),
     };
   }, [currentSession, config, skills, sessionContextUsage]);
 

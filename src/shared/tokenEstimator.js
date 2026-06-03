@@ -128,7 +128,7 @@ function estimateToolDefinitionsTokens(agentTools = {}) {
     return count * TOKENS_PER_TOOL_SCHEMA;
 }
 
-function reconcileBreakdownCategories(categories, targetTotal) {
+export function reconcileContextBreakdownCategories(categories, targetTotal) {
     const order = CONTEXT_BREAKDOWN_CATEGORIES.map((category) => category.id);
     const sorted = [...categories].sort(
         (left, right) => order.indexOf(left.id) - order.indexOf(right.id),
@@ -222,7 +222,7 @@ export function estimateSessionContextBreakdown(session, model, options = {}) {
         conversation: conversationTokens,
     };
 
-    const categories = reconcileBreakdownCategories(
+    const categories = reconcileContextBreakdownCategories(
         CONTEXT_BREAKDOWN_CATEGORIES.map((category) => ({
             ...category,
             tokens: byId[category.id] ?? 0,

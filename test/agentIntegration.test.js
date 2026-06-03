@@ -913,4 +913,7 @@ test("getSessionContextDetail exposes system prompt preview and full-session bre
     const conversation = detail.categories.find((category) => category.id === "conversation");
     assert.ok(conversation);
     assert.match(conversation.previewText, /hello/);
+
+    const categorizedTotal = detail.categories.reduce((sum, category) => sum + category.tokens, 0);
+    assert.equal(categorizedTotal, detail.tokens);
 });

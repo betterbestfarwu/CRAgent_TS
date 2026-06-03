@@ -4,6 +4,7 @@ export {
     estimateMessagesTokens,
     estimateSessionContextUsage,
     estimateSessionContextBreakdown,
+    reconcileContextBreakdownCategories,
     formatTokens,
     estimateTokens,
     CONTEXT_BREAKDOWN_CATEGORIES,

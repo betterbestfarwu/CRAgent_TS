@@ -25,6 +25,7 @@ import {
     estimateMessageTokens,
     estimateSessionContextBreakdown,
     estimateSessionContextUsage,
+    reconcileContextBreakdownCategories,
 } from "../src/shared/tokenEstimator.js";
 
 test("formatCompactSummary extracts summary block and strips analysis", () => {
@@ -317,4 +318,23 @@ test("estimateSessionContextBreakdown keeps non-negative categories aligned to t
     if (system) {
         assert.ok(system.tokens >= 0);
     }
+});
+
+test("reconcileContextBreakdownCategories realigns categories after system prompt is injected", () => {
+    const targetTotal = 8500;
+    const categories = [
+        { id: "toolDefinitions", label: "Tool definitions", color: "#a855f7", tokens: 4700 },
+        { id: "rules", label: "Rules", color: "#22c55e", tokens: 2400 },
+        { id: "skills", label: "Skills", color: "#eab308", tokens: 52 },
+        { id: "mcp", label: "MCP", color: "#ec4899", tokens: 788 },
+        { id: "subagentDefinitions", label: "Subagent definitions", color: "#3b82f6", tokens: 258 },
+        { id: "conversation", label: "Conversation", color: "#ea580c", tokens: 320 },
+        { id: "systemPrompt", label: "System prompt", color: "#9ca3af", tokens: 1000 },
+    ];
+
+    const reconciled = reconcileContextBreakdownCategories(categories, targetTotal);
+    const categorizedTotal = reconciled.reduce((sum, category) => sum + category.tokens, 0);
+
+    assert.equal(categorizedTotal, targetTotal);
+    assert.ok(reconciled.some((category) => category.id === "systemPrompt"));
 });
