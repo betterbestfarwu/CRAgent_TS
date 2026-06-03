@@ -361,7 +361,7 @@ export function App() {
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [input, pendingAtMentions]);
+  }, [input, pendingAtMentions, currentSession?.meta?.id]);
 
   useLayoutEffect(() => {
     resizeComposer();
@@ -401,7 +401,15 @@ export function App() {
     const offMessage = window.cragent.onMessageAppended(({ sessionId, message }) => {
       setCurrentSession((prev) => {
         if (!prev || prev.meta.id !== sessionId) return prev;
-        return { ...prev, messages: [...prev.messages, message] };
+        const messages = [...prev.messages, message];
+        return {
+          ...prev,
+          messages,
+          meta:
+            message.role === "user"
+              ? { ...prev.meta, hasUserMessages: true }
+              : prev.meta,
+        };
       });
       setSessions((prev) =>
         sortSessions(
@@ -729,12 +737,21 @@ export function App() {
     return projects.find((project) => project.id === projectId) || null;
   }, [currentSession?.meta?.projectId, projects]);
 
+  const active = Boolean(currentSession && currentSession.messages.length > 0);
+  const hasComposerDraft =
+    input.length > 0 ||
+    pendingImages.length > 0 ||
+    pendingFiles.length > 0 ||
+    pendingAtMentions.length > 0;
+
   const showComposerProjectPicker = useMemo(() => {
     if (!currentSession || page !== "chat") return false;
     if (!isDefaultSessionTitle(currentSession.meta.title)) return false;
     if (currentSession.meta.hasUserMessages) return false;
-    return !sessionHasUserMessages(currentSession.messages);
-  }, [currentSession, page]);
+    if (sessionHasUserMessages(currentSession.messages)) return false;
+    if (hasComposerDraft || busy) return false;
+    return true;
+  }, [currentSession, page, hasComposerDraft, busy]);
 
   const composerProjectLabel = useMemo(() => {
     if (activeProject?.name) return activeProject.name;
@@ -1245,6 +1262,7 @@ export function App() {
       });
       setPage("chat");
       if (compactLayout) setSidebarOpen(false);
+      requestComposerFocusAtEnd();
     } finally {
       newChatInFlightRef.current = false;
     }
@@ -1447,13 +1465,7 @@ export function App() {
     }
   }
 
-  const active = Boolean(currentSession && currentSession.messages.length > 0);
-  const hasComposerDraft =
-    input.length > 0 ||
-    pendingImages.length > 0 ||
-    pendingFiles.length > 0 ||
-    pendingAtMentions.length > 0;
-  const chatWelcomeLayout = !active && !hasComposerDraft;
+  const chatWelcomeLayout = !active && !hasComposerDraft && !busy;
   const onSettingsPage = page === "settings";
 
   const titleBarLabel = useMemo(() => {
