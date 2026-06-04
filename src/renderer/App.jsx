@@ -25,6 +25,10 @@ import { ComposerAtMenu } from "./ComposerAtMenu.jsx";
 import { ComposerProjectPicker } from "./ComposerProjectPicker.jsx";
 import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
 import {
+  getComposerMentionBeforeSelection,
+  placeComposerCaretAtEnd,
+} from "@shared/composerEditor.js";
+import {
   appendSpaceAfterInsertAt,
   atMentionFileName,
   buildAtNavItems,
@@ -343,6 +347,10 @@ export function App() {
     const el = textareaRef.current;
     if (!el) return false;
     el.focus({ preventScroll: true });
+    if (el.isContentEditable) {
+      placeComposerCaretAtEnd(el);
+      return true;
+    }
     const pos = el.value.length;
     el.setSelectionRange(pos, pos);
     return true;
@@ -1659,6 +1667,7 @@ export function App() {
                   ) : null}
                   <ChatView
                     sessionId={currentSession.meta.id}
+                    sessionModelId={currentSession.meta.modelId}
                     messages={currentSession.messages}
                     todoRuns={visibleTodoRuns}
                     busy={busy}
@@ -1817,22 +1826,22 @@ export function App() {
                     }}
                     onKeyDown={(e, segment) => {
                     if (e.key === "Backspace" && pendingAtMentions.length > 0) {
-                      const el = e.currentTarget;
-                      const start = el?.selectionStart ?? 0;
-                      const end = el?.selectionEnd ?? 0;
-                      if (start === 0 && end === 0) {
-                        e.preventDefault();
-                        if (segment?.textIndex > 0) {
-                          const mentionBeforeSegment = pendingAtMentions
-                            .filter((mention) => mention.insertAt === segment.segmentStart)
-                            .at(-1);
-                          if (mentionBeforeSegment) {
-                            removePendingAtMention(mentionBeforeSegment.id);
-                            return;
-                          }
+                      if (segment?.contentEditable) {
+                        const mentionId = getComposerMentionBeforeSelection(e.currentTarget);
+                        if (mentionId) {
+                          e.preventDefault();
+                          removePendingAtMention(mentionId);
+                          return;
                         }
-                        removeLastPendingAtMention();
-                        return;
+                      } else {
+                        const el = e.currentTarget;
+                        const start = el?.selectionStart ?? 0;
+                        const end = el?.selectionEnd ?? 0;
+                        if (start === 0 && end === 0) {
+                          e.preventDefault();
+                          removeLastPendingAtMention();
+                          return;
+                        }
                       }
                     }
                     if (showSlashMenu && slashNavItems.length) {

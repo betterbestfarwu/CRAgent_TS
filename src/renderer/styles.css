@@ -58,6 +58,7 @@
   --chat-inner-x: 12px;
   --composer-input-toolbar-gap: 10px;
   --composer-hook-input-gap: 10px;
+  --composer-task-input-gap: 10px;
   --composer-fade-gap: 2px;
   --composer-shell-height: 100px;
   --surface-border: var(--cursor-border);
@@ -1455,6 +1456,7 @@ body.app-sidebar-resizing {
   gap: 8px;
   width: 100%;
   padding: 6px 0 0;
+  margin-bottom: var(--composer-task-input-gap);
   font-size: var(--cursor-font-size-sm);
   color: var(--cursor-fg-muted);
   box-sizing: border-box;
@@ -1647,7 +1649,20 @@ body.app-sidebar-resizing {
 }
 
 .composer-input-row.has-at-mentions {
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+
+.composer-input-row.has-at-mentions .composer-input-editor {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.composer-input-editor .composer-at-chip {
+  display: inline-flex;
+  vertical-align: middle;
 }
 
 .composer-at-chip {
@@ -1771,6 +1786,8 @@ body.app-sidebar-resizing {
 
 .composer-input-editor {
   min-width: 80px;
+  min-height: 24px;
+  overflow-y: hidden;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;

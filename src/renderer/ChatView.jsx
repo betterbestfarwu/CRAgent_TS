@@ -89,6 +89,7 @@ function toWireMessage(message, planContext) {
 
 export function ChatView({
   sessionId,
+  sessionModelId,
   messages,
   todoRuns,
   busy,
@@ -182,6 +183,8 @@ export function ChatView({
         syncMessages();
         postToChat("setBusy", busy);
         postToChat("setVerboseThinking", verboseThinkingRef.current);
+        postToChat("setSessionId", sessionId || "");
+        postToChat("setSessionModel", sessionModelId || "");
         const queue = pendingRef.current;
         pendingRef.current = [];
         queue.forEach((run) => run());
@@ -207,6 +210,16 @@ export function ChatView({
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [busy, onDelete, onOpenImage, onOpenPlanFile, postToChat, syncIframeLayout, syncMessages]);
+
+  useEffect(() => {
+    if (!readyRef.current) return;
+    postToChat("setSessionId", sessionId || "");
+  }, [sessionId, postToChat]);
+
+  useEffect(() => {
+    if (!readyRef.current) return;
+    postToChat("setSessionModel", sessionModelId || "");
+  }, [sessionModelId, postToChat]);
 
   useEffect(() => {
     wireSnapshotRef.current = { ids: [], todoJson: "", wireJson: "" };

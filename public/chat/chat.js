@@ -23,6 +23,9 @@
   var todoRunsById = {};
   var chatUi = window.CRAgentChatUtils || {};
   var verboseThinking = false;
+  var currentSessionId = '';
+  var currentSessionModelId = '';
+  var thinkingOpenState = {};
   var planContext = { active: false };
   var planPreviewTarget = { messageId: null, runId: null };
   var PLAN_PREVIEW_MAX_HEIGHT = 280;
@@ -696,6 +699,86 @@
     return String(msg.content || '').trim().length > 0;
   }
 
+  function thinkingStateStorageKey() {
+    return 'cragent:thinking-open:' + (currentSessionId || 'default');
+  }
+
+  function loadThinkingOpenState() {
+    try {
+      var raw = sessionStorage.getItem(thinkingStateStorageKey());
+      thinkingOpenState = raw ? JSON.parse(raw) : {};
+    } catch (_) {
+      thinkingOpenState = {};
+    }
+  }
+
+  function saveThinkingOpenState() {
+    try {
+      sessionStorage.setItem(thinkingStateStorageKey(), JSON.stringify(thinkingOpenState));
+    } catch (_) {}
+  }
+
+  function thinkingGroupKey(scopeId) {
+    return String(scopeId || 'unknown') + ':group';
+  }
+
+  function thinkingStepKey(scopeId, index, item) {
+    var base = String(scopeId || 'unknown') + ':step:' + index;
+    if (item && item.kind) {
+      base += ':' + item.kind;
+    }
+    if (item && item.name) {
+      base += ':' + item.name;
+    }
+    return base;
+  }
+
+  function isThinkingOpen(key) {
+    return Boolean(thinkingOpenState[key]);
+  }
+
+  function setThinkingOpen(key, open) {
+    if (!key) return;
+    if (open) {
+      thinkingOpenState[key] = true;
+    } else {
+      delete thinkingOpenState[key];
+    }
+    saveThinkingOpenState();
+  }
+
+  function captureThinkingOpenState(root) {
+    var scope = root || container;
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll('details.thinking-group, details.thinking-step').forEach(function (el) {
+      var key = el.dataset.thinkingKey;
+      if (!key) return;
+      if (el.open) {
+        thinkingOpenState[key] = true;
+      } else {
+        delete thinkingOpenState[key];
+      }
+    });
+    saveThinkingOpenState();
+  }
+
+  function applyThinkingOpenState(root) {
+    var scope = root || container;
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll('details.thinking-group, details.thinking-step').forEach(function (el) {
+      var key = el.dataset.thinkingKey;
+      if (key && isThinkingOpen(key)) {
+        el.open = true;
+      }
+    });
+  }
+
+  function resolveThinkingScopeId(runId, thinkingIds) {
+    if (runId) return runId;
+    if (thinkingIds && thinkingIds.length) return thinkingIds.join(',');
+    return 'unknown';
+  }
+
   function buildRunThinking(messages) {
     if (chatUi.buildThinkingSummary) {
       return chatUi.buildThinkingSummary(messages, { verbose: verboseThinking });
@@ -777,10 +860,13 @@
     };
   }
 
-  function renderThinkingStep(item) {
+  function renderThinkingStep(item, scopeId, index) {
+    var stepKey = thinkingStepKey(scopeId, index, item);
+    var openAttr = isThinkingOpen(stepKey) ? ' open' : '';
+    var keyAttr = ' data-thinking-key="' + escapeAttr(stepKey) + '"';
     if (item.kind === 'assistant-text') {
       return (
-        '<details class="thinking thinking-step">' +
+        '<details class="thinking thinking-step"' + openAttr + keyAttr + '>' +
           '<summary>Thinking · assistant</summary>' +
           '<div class="thinking-assistant-text">' + window.MD.render(item.content || '') + '</div>' +
         '</details>'
@@ -790,7 +876,7 @@
       var args = item.arguments || '';
       try { args = JSON.stringify(JSON.parse(args), null, 2); } catch (_) {}
       return (
-        '<details class="thinking thinking-step">' +
+        '<details class="thinking thinking-step"' + openAttr + keyAttr + '>' +
           '<summary>Thinking · ' + escapeText(item.name) + '</summary>' +
           '<pre class="tool-call">⚙ ' + escapeText(item.name) + '\n' + escapeText(args) + '</pre>' +
         '</details>'
@@ -798,19 +884,19 @@
     }
     if (item.kind === 'tool-call-group') {
       var count = item.calls ? item.calls.length : 0;
-      var groupBody = (item.calls || []).map(function (call, index) {
+      var groupBody = (item.calls || []).map(function (call, callIndex) {
         var callArgs = call.arguments || '';
         try { callArgs = JSON.stringify(JSON.parse(callArgs), null, 2); } catch (_) {}
         return (
           '<pre class="tool-call">' +
-            escapeText(String(index + 1) + '. ' + (call.name || item.name)) +
+            escapeText(String(callIndex + 1) + '. ' + (call.name || item.name)) +
             '\n' +
             escapeText(callArgs) +
           '</pre>'
         );
       }).join('');
       return (
-        '<details class="thinking thinking-step thinking-step-group">' +
+        '<details class="thinking thinking-step thinking-step-group"' + openAttr + keyAttr + '>' +
           '<summary>Thinking · ' + escapeText(item.name) + ' × ' + count + '</summary>' +
           '<div class="thinking-group-steps">' + groupBody + '</div>' +
         '</details>'
@@ -819,7 +905,7 @@
     if (item.kind === 'tool-result') {
       var label = 'Thinking · tool result' + (item.name ? ' (' + escapeText(item.name) + ')' : '');
       return (
-        '<details class="thinking thinking-step">' +
+        '<details class="thinking thinking-step"' + openAttr + keyAttr + '>' +
           '<summary>' + label + '</summary>' +
           '<pre class="tool-call">' + escapeText(item.content || '') + '</pre>' +
         '</details>'
@@ -827,17 +913,17 @@
     }
     if (item.kind === 'tool-result-group') {
       var resultCount = item.results ? item.results.length : 0;
-      var resultsBody = (item.results || []).map(function (content, index) {
+      var resultsBody = (item.results || []).map(function (content, resultIndex) {
         return (
           '<pre class="tool-call">' +
-            escapeText(String(index + 1) + '. ' + (item.name || 'tool')) +
+            escapeText(String(resultIndex + 1) + '. ' + (item.name || 'tool')) +
             '\n' +
             escapeText(content || '') +
           '</pre>'
         );
       }).join('');
       return (
-        '<details class="thinking thinking-step thinking-step-group">' +
+        '<details class="thinking thinking-step thinking-step-group"' + openAttr + keyAttr + '>' +
           '<summary>Thinking · ' + escapeText(item.name) + ' results × ' + resultCount + '</summary>' +
           '<div class="thinking-group-steps">' + resultsBody + '</div>' +
         '</details>'
@@ -856,16 +942,20 @@
     }
   }
 
-  function renderThinkingBlockHtml(thinking) {
+  function renderThinkingBlockHtml(thinking, scopeId) {
     var items = thinking && thinking.items ? thinking.items : thinking;
     if (!items || !items.length) return '';
     var summary =
       (thinking && thinking.summaryLine) ||
       ('Thinking · ' + items.length + ' step' + (items.length === 1 ? '' : 's'));
-    var body = items.map(renderThinkingStep).join('');
+    var groupKey = thinkingGroupKey(scopeId);
+    var groupOpenAttr = isThinkingOpen(groupKey) ? ' open' : '';
+    var body = items.map(function (item, index) {
+      return renderThinkingStep(item, scopeId, index);
+    }).join('');
     return (
       '<div class="thinking-block">' +
-        '<details class="thinking-group">' +
+        '<details class="thinking-group"' + groupOpenAttr + ' data-thinking-key="' + escapeAttr(groupKey) + '">' +
           '<summary class="thinking-summary-line">' + escapeText(summary) + '</summary>' +
           '<div class="thinking-group-body">' + body + '</div>' +
         '</details>' +
@@ -885,10 +975,14 @@
     }
     var thinkingIds = options.thinkingIds || thinking.ids || [];
     var contentMsg = options.contentMsg || null;
-    var modelId = options.modelId || messageModelId(contentMsg);
+    var modelId = resolveAssistantModelId(
+      options.modelId || messageModelId(contentMsg),
+      options.runMessages,
+    );
     var startedAt = options.startedAt;
     var endedAt = options.endedAt;
     var runId = options.runId || '';
+    var thinkingScopeId = resolveThinkingScopeId(runId, thinkingIds);
 
     var wrap = document.createElement('div');
     wrap.className = 'msg assistant assistant-turn';
@@ -904,7 +998,7 @@
 
     var bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking);
+    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking, thinkingScopeId);
     if (contentMsg) {
       prependPlanSection(bubble, contentMsg, {
         showPreview: shouldShowPlanPreview(contentMsg, runId),
@@ -946,7 +1040,7 @@
         '</button>';
     meta.innerHTML =
       '<span>' +
-      assistantMetaLabel(modelId ? { model_id: modelId } : contentMsg) +
+      assistantMetaLabel(modelId ? { model_id: modelId } : contentMsg, modelId) +
       (time ? ' · ' + time : '') +
       '</span>' +
       '<span class="actions">' +
@@ -960,8 +1054,21 @@
     return (msg && (msg.model_id || msg.modelId)) || '';
   }
 
-  function assistantMetaLabel(msg) {
-    var modelId = messageModelId(msg);
+  function resolveRunModelId(runMessages) {
+    if (!runMessages || !runMessages.length) return '';
+    for (var i = runMessages.length - 1; i >= 0; i -= 1) {
+      var id = messageModelId(runMessages[i]);
+      if (id) return id;
+    }
+    return '';
+  }
+
+  function resolveAssistantModelId(explicitModelId, runMessages) {
+    return explicitModelId || resolveRunModelId(runMessages) || currentSessionModelId || '';
+  }
+
+  function assistantMetaLabel(msg, fallbackModelId) {
+    var modelId = messageModelId(msg) || fallbackModelId || currentSessionModelId || '';
     return modelId ? 'Answered by ' + escapeText(modelId) : 'Answered by';
   }
 
@@ -1192,10 +1299,10 @@
     var bubble = turn.querySelector('.bubble');
     if (!bubble) return;
 
-    var thinkingGroup = bubble.querySelector('.thinking-group');
-    var wasOpen = Boolean(thinkingGroup && thinkingGroup.open);
+    captureThinkingOpenState(turn);
 
-    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking);
+    var thinkingScopeId = resolveThinkingScopeId(runId, thinking.ids);
+    bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking, thinkingScopeId);
 
     if (shouldShowPlanPreview(null, runId)) {
       bubble.insertBefore(
@@ -1204,22 +1311,20 @@
       );
     }
 
-    thinkingGroup = bubble.querySelector('.thinking-group');
-    if (thinkingGroup && wasOpen) {
-      thinkingGroup.open = true;
-    }
+    applyThinkingOpenState(turn);
 
     postProcessRenderedContent(bubble);
 
     var metaLabel = turn.querySelector('.meta > span:first-child');
     if (metaLabel) {
-      var turnModelId = messageModelId(split.thinkingMessages[split.thinkingMessages.length - 1]);
+      var turnModelId = resolveAssistantModelId(messageModelId(split.finalReply), runMessages);
       var time = formatTimeRange(
         runMessages[0] && runMessages[0].created_at,
         runMessages[runMessages.length - 1] && runMessages[runMessages.length - 1].created_at,
       );
       metaLabel.textContent =
-        assistantMetaLabel(turnModelId ? { model_id: turnModelId } : null) + (time ? ' · ' + time : '');
+        assistantMetaLabel(turnModelId ? { model_id: turnModelId } : null, turnModelId) +
+        (time ? ' · ' + time : '');
     }
   }
 
@@ -1268,18 +1373,20 @@
 
     var split = splitRunMessages(collected.runMessages);
     if (split.finalReply) {
+      captureThinkingOpenState(turn);
       var thinking = buildRunThinking(split.thinkingMessages);
-      turn.replaceWith(
-        buildAssistantTurn({
-          thinking: thinking,
-          thinkingIds: thinking.ids.concat([split.finalReply.id]),
-          contentMsg: split.finalReply,
-          modelId: messageModelId(split.finalReply),
-          startedAt: collected.runMessages[0] && collected.runMessages[0].created_at,
-          endedAt: split.finalReply.created_at,
-          runId: collected.runId,
-        }),
-      );
+      var nextTurn = buildAssistantTurn({
+        thinking: thinking,
+        thinkingIds: thinking.ids.concat([split.finalReply.id]),
+        contentMsg: split.finalReply,
+        modelId: resolveAssistantModelId(messageModelId(split.finalReply), collected.runMessages),
+        runMessages: collected.runMessages,
+        startedAt: collected.runMessages[0] && collected.runMessages[0].created_at,
+        endedAt: split.finalReply.created_at,
+        runId: collected.runId,
+      });
+      turn.replaceWith(nextTurn);
+      applyThinkingOpenState(nextTurn);
     } else {
       patchInProgressRunTurn(turn, collected.runId, collected.runMessages);
     }
@@ -1314,15 +1421,17 @@
           if (runMessages.length) {
             var split = splitRunMessages(runMessages);
             var thinking = buildRunThinking(split.thinkingMessages);
-            var turnModelId = split.finalReply
-              ? messageModelId(split.finalReply)
-              : messageModelId(split.thinkingMessages[split.thinkingMessages.length - 1]);
+            var turnModelId = resolveAssistantModelId(
+              split.finalReply ? messageModelId(split.finalReply) : '',
+              runMessages,
+            );
             container.appendChild(
               buildAssistantTurn({
                 thinking: thinking,
                 thinkingIds: thinking.ids.concat(split.finalReply ? [split.finalReply.id] : []),
                 contentMsg: split.finalReply,
                 modelId: turnModelId,
+                runMessages: runMessages,
                 startedAt: runMessages[0] && runMessages[0].created_at,
                 endedAt: (split.finalReply && split.finalReply.created_at) || (runMessages[runMessages.length - 1] && runMessages[runMessages.length - 1].created_at),
                 runId: runId,
@@ -1362,7 +1471,11 @@
             thinking: legacyThinking,
             thinkingIds: legacyThinking.ids.concat(legacyFinal ? [legacyFinal.id] : []),
             contentMsg: legacyFinal,
-            modelId: legacyFinal ? messageModelId(legacyFinal) : '',
+            modelId: resolveAssistantModelId(
+              legacyFinal ? messageModelId(legacyFinal) : '',
+              legacyMessages,
+            ),
+            runMessages: legacyMessages,
             startedAt: legacyStartedAt,
             endedAt: legacyFinal ? legacyFinal.created_at : legacyEndedAt,
             runId: legacyFinal && legacyFinal.run_id ? legacyFinal.run_id : '',
@@ -1374,6 +1487,7 @@
       index += 1;
     }
     applyDefaultExpandToLastMessage();
+    applyThinkingOpenState(container);
     } finally {
       batchPostProcess = false;
       requestAnimationFrame(function () {
@@ -1417,6 +1531,15 @@
       if (planContext.content !== prevContent) {
         refreshPlanPreviewCards();
       }
+    },
+    setSessionId: function (sessionId) {
+      var nextId = sessionId ? String(sessionId) : '';
+      if (nextId === currentSessionId) return;
+      currentSessionId = nextId;
+      loadThinkingOpenState();
+    },
+    setSessionModel: function (modelId) {
+      currentSessionModelId = modelId ? String(modelId) : '';
     },
   };
 
@@ -1520,6 +1643,18 @@
     if (e.key === 'Escape') closeMermaidModal();
   });
 
+  container.addEventListener('toggle', function (e) {
+    var details = e.target;
+    if (!details || !details.matches || !details.matches('details.thinking-group, details.thinking-step')) {
+      return;
+    }
+    var key = details.dataset.thinkingKey;
+    if (key) {
+      setThinkingOpen(key, details.open);
+    }
+  }, true);
+
+  loadThinkingOpenState();
   window.app = app;
   notifyHost({ action: 'ready' });
 })();
