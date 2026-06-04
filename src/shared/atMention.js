@@ -13,11 +13,14 @@ export function parseActiveAtMention(text, caretIndex) {
             ? Math.max(0, Math.min(caretIndex, value.length))
             : value.length;
     const before = value.slice(0, caret);
-    const match = before.match(/@([^\s@]*)$/);
+    // Only treat `@` as a file mention when it starts the input or follows whitespace,
+    // so emails and URL userinfo (e.g. user@host) do not open the @ menu.
+    const match = before.match(/(^|\s)@([^\s@]*)$/);
     if (!match) return null;
+    const mentionStart = match.index + (match[1] === " " ? 1 : 0);
     return {
-        query: match[1],
-        mentionStart: caret - match[0].length,
+        query: match[2],
+        mentionStart,
         mentionEnd: caret,
     };
 }

@@ -50,11 +50,14 @@ export function getCommandSlashNames(command) {
  */
 export function parseActiveSlashCommand(text) {
   const value = String(text ?? "");
-  const match = value.match(/\/([^\s]*)$/);
+  // Only treat `/` as a slash command when it starts the input or follows whitespace,
+  // so URL path segments (e.g. …/customsearch/v1) do not open the slash menu.
+  const match = value.match(/(^|\s)\/([^\s]*)$/);
   if (!match) return null;
+  const slashStart = match.index + (match[1] === " " ? 1 : 0);
   return {
-    query: match[1],
-    slashStart: value.length - match[0].length,
+    query: match[2],
+    slashStart,
     slashEnd: value.length,
   };
 }

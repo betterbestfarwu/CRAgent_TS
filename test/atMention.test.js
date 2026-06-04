@@ -37,6 +37,15 @@ describe("parseActiveAtMention", () => {
         assert.equal(parseActiveAtMention("@file hello"), null);
         assert.equal(parseActiveAtMention("@file hello", 13), null);
     });
+
+    it("returns null for emails and URL userinfo", () => {
+        assert.equal(parseActiveAtMention("user@example.com"), null);
+        assert.equal(parseActiveAtMention("mailto:user@example.com"), null);
+        assert.equal(
+            parseActiveAtMention("https://user:pass@googleapis.com/foo"),
+            null,
+        );
+    });
 });
 
 describe("splitAtQueryPath", () => {

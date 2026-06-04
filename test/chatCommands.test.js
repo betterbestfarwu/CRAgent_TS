@@ -36,6 +36,14 @@ describe("parseActiveSlashCommand", () => {
     it("returns null when slash is not active at end", () => {
         assert.equal(parseActiveSlashCommand("/help more"), null);
     });
+
+    it("returns null for URL path segments at end of input", () => {
+        assert.equal(
+            parseActiveSlashCommand("https://www.googleapis.com/customsearch/v1"),
+            null,
+        );
+        assert.equal(parseActiveSlashCommand("https://example.com/foo/bar"), null);
+    });
 });
 
 describe("chatCommands computer use", () => {
