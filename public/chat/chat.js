@@ -962,7 +962,7 @@
 
   function assistantMetaLabel(msg) {
     var modelId = messageModelId(msg);
-    return modelId ? 'Answered by ' + escapeText(modelId) : 'Assistant';
+    return modelId ? 'Answered by ' + escapeText(modelId) : 'Answered by';
   }
 
   function roleLabel(role, msg) {

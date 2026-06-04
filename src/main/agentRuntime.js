@@ -86,6 +86,7 @@ import {
     reconcileContextBreakdownCategories,
 } from "@shared/tokenEstimator.js";
 import { ipcPayloadForRenderer } from "./rendererSession.js";
+import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeToolResult, toolResultContent } from "@shared/toolResult.js";
 import { computerUseSystemPromptSection } from "./tools/computerUseTools.js";
 
@@ -190,9 +191,24 @@ export class AgentRuntime {
         );
     }
 
-    executionMode() {
-        const mode = this.configStore.get().agents?.default?.execution_mode;
-        return mode === "plan" ? "plan" : "goal";
+    sessionExecutionMode(sessionOrId) {
+        const fallback = this.configStore.get().agents?.default?.execution_mode;
+        if (typeof sessionOrId === "string") {
+            try {
+                const session = this.sessionStore.get(sessionOrId, {
+                    loadAllMessages: false,
+                    hydrateImages: false,
+                });
+                return normalizeExecutionMode(session.meta.executionMode, fallback);
+            } catch {
+                return normalizeExecutionMode(undefined, fallback);
+            }
+        }
+        return normalizeExecutionMode(sessionOrId?.meta?.executionMode, fallback);
+    }
+
+    executionMode(sessionOrId) {
+        return this.sessionExecutionMode(sessionOrId);
     }
 
     resolveSessionPlan(sessionId) {
@@ -208,21 +224,11 @@ export class AgentRuntime {
     }
 
     maybeAutoEnterPlanMode(sessionId, input) {
-        if (this.executionMode() === "plan" || !shouldStartInPlanMode(input)) {
+        if (this.sessionExecutionMode(sessionId) === "plan" || !shouldStartInPlanMode(input)) {
             return false;
         }
         this.resolveSessionPlan(sessionId);
-        const config = this.configStore.get();
-        this.configStore.update({
-            ...config,
-            agents: {
-                ...config.agents,
-                default: {
-                    ...(config.agents?.default || {}),
-                    execution_mode: "plan",
-                },
-            },
-        });
+        this.sessionStore.updateExecutionMode(sessionId, "plan");
         return true;
     }
 
@@ -254,7 +260,7 @@ export class AgentRuntime {
         if (agent?.tools?.enable_computer_use === true) {
             parts.push(computerUseSystemPromptSection());
         }
-        if (this.executionMode() === "plan") {
+        if (this.sessionExecutionMode(session) === "plan") {
             const { filePath: planFilePath, sessionsDir, workspace } = this.resolveSessionPlan(
                 session.meta.id,
             );
@@ -995,17 +1001,7 @@ export class AgentRuntime {
             filePath = writePlanFile(sessionsDir, sessionId, approvedContent, workspace);
             content = approvedContent;
         }
-        const config = this.configStore.get();
-        this.configStore.update({
-            ...config,
-            agents: {
-                ...config.agents,
-                default: {
-                    ...(config.agents?.default || {}),
-                    execution_mode: "goal",
-                },
-            },
-        });
+        this.sessionStore.updateExecutionMode(sessionId, "goal");
         await this.sendUserMessage(
             sessionId,
             buildExitPlanModeUserMessage(content, filePath),
@@ -1015,7 +1011,7 @@ export class AgentRuntime {
             { skipAutoPlanMode: true },
         );
         return {
-            config: this.configStore.get(),
+            session: this.sessionStore.get(sessionId),
             planFilePath: filePath,
         };
     }
@@ -1545,7 +1541,7 @@ export class AgentRuntime {
                 if (this.wasRunCancelled(sessionId)) {
                     return;
                 }
-                const planMode = this.executionMode() === "plan";
+                const planMode = this.sessionExecutionMode(sessionId) === "plan";
                 const planFilePath = planMode
                     ? this.resolveSessionPlan(sessionId).filePath
                     : null;
@@ -1561,11 +1557,16 @@ export class AgentRuntime {
                 if (toolsEnabled) {
                     if (planMode) {
                         toolSchemas = this.toolRegistry.schemas({
-                            tools: filterToolsForPlanMode(this.toolRegistry.activeTools()),
+                            tools: filterToolsForPlanMode(
+                                this.toolRegistry.activeTools(sessionId),
+                            ),
                             unlockedToolNames,
                         });
                     } else {
-                        toolSchemas = this.toolRegistry.schemas({ unlockedToolNames });
+                        toolSchemas = this.toolRegistry.schemas({
+                            unlockedToolNames,
+                            sessionId,
+                        });
                     }
                 }
                 const chatResult = await this.requestAgentChat(sessionId, () => {

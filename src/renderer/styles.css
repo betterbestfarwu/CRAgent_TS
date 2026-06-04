@@ -2206,6 +2206,30 @@ body.app-sidebar-resizing {
   display: none;
 }
 
+.composer-plan-mode-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  flex-shrink: 0;
+  color: #3b82f6;
+  font-size: 13px;
+  line-height: 1;
+  user-select: none;
+}
+
+.composer-plan-mode-indicator-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.composer-plan-mode-indicator-label {
+  pointer-events: none;
+}
+
 .composer-auth-wrap {
   position: relative;
   display: inline-flex;

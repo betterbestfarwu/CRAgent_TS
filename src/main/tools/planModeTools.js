@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { getPlanDisplayPath, planFileExists } from "../planMode.js";
 import { ensureSessionPlanFile } from "@shared/sessionPlanPaths.js";
+import { normalizeExecutionMode } from "@shared/executionMode.js";
 
 function fnSchema(name, description, parameters) {
     return {
@@ -9,12 +10,26 @@ function fnSchema(name, description, parameters) {
     };
 }
 
-export function createPlanModeTools({ configStore, sessionStore, resolveWorkspaceForSession }) {
+export function createPlanModeTools({ sessionStore, resolveWorkspaceForSession }) {
     return [
         {
             name: "enter_plan_mode",
             requiresConfirmation: false,
-            enabled: () => configStore.get().agents?.default?.execution_mode !== "plan",
+            enabled: () => true,
+            enabledForSession(sessionId) {
+                if (!sessionId) {
+                    return true;
+                }
+                try {
+                    const session = sessionStore.get(sessionId, {
+                        loadAllMessages: false,
+                        hydrateImages: false,
+                    });
+                    return normalizeExecutionMode(session.meta.executionMode) !== "plan";
+                } catch {
+                    return true;
+                }
+            },
             schema: fnSchema(
                 "enter_plan_mode",
                 "Switch to Plan mode for read-only exploration and planning before implementation. Use when the task is large, ambiguous, or needs design before coding.",
@@ -28,17 +43,7 @@ export function createPlanModeTools({ configStore, sessionStore, resolveWorkspac
                 const sessionsDir = sessionStore.locateSessionStorage(sessionId);
                 const workspace = resolveWorkspaceForSession(sessionId);
                 const planFilePath = ensureSessionPlanFile(sessionsDir, sessionId, workspace);
-                const config = configStore.get();
-                configStore.update({
-                    ...config,
-                    agents: {
-                        ...config.agents,
-                        default: {
-                            ...(config.agents?.default || {}),
-                            execution_mode: "plan",
-                        },
-                    },
-                });
+                sessionStore.updateExecutionMode(sessionId, "plan");
                 const exists = planFileExists(sessionsDir, sessionId, workspace);
                 return [
                     "Entered Plan mode.",

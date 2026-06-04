@@ -60,6 +60,7 @@ import {
 import { formatModelRef } from "@shared/modelRef.js";
 import { filterVisibleTodoRuns, msUntilTodoRunsHide } from "@shared/todoRunsDisplay.js";
 import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
+import { normalizeExecutionMode } from "@shared/executionMode.js";
 
 const COMPOSER_LINE_HEIGHT = 24;
 const COMPOSER_MIN_HEIGHT = COMPOSER_LINE_HEIGHT;
@@ -628,6 +629,7 @@ export function App() {
     currentSession?.meta?.id,
     currentSession?.meta?.providerKey,
     currentSession?.meta?.modelId,
+    currentSession?.meta?.executionMode,
   ]);
 
   const contextUsage = useMemo(() => {
@@ -1372,8 +1374,13 @@ export function App() {
     });
   }
 
-  const executionMode =
-    config?.agents?.default?.execution_mode === "plan" ? "plan" : "goal";
+  const executionMode = useMemo(() => {
+    const fallback = config?.agents?.default?.execution_mode;
+    if (!currentSession) {
+      return normalizeExecutionMode(undefined, fallback);
+    }
+    return normalizeExecutionMode(currentSession.meta.executionMode, fallback);
+  }, [currentSession, config?.agents?.default?.execution_mode]);
 
   const [planFileContent, setPlanFileContent] = useState(null);
 
@@ -1429,7 +1436,7 @@ export function App() {
         if (result.session) setCurrentSession(result.session);
         return;
       }
-      if (result?.config) setConfig(result.config);
+      if (result?.session) setCurrentSession(result.session);
     } catch (err) {
       showSessionError(
         err instanceof Error ? err.message : String(err),
@@ -1439,21 +1446,16 @@ export function App() {
   }
 
   async function handleExecutionModeChange(nextMode) {
-    if (!config || nextMode === executionMode || executionModeSaving) return;
-    const nextConfig = {
-      ...config,
-      agents: {
-        ...config.agents,
-        default: {
-          ...(config.agents?.default || {}),
-          execution_mode: nextMode,
-        },
-      },
-    };
+    if (!currentSession || nextMode === executionMode || executionModeSaving) return;
     setExecutionModeSaving(true);
     try {
-      const updated = await window.cragent.updateConfig(nextConfig);
-      setConfig(updated);
+      const session = await window.cragent.updateExecutionMode?.({
+        sessionId: currentSession.meta.id,
+        executionMode: nextMode,
+      });
+      if (session) {
+        setCurrentSession(session);
+      }
       requestAnimationFrame(() => {
         textareaRef.current?.focus();
       });
@@ -2010,6 +2012,21 @@ export function App() {
                       }}
                     />
                   </div>
+                  {executionMode === "plan" ? (
+                    <span className="composer-plan-mode-indicator">
+                      <span className="composer-plan-mode-indicator-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none">
+                          <path
+                            d="M4 7h16M4 12h10M4 17h6"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </span>
+                      <span className="composer-plan-mode-indicator-label">计划模式</span>
+                    </span>
+                  ) : null}
                   <ComposerAuthMenu
                     authMode={currentSession?.meta?.authMode}
                     onChange={(mode) => void handleAuthModeChange(mode)}

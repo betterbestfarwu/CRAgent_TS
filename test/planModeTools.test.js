@@ -24,7 +24,6 @@ describe("enter_plan_mode tool", () => {
         );
         const session = sessionStore.newSession();
         const tools = createPlanModeTools({
-            configStore,
             sessionStore,
             resolveWorkspaceForSession: () => path.join(dir, "workspace"),
         });

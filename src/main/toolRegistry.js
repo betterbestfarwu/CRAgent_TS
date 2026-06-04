@@ -8,8 +8,13 @@ export class ToolRegistry {
         this.getAuthMode = getAuthMode;
     }
 
-    activeTools() {
-        return this.toolFactory().filter((tool) => tool.enabled());
+    activeTools(sessionId) {
+        return this.toolFactory().filter((tool) => {
+            if (sessionId && typeof tool.enabledForSession === "function") {
+                return tool.enabledForSession(sessionId);
+            }
+            return tool.enabled();
+        });
     }
 
     allTools() {
@@ -17,9 +22,11 @@ export class ToolRegistry {
     }
 
     schemas(options = {}) {
-        const tools = options.tools || this.activeTools();
-        const { tools: _omit, ...rest } = options;
-        return schemasForToolCatalog(tools, rest);
+        const { sessionId, tools: toolsOverride, ...schemaOptions } = options;
+        const tools =
+            toolsOverride ||
+            this.activeTools(typeof sessionId === "string" ? sessionId : undefined);
+        return schemasForToolCatalog(tools, schemaOptions);
     }
 
     async execute(call, context = {}) {
@@ -34,7 +41,7 @@ export class ToolRegistry {
             return executeToolSearch(args, this.activeTools(), unlocked);
         }
 
-        const tool = this.activeTools().find((entry) => entry.name === call.function.name);
+        const tool = this.activeTools(context.sessionId).find((entry) => entry.name === call.function.name);
         if (!tool) {
             return `Error: unknown tool '${call.function.name}'`;
         }

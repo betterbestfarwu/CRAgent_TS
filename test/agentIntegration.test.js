@@ -784,7 +784,7 @@ test("runLoop stops with guidance when context remains blocked", async () => {
 });
 
 test("plan execution mode uses chat loop with read-only tool policy", async () => {
-    const { session, runtime, configStore, llmCalls, llmCompleteCalls, events } = makeRuntimeHarness({
+    const { session, runtime, sessionStore, llmCalls, llmCompleteCalls, events } = makeRuntimeHarness({
         chatImpl: () => ({
             message: {
                 id: "assistant-plan",
@@ -795,16 +795,7 @@ test("plan execution mode uses chat loop with read-only tool policy", async () =
             },
         }),
     });
-    configStore.update({
-        ...configStore.get(),
-        agents: {
-            ...configStore.get().agents,
-            default: {
-                ...configStore.get().agents.default,
-                execution_mode: "plan",
-            },
-        },
-    });
+    sessionStore.updateExecutionMode(session.meta.id, "plan");
 
     await runtime.sendUserMessage(session.meta.id, "帮我改这个项目的会话标题策略");
 
@@ -819,7 +810,7 @@ test("plan execution mode uses chat loop with read-only tool policy", async () =
 });
 
 test("rejectPlanMode appends rejection user message and stays in plan", async () => {
-    const { session, runtime, configStore, sessionStore } = makeRuntimeHarness({
+    const { session, runtime, sessionStore } = makeRuntimeHarness({
         chatImpl: () => ({
             message: {
                 id: "assistant-after-reject",
@@ -829,21 +820,12 @@ test("rejectPlanMode appends rejection user message and stays in plan", async ()
             },
         }),
     });
-    configStore.update({
-        ...configStore.get(),
-        agents: {
-            ...configStore.get().agents,
-            default: {
-                ...configStore.get().agents.default,
-                execution_mode: "plan",
-            },
-        },
-    });
+    sessionStore.updateExecutionMode(session.meta.id, "plan");
     await runtime.rejectPlanMode(session.meta.id, {
         planContent: "# Rejected plan\n\n- fix tests",
         feedback: "补充端到端验证步骤",
     });
-    assert.equal(configStore.get().agents.default.execution_mode, "plan");
+    assert.equal(sessionStore.get(session.meta.id).meta.executionMode, "plan");
     const updated = sessionStore.get(session.meta.id);
     const rejection = updated.messages.find((m) => m.planRejection);
     assert.ok(rejection);
@@ -853,7 +835,7 @@ test("rejectPlanMode appends rejection user message and stays in plan", async ()
 });
 
 test("exitPlanMode switches to goal and queues implementation prompt", async () => {
-    const { session, runtime, configStore } = makeRuntimeHarness({
+    const { session, runtime, sessionStore } = makeRuntimeHarness({
         chatImpl: () => ({
             message: {
                 id: "assistant-plan",
@@ -863,22 +845,13 @@ test("exitPlanMode switches to goal and queues implementation prompt", async () 
             },
         }),
     });
-    configStore.update({
-        ...configStore.get(),
-        agents: {
-            ...configStore.get().agents,
-            default: {
-                ...configStore.get().agents.default,
-                execution_mode: "plan",
-            },
-        },
-    });
+    sessionStore.updateExecutionMode(session.meta.id, "plan");
     const result = await runtime.exitPlanMode(
         session.meta.id,
         "# Approved plan\n\n1. 实现用户登录功能\n2. 添加 API 接口",
     );
-    assert.equal(result.config.agents.default.execution_mode, "goal");
-    assert.equal(configStore.get().agents.default.execution_mode, "goal");
+    assert.equal(result.session.meta.executionMode, "goal");
+    assert.equal(sessionStore.get(session.meta.id).meta.executionMode, "goal");
 });
 
 test("getSessionContextDetail exposes system prompt preview and full-session breakdown", () => {

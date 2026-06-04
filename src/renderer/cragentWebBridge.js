@@ -11,6 +11,8 @@ import {
   sessionHasActiveLlmContext,
 } from "@shared/chatMessages";
 import { stripSessionImagesForUi } from "@shared/sessionForUi.js";
+import { normalizeExecutionMode } from "@shared/executionMode.js";
+import { normalizeAuthMode } from "@shared/authMode.js";
 
 const CONFIG_KEY = "cragent:web:config";
 const SESSIONS_KEY = "cragent:web:sessions";
@@ -126,6 +128,8 @@ function makeSession(config, projectId = null) {
       providerKey,
       modelId,
       projectId,
+      executionMode: normalizeExecutionMode(config?.agents?.default?.execution_mode),
+      authMode: normalizeAuthMode(undefined),
       createdAt: timestamp,
       updatedAt: timestamp,
     },
@@ -362,7 +366,17 @@ export function installWebBridge() {
 
       const commandId = matchChatCommand(trimmed);
       if (commandId === "new_session") {
-        const next = updateState((state) => openNewSession(state));
+        const current = ensureState().sessions.find((item) => item.meta.id === sessionId);
+        const projectId =
+          typeof current?.meta?.projectId === "string" && current.meta.projectId.trim()
+            ? current.meta.projectId.trim()
+            : null;
+        const next = updateState((state) =>
+          openNewSession({
+            ...state,
+            newSessionProjectId: projectId,
+          }),
+        );
         const session = next.sessions.find((item) => item.meta.id === next.currentSessionId);
         emit(listeners.sessionChanged, session);
         return;
@@ -547,6 +561,48 @@ export function installWebBridge() {
       });
       const session = next.sessions.find((item) => item.meta.id === sessionId);
       emit(listeners.sessionChanged, session);
+    },
+
+    async updateAuthMode({ sessionId, authMode }) {
+      const next = updateState((state) => {
+        const sessions = state.sessions.map((item) =>
+          item.meta.id === sessionId
+            ? {
+                ...item,
+                meta: {
+                  ...item.meta,
+                  authMode: normalizeAuthMode(authMode),
+                  updatedAt: nowIso(),
+                },
+              }
+            : item,
+        );
+        return { ...state, sessions };
+      });
+      const session = next.sessions.find((item) => item.meta.id === sessionId);
+      emit(listeners.sessionChanged, session);
+      return session;
+    },
+
+    async updateExecutionMode({ sessionId, executionMode }) {
+      const next = updateState((state) => {
+        const sessions = state.sessions.map((item) =>
+          item.meta.id === sessionId
+            ? {
+                ...item,
+                meta: {
+                  ...item.meta,
+                  executionMode: normalizeExecutionMode(executionMode),
+                  updatedAt: nowIso(),
+                },
+              }
+            : item,
+        );
+        return { ...state, sessions };
+      });
+      const session = next.sessions.find((item) => item.meta.id === sessionId);
+      emit(listeners.sessionChanged, session);
+      return session;
     },
 
     async updateSessionProject({ sessionId, projectId }) {

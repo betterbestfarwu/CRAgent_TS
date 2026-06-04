@@ -240,9 +240,17 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.getSessionContextDetail, (_event, sessionId) =>
         runtime.getSessionContextDetail(sessionId),
     );
-    ipcMain.handle(IPC_CHANNELS.newSession, (_event, args = {}) =>
-        sessionForRenderer(sessionStore.openNewSession(args)),
-    );
+    ipcMain.handle(IPC_CHANNELS.newSession, (_event, args = {}) => {
+        const config = configStore.get();
+        const defaultExecutionMode =
+            config.agents?.default?.execution_mode === "plan" ? "plan" : "goal";
+        return sessionForRenderer(
+            sessionStore.openNewSession({
+                ...args,
+                executionMode: defaultExecutionMode,
+            }),
+        );
+    });
     ipcMain.handle(IPC_CHANNELS.deleteSession, (_event, sessionId) => {
         const fallbackMeta = sessionStore.delete(sessionId);
         return sessionForRenderer(
@@ -318,6 +326,14 @@ function registerIpc() {
     );
     ipcMain.handle(IPC_CHANNELS.updateAuthMode, (_event, args) => {
         const session = sessionStore.updateAuthMode(args.sessionId, args.authMode);
+        mainWindow?.webContents.send(
+            IPC_CHANNELS.onSessionChanged,
+            sessionForRenderer(session),
+        );
+        return sessionForRenderer(session);
+    });
+    ipcMain.handle(IPC_CHANNELS.updateExecutionMode, (_event, args) => {
+        const session = sessionStore.updateExecutionMode(args.sessionId, args.executionMode);
         mainWindow?.webContents.send(
             IPC_CHANNELS.onSessionChanged,
             sessionForRenderer(session),
@@ -485,7 +501,6 @@ function bootstrap() {
                 runSubAgent: (args) => runtime.runSubAgent(args),
             });
             const planTools = createPlanModeTools({
-                configStore,
                 sessionStore,
                 resolveWorkspaceForSession: (sessionId) =>
                     resolveSessionWorkspace(sessionStore, configStore, sessionId),

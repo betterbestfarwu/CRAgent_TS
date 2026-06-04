@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
     cancelRun: "chat:cancelRun",
     removeQueuedMessage: "chat:removeQueuedMessage",
     updateAuthMode: "session:updateAuthMode",
+    updateExecutionMode: "session:updateExecutionMode",
     updateSessionProject: "session:updateProject",
     updateModel: "session:updateModel",
     updateConfig: "config:update",

@@ -40,6 +40,8 @@ import {
     normalizeProjectSessions,
     repairProjectRecords,
 } from "@shared/projectSessions.js";
+import { normalizeExecutionMode } from "@shared/executionMode.js";
+import { normalizeAuthMode } from "@shared/authMode.js";
 
 function nowIso() {
     return new Date().toISOString();
@@ -440,7 +442,11 @@ export class SessionStore {
             }
             return existing;
         }
-        return this.newSession({ projectId: normalizedProjectId });
+        return this.newSession({
+            projectId: normalizedProjectId,
+            executionMode: options.executionMode,
+            authMode: options.authMode,
+        });
     }
 
     newSession(options = {}) {
@@ -454,6 +460,8 @@ export class SessionStore {
                 providerKey: this.defaultModel.providerKey,
                 modelId: this.defaultModel.modelId,
                 projectId,
+                executionMode: normalizeExecutionMode(options.executionMode),
+                authMode: normalizeAuthMode(options.authMode),
                 createdAt: timestamp,
                 updatedAt: timestamp,
                 todos: [],
@@ -615,7 +623,17 @@ export class SessionStore {
         this.ensureMigrated(sessionId);
         const sessionsDir = this.locateSessionStorage(sessionId);
         const meta = readMeta(sessionsDir, sessionId);
-        meta.authMode = authMode;
+        meta.authMode = normalizeAuthMode(authMode);
+        meta.updatedAt = nowIso();
+        writeMeta(sessionsDir, meta);
+        return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
+    }
+
+    updateExecutionMode(sessionId, executionMode) {
+        this.ensureMigrated(sessionId);
+        const sessionsDir = this.locateSessionStorage(sessionId);
+        const meta = readMeta(sessionsDir, sessionId);
+        meta.executionMode = normalizeExecutionMode(executionMode);
         meta.updatedAt = nowIso();
         writeMeta(sessionsDir, meta);
         return this.get(sessionId, { loadAllMessages: true, hydrateImages: false });

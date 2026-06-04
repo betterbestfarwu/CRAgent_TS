@@ -12,7 +12,9 @@ export function createChatCommandHandlers({
     async function execute(commandId, sessionId, runId) {
         switch (commandId) {
             case "new_session": {
-                const session = sessionStore.openNewSession();
+                const current = sessionStore.get(sessionId);
+                const projectId = current?.meta?.projectId ?? null;
+                const session = sessionStore.openNewSession({ projectId });
                 emit(IPC_CHANNELS.onSessionChanged, session);
                 return true;
             }

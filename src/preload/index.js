@@ -55,6 +55,7 @@ const api = {
     cancelRun: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.cancelRun, sessionId),
     removeQueuedMessage: (args) => ipcRenderer.invoke(IPC_CHANNELS.removeQueuedMessage, args),
     updateAuthMode: (args) => invokeUiSession(IPC_CHANNELS.updateAuthMode, args),
+    updateExecutionMode: (args) => invokeUiSession(IPC_CHANNELS.updateExecutionMode, args),
     updateSessionProject: (args) => invokeUiSession(IPC_CHANNELS.updateSessionProject, args),
     updateModel: (args) => ipcRenderer.invoke(IPC_CHANNELS.updateModel, args),
     updateConfig: (next) => ipcRenderer.invoke(IPC_CHANNELS.updateConfig, next),
