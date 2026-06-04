@@ -60,12 +60,22 @@ const ICON_MENU_REMOVE = (
   </svg>
 );
 
+const ICON_CARET_RIGHT = (
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+    <path d="M6 4.5 10.5 8 6 11.5V4.5Z" />
+  </svg>
+);
+
+const ICON_CARET_DOWN = (
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+    <path d="M4.5 6 8 10.5 11.5 6H4.5Z" />
+  </svg>
+);
+
 const CURSOR_OUTLINE_ICON = {
   folder: "\uEA83",
   "folder-open": "\uEAF7",
   "folder-plus": "\uEA80",
-  "chevron-right": "\uEAB6",
-  "chevron-down": "\uEAB4",
 };
 
 function SessionStatusDot({ active, busy, unread }) {
@@ -186,7 +196,7 @@ function ProjectNodeHead({ project, expanded, forceActionButtons, onSelect, onNe
         >
           <span className="project-node-icon">
             {hovered ? (
-              <CursorOutlineIcon name={expanded ? "chevron-down" : "chevron-right"} />
+              expanded ? ICON_CARET_DOWN : ICON_CARET_RIGHT
             ) : (
               <CursorOutlineIcon name={expanded ? "folder-open" : "folder"} />
             )}

@@ -723,6 +723,12 @@ body.app-sidebar-resizing {
   color: var(--sidebar-muted);
 }
 
+.project-node-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
 .session-node-content,
 .project-node-list {
   padding-left: var(--sidebar-tree-indent, 10px);
