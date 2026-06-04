@@ -1,18 +1,24 @@
 /** @typedef {{ name: string, kind: "dir" | "file", relativePath: string }} ProjectDirEntry */
 
 /**
- * Active `@` mention at end of composer text.
+ * Active `@` mention at the composer caret (or end of text when caret is omitted).
  * @param {string} text
+ * @param {number} [caretIndex]
  * @returns {{ query: string, mentionStart: number, mentionEnd: number } | null}
  */
-export function parseActiveAtMention(text) {
+export function parseActiveAtMention(text, caretIndex) {
     const value = String(text ?? "");
-    const match = value.match(/@([^\s@]*)$/);
+    const caret =
+        typeof caretIndex === "number" && Number.isFinite(caretIndex)
+            ? Math.max(0, Math.min(caretIndex, value.length))
+            : value.length;
+    const before = value.slice(0, caret);
+    const match = before.match(/@([^\s@]*)$/);
     if (!match) return null;
     return {
         query: match[1],
-        mentionStart: value.length - match[0].length,
-        mentionEnd: value.length,
+        mentionStart: caret - match[0].length,
+        mentionEnd: caret,
     };
 }
 

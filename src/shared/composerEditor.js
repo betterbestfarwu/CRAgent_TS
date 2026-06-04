@@ -227,6 +227,98 @@ function findMentionIdOnNode(node) {
 }
 
 /**
+ * Logical text offset of the collapsed selection in a composer contenteditable root.
+ * Matches {@link parseComposerEditorDom} text coordinates (chips contribute no characters).
+ * @param {HTMLElement | null | undefined} root
+ * @returns {number}
+ */
+export function getComposerEditorCaretOffset(root) {
+    if (!root) return 0;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+        return normalizeComposerEditorText(parseComposerEditorDom(root, new Map()).text).length;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.startContainer)) {
+        return normalizeComposerEditorText(parseComposerEditorDom(root, new Map()).text).length;
+    }
+
+    const endContainer = range.startContainer;
+    const endOffset = range.startOffset;
+    let offset = 0;
+    let found = false;
+
+    /**
+     * @param {Node} node
+     * @param {boolean} blockBreakAfter
+     */
+    function visit(node, blockBreakAfter = false) {
+        if (found) return;
+        if (node.nodeType === Node.TEXT_NODE) {
+            const raw = node.nodeValue ?? "";
+            const normalized = normalizeComposerEditorText(raw);
+            if (node === endContainer) {
+                const rawBefore = raw.slice(0, endOffset);
+                offset += normalizeComposerEditorText(rawBefore).length;
+                found = true;
+                return;
+            }
+            offset += normalized.length;
+            return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+        const el = /** @type {HTMLElement} */ (node);
+        if (el.dataset?.fileId && el.classList.contains("composer-file-chip")) {
+            return;
+        }
+        if (el.dataset?.mentionId && el.classList.contains("composer-at-chip")) {
+            return;
+        }
+
+        if (el.tagName === "BR") {
+            if (node === endContainer && endOffset === 0) {
+                found = true;
+                return;
+            }
+            offset += 1;
+            return;
+        }
+
+        const isBlock = el.tagName === "DIV" || el.tagName === "P";
+        const children = Array.from(el.childNodes);
+        for (let index = 0; index < children.length; index += 1) {
+            if (found) break;
+            if (node === endContainer && node.nodeType === Node.ELEMENT_NODE && endOffset === index) {
+                found = true;
+                break;
+            }
+            visit(children[index], index < children.length - 1 && isBlock);
+        }
+        if (found) return;
+        if (node === endContainer && node.nodeType === Node.ELEMENT_NODE && endOffset === children.length) {
+            found = true;
+            return;
+        }
+        if (isBlock && el !== root && blockBreakAfter) {
+            if (offset > 0) offset += 1;
+        }
+    }
+
+    const children = Array.from(root.childNodes);
+    for (let index = 0; index < children.length; index += 1) {
+        if (found) break;
+        visit(children[index], index < children.length - 1);
+    }
+
+    if (!found) {
+        return normalizeComposerEditorText(parseComposerEditorDom(root, new Map()).text).length;
+    }
+    return offset;
+}
+
+/**
  * @param {HTMLElement} root
  */
 export function placeComposerCaretAtEnd(root) {

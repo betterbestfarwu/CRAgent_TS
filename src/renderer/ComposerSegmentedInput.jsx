@@ -3,6 +3,7 @@ import { applyComposerTextSegmentEdit, buildComposerSegments } from "@shared/atM
 import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
   ensureComposerCaretAnchor,
+  getComposerEditorCaretOffset,
   parseComposerEditorDom,
   restoreComposerEditorCaret,
 } from "@shared/composerEditor.js";
@@ -57,6 +58,7 @@ function rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons,
 function ComposerInlineEditor({
   input,
   onInputChange,
+  onCaretChange,
   mentions,
   onRemoveMention,
   files,
@@ -158,6 +160,12 @@ function ComposerInlineEditor({
     return () => root.removeEventListener("click", handleClick);
   }, [onRemoveFile, onRemoveMention]);
 
+  function reportCaret() {
+    const root = rootRef.current;
+    if (!root) return;
+    onCaretChange?.(getComposerEditorCaretOffset(root));
+  }
+
   function handleInput() {
     const root = rootRef.current;
     if (!root) return;
@@ -168,6 +176,7 @@ function ComposerInlineEditor({
     });
     internalEditRef.current = true;
     onInputChange(parsed.text, nextMentions);
+    reportCaret();
     onResize?.();
   }
 
@@ -185,6 +194,9 @@ function ComposerInlineEditor({
       data-placeholder={placeholder}
       onInput={handleInput}
       onPaste={onPaste}
+      onKeyUp={reportCaret}
+      onClick={reportCaret}
+      onSelect={reportCaret}
       onKeyDown={(event) => onKeyDown?.(event, { contentEditable: true })}
     />
   );
@@ -193,6 +205,7 @@ function ComposerInlineEditor({
 function ComposerPlainTextarea({
   input,
   onInputChange,
+  onCaretChange,
   mentions,
   textareaRef,
   onResize,
@@ -202,8 +215,15 @@ function ComposerPlainTextarea({
 }) {
   const segments = useMemo(() => buildComposerSegments(input, mentions), [input, mentions]);
   const textOffsets = useMemo(() => getTextSegmentOffsets(segments), [segments]);
+  const segmentStart = textOffsets[0]?.start ?? 0;
 
-  function handleSegmentChange(textIndex, nextContent) {
+  function reportCaret(event) {
+    const el = event?.currentTarget ?? textareaRef?.current;
+    if (!el) return;
+    onCaretChange?.(segmentStart + (el.selectionStart ?? el.value?.length ?? 0));
+  }
+
+  function handleSegmentChange(textIndex, nextContent, event) {
     const offset = textOffsets[textIndex];
     if (!offset) return;
     const { text, mentions: nextMentions } = applyComposerTextSegmentEdit(
@@ -214,6 +234,7 @@ function ComposerPlainTextarea({
       mentions,
     );
     onInputChange(text, nextMentions);
+    reportCaret(event);
   }
 
   const segment = segments[0];
@@ -226,13 +247,16 @@ function ComposerPlainTextarea({
       value={segment.content}
       rows={1}
       placeholder={placeholder}
-      onChange={(event) => handleSegmentChange(0, event.target.value)}
+      onChange={(event) => handleSegmentChange(0, event.target.value, event)}
       onInput={onResize}
       onPaste={onPaste}
+      onKeyUp={reportCaret}
+      onClick={reportCaret}
+      onSelect={reportCaret}
       onKeyDown={(event) =>
         onKeyDown?.(event, {
           textIndex: 0,
-          segmentStart: textOffsets[0]?.start ?? 0,
+          segmentStart,
         })
       }
     />
@@ -242,6 +266,7 @@ function ComposerPlainTextarea({
 export function ComposerSegmentedInput({
   input,
   onInputChange,
+  onCaretChange,
   mentions,
   onRemoveMention,
   files = [],
@@ -259,6 +284,7 @@ export function ComposerSegmentedInput({
       <ComposerInlineEditor
         input={input}
         onInputChange={onInputChange}
+        onCaretChange={onCaretChange}
         mentions={mentions}
         onRemoveMention={onRemoveMention}
         files={files}
@@ -278,6 +304,7 @@ export function ComposerSegmentedInput({
     <ComposerPlainTextarea
       input={input}
       onInputChange={onInputChange}
+      onCaretChange={onCaretChange}
       mentions={mentions}
       textareaRef={textareaRef}
       onResize={onResize}

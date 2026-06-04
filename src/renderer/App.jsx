@@ -113,6 +113,7 @@ export function App() {
   const [config, setConfig] = useState(null);
   const [skills, setSkills] = useState([]);
   const [input, setInput] = useState("");
+  const [composerCaret, setComposerCaret] = useState(0);
   const [pendingImages, setPendingImages] = useState([]);
   const [pendingFiles, setPendingFiles] = useState([]);
   const [pendingAtMentions, setPendingAtMentions] = useState([]);
@@ -339,11 +340,16 @@ export function App() {
     }
   }
 
-  function updateComposerInput(nextInput, nextMentions = pendingAtMentions) {
+  function updateComposerInput(nextInput, nextMentions = pendingAtMentions, caret) {
     setInput(nextInput);
     if (nextMentions !== pendingAtMentions) {
       setPendingAtMentions(nextMentions);
     }
+    setComposerCaret(
+      typeof caret === "number" && Number.isFinite(caret)
+        ? Math.max(0, Math.min(caret, nextInput.length))
+        : nextInput.length,
+    );
   }
 
   function focusPrimaryComposerEnd() {
@@ -748,7 +754,7 @@ export function App() {
   const slashMention = useMemo(() => parseActiveSlashCommand(input), [input]);
   const slashQuery = slashMention ? slashMention.query.toLowerCase() : null;
 
-  const atMention = useMemo(() => parseActiveAtMention(input), [input]);
+  const atMention = useMemo(() => parseActiveAtMention(input, composerCaret), [input, composerCaret]);
 
   const activeProject = useMemo(() => {
     const projectId = currentSession?.meta?.projectId;
@@ -937,13 +943,13 @@ export function App() {
 
   useEffect(() => {
     if (showAtMenu && atMention) {
-      atPickContextRef.current = { atMention, inputSnapshot: input };
+      atPickContextRef.current = { atMention, inputSnapshot: input, caretSnapshot: composerCaret };
       return;
     }
     if (!showAtMenu) {
       atPickContextRef.current = null;
     }
-  }, [showAtMenu, atMention, input]);
+  }, [showAtMenu, atMention, input, composerCaret]);
   const sendButtonDisabled = !busy && !canSend;
 
   function replaceActiveAtMention(nextMentionBody) {
@@ -951,7 +957,9 @@ export function App() {
     const prefix = input.slice(0, atMention.mentionStart);
     const suffix = input.slice(atMention.mentionEnd);
     const body = String(nextMentionBody ?? "");
-    setInput(`${prefix}@${body}${suffix}`);
+    const next = `${prefix}@${body}${suffix}`;
+    setInput(next);
+    setComposerCaret(atMention.mentionStart + 1 + body.length);
     requestComposerFocusAtEnd();
   }
 
@@ -960,9 +968,15 @@ export function App() {
     if (!cleanPath) return;
 
     const pickContext = atPickContextRef.current;
-    const sourceInput = parseActiveAtMention(input) ? input : (pickContext?.inputSnapshot ?? input);
+    const pickCaret = pickContext?.caretSnapshot ?? composerCaret;
+    const useLiveInput = parseActiveAtMention(input, pickCaret);
+    const sourceInput = useLiveInput ? input : (pickContext?.inputSnapshot ?? input);
+    const sourceCaret = useLiveInput ? pickCaret : (pickContext?.caretSnapshot ?? composerCaret);
     const activeAt =
-      parseActiveAtMention(sourceInput) ?? atMention ?? pickContext?.atMention ?? null;
+      parseActiveAtMention(sourceInput, sourceCaret) ??
+      atMention ??
+      pickContext?.atMention ??
+      null;
     if (!activeAt) return;
 
     const mentionStart = activeAt.mentionStart;
@@ -1208,6 +1222,7 @@ export function App() {
     if (busy) {
       setComposerQuickMenuOpen(false);
       setInput("");
+      setComposerCaret(0);
       setPendingImages([]);
       setPendingFiles([]);
       setPendingAtMentions([]);
@@ -1228,6 +1243,7 @@ export function App() {
     }
 
     setInput("");
+    setComposerCaret(0);
     setPendingImages([]);
     setPendingFiles([]);
     setPendingAtMentions([]);
@@ -1815,6 +1831,7 @@ export function App() {
                     <ComposerSegmentedInput
                     input={input}
                     onInputChange={updateComposerInput}
+                    onCaretChange={setComposerCaret}
                     mentions={pendingAtMentions}
                     onRemoveMention={removePendingAtMention}
                     files={pendingFiles}
@@ -1907,6 +1924,7 @@ export function App() {
                         e.preventDefault();
                         if (atMention) {
                           setInput(input.slice(0, atMention.mentionStart) + input.slice(atMention.mentionEnd));
+                          setComposerCaret(atMention.mentionStart);
                         }
                         return;
                       }

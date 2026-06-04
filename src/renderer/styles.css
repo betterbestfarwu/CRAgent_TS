@@ -1452,7 +1452,7 @@ body.app-sidebar-resizing {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 0 0;
+  padding: 6px 0 0 8px;
   margin-bottom: var(--composer-task-input-gap);
   font-size: var(--cursor-font-size-sm);
   color: var(--cursor-fg-muted);

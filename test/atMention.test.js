@@ -26,8 +26,16 @@ describe("parseActiveAtMention", () => {
         assert.equal(parsed?.mentionEnd, 13);
     });
 
-    it("returns null when @ is not active at end", () => {
+    it("detects @ mention at caret when text continues after it", () => {
+        const parsed = parseActiveAtMention("@file hello", 5);
+        assert.equal(parsed?.query, "file");
+        assert.equal(parsed?.mentionStart, 0);
+        assert.equal(parsed?.mentionEnd, 5);
+    });
+
+    it("returns null when caret is past an inactive @ mention", () => {
         assert.equal(parseActiveAtMention("@file hello"), null);
+        assert.equal(parseActiveAtMention("@file hello", 13), null);
     });
 });
 
