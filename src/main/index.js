@@ -508,6 +508,7 @@ function bootstrap() {
             const computerTools = createComputerUseTools({
                 getAgentTools,
                 confirmToolExecution: baseConfirm,
+                getAuthMode,
             });
             return [...builtin, ...buildMcpTools(), ...meta, ...planTools, ...computerTools];
         },

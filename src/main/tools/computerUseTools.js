@@ -1,3 +1,4 @@
+import { shouldRequireToolConfirmation } from "../authPolicy.js";
 import {
     captureScreenshot,
     clickAt,
@@ -32,10 +33,17 @@ function computerEnabled(getAgentTools) {
 
 export { computerUseSystemPromptSection };
 
-export function createComputerUseTools({ getAgentTools, confirmToolExecution }) {
+export function createComputerUseTools({ getAgentTools, confirmToolExecution, getAuthMode }) {
     const enabled = computerEnabled(getAgentTools);
 
-    async function confirmComputerAction(toolName, summary) {
+    async function confirmComputerAction(toolName, summary, sessionId) {
+        const needsConfirm = shouldRequireToolConfirmation(
+            { requiresConfirmation: true },
+            () => (typeof getAuthMode === "function" ? getAuthMode(sessionId) : "default"),
+        );
+        if (!needsConfirm) {
+            return;
+        }
         const approved = await confirmToolExecution(toolName, summary);
         if (!approved) {
             throw new Error(`user declined: ${toolName}`);
@@ -58,7 +66,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution }) 
         },
         {
             name: "computer_screenshot",
-            requiresConfirmation: true,
+            requiresConfirmation: false,
             enabled,
             schema: fnSchema(
                 "computer_screenshot",
@@ -74,11 +82,12 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution }) 
                     },
                 },
             ),
-            async execute(args) {
+            async execute(args, context = {}) {
                 const display = args.display ?? "main";
                 await confirmComputerAction(
                     "computer_screenshot",
                     `Capture desktop screenshot (display=${display})`,
+                    context.sessionId,
                 );
                 const { image, caption } = await captureScreenshot({ display });
                 return {
@@ -89,7 +98,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution }) 
         },
         {
             name: "computer_move",
-            requiresConfirmation: true,
+            requiresConfirmation: false,
             enabled,
             schema: fnSchema(
                 "computer_move",
@@ -109,17 +118,18 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution }) 
                     required: ["x", "y"],
                 },
             ),
-            async execute(args) {
+            async execute(args, context = {}) {
                 await confirmComputerAction(
                     "computer_move",
                     `Move cursor to (${args.x}, ${args.y})`,
+                    context.sessionId,
                 );
                 return moveTo({ x: args.x, y: args.y });
             },
         },
         {
             name: "computer_click",
-            requiresConfirmation: true,
+            requiresConfirmation: false,
             enabled,
             schema: fnSchema(
                 "computer_click",
@@ -144,18 +154,19 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution }) 
                     required: ["x", "y"],
                 },
             ),
-            async execute(args) {
+            async execute(args, context = {}) {
                 const button = args.button || "left";
                 await confirmComputerAction(
                     "computer_click",
                     `${button} click at (${args.x}, ${args.y})`,
+                    context.sessionId,
                 );
                 return clickAt({ x: args.x, y: args.y, button });
             },
         },
         {
             name: "computer_type",
-            requiresConfirmation: true,
+            requiresConfirmation: false,
             enabled,
             schema: fnSchema(
                 "computer_type",
@@ -172,18 +183,19 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution }) 
                     required: ["text"],
                 },
             ),
-            async execute(args) {
+            async execute(args, context = {}) {
                 const preview = String(args.text ?? "").slice(0, 120);
                 await confirmComputerAction(
                     "computer_type",
                     `Type text${args.clear_first ? " (clear first)" : ""}: ${preview}${String(args.text ?? "").length > 120 ? "…" : ""}`,
+                    context.sessionId,
                 );
                 return typeText({ text: args.text, clear_first: args.clear_first });
             },
         },
         {
             name: "computer_key",
-            requiresConfirmation: true,
+            requiresConfirmation: false,
             enabled,
             schema: fnSchema(
                 "computer_key",
@@ -200,14 +212,18 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution }) 
                     required: ["key"],
                 },
             ),
-            async execute(args) {
-                await confirmComputerAction("computer_key", `Press key: ${args.key}`);
+            async execute(args, context = {}) {
+                await confirmComputerAction(
+                    "computer_key",
+                    `Press key: ${args.key}`,
+                    context.sessionId,
+                );
                 return pressKey({ key: args.key });
             },
         },
         {
             name: "computer_scroll",
-            requiresConfirmation: true,
+            requiresConfirmation: false,
             enabled,
             schema: fnSchema(
                 "computer_scroll",
@@ -235,7 +251,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution }) 
                     },
                 },
             ),
-            async execute(args) {
+            async execute(args, context = {}) {
                 const direction = args.direction || "down";
                 const amount = args.amount ?? 3;
                 const at =
@@ -244,6 +260,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution }) 
                 await confirmComputerAction(
                     "computer_scroll",
                     `Scroll ${direction} (${amount})${atHint}`,
+                    context.sessionId,
                 );
                 return scroll({ direction, amount, at });
             },

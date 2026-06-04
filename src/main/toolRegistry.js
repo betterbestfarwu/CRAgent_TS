@@ -64,10 +64,9 @@ export class ToolRegistry {
         }
 
         try {
-            if (tool.execute.length >= 2) {
-                return await tool.execute(args, context);
-            }
-            return await tool.execute(args);
+            // Always pass context. Default parameters make execute.length === 1 even when
+            // the tool accepts a second argument (e.g. computer_* tools need sessionId).
+            return await tool.execute(args, context);
         } catch (error) {
             return `Error: ${error.message}`;
         }

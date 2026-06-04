@@ -6,6 +6,8 @@ import {
     toolResultContent,
 } from "../src/shared/toolResult.js";
 import { messagesToApiPayloads } from "../src/main/llmClient.js";
+import { shouldRequireToolConfirmation } from "../src/main/authPolicy.js";
+import { ToolRegistry } from "../src/main/toolRegistry.js";
 import { createComputerUseTools } from "../src/main/tools/computerUseTools.js";
 import { isComputerUseSupported } from "../src/main/computerUse.js";
 import {
@@ -130,6 +132,86 @@ describe("computer use displays", () => {
 });
 
 describe("computer use tools", () => {
+    it("passes execution context to tools with optional context parameter", async () => {
+        let receivedContext;
+        const registry = new ToolRegistry(() => [
+            {
+                name: "context_probe",
+                requiresConfirmation: false,
+                enabled: () => true,
+                schema: {
+                    type: "function",
+                    function: {
+                        name: "context_probe",
+                        parameters: { type: "object", properties: {} },
+                    },
+                },
+                async execute(_args, context = {}) {
+                    receivedContext = context;
+                    return "ok";
+                },
+            },
+        ]);
+
+        await registry.execute(
+            {
+                id: "call-context",
+                function: { name: "context_probe", arguments: "{}" },
+            },
+            { sessionId: "session-123" },
+        );
+
+        assert.equal(receivedContext?.sessionId, "session-123");
+    });
+
+    it("forwards sessionId so fullAccess auth skips inline confirmations", async () => {
+        let confirmCalls = 0;
+        const confirmToolExecution = async () => {
+            confirmCalls += 1;
+            return true;
+        };
+        const getAuthMode = (sessionId) => (sessionId === "session-full" ? "fullAccess" : "default");
+        const registry = new ToolRegistry(
+            () => [
+                {
+                    name: "inline_confirm_probe",
+                    requiresConfirmation: false,
+                    enabled: () => true,
+                    schema: {
+                        type: "function",
+                        function: {
+                            name: "inline_confirm_probe",
+                            parameters: { type: "object", properties: {} },
+                        },
+                    },
+                    async execute(_args, context = {}) {
+                        const needsConfirm = shouldRequireToolConfirmation(
+                            { requiresConfirmation: true },
+                            () => getAuthMode(context.sessionId),
+                        );
+                        if (needsConfirm) {
+                            await confirmToolExecution("inline_confirm_probe", "summary");
+                        }
+                        return context.sessionId || "missing-session";
+                    },
+                },
+            ],
+            confirmToolExecution,
+            getAuthMode,
+        );
+
+        const result = await registry.execute(
+            {
+                id: "call-inline-confirm",
+                function: { name: "inline_confirm_probe", arguments: "{}" },
+            },
+            { sessionId: "session-full" },
+        );
+
+        assert.equal(result, "session-full");
+        assert.equal(confirmCalls, 0);
+    });
+
     it("registers tools only when enable_computer_use is true", () => {
         if (!isComputerUseSupported()) {
             return;
