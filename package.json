@@ -1,6 +1,6 @@
 {
   "name": "cragent_ts",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "CRAgent Electron port (macOS 10.14+, Windows 10+)",
   "main": "./out/main/index.js",
   "scripts": {
