@@ -311,7 +311,6 @@ export function Sidebar({
   const [forceActionButtons, setForceActionButtons] = useState(false);
   const [projectDropActive, setProjectDropActive] = useState(false);
   const [sessionsVisibleLimit, setSessionsVisibleLimit] = useState(SIDEBAR_INITIAL_VISIBLE);
-  const [projectsVisibleLimit, setProjectsVisibleLimit] = useState(SIDEBAR_INITIAL_VISIBLE);
   const [projectSessionsVisibleLimits, setProjectSessionsVisibleLimits] = useState(
     () => new Map()
   );
@@ -362,14 +361,8 @@ export function Sidebar({
     [fixedRows, sessionsVisibleLimit]
   );
 
-  const projectsDisplay = useMemo(
-    () => sliceForSidebarDisplay(projects, projectsVisibleLimit),
-    [projects, projectsVisibleLimit]
-  );
-
   useEffect(() => {
     setSessionsVisibleLimit(SIDEBAR_INITIAL_VISIBLE);
-    setProjectsVisibleLimit(SIDEBAR_INITIAL_VISIBLE);
     setProjectSessionsVisibleLimits(new Map());
   }, [search]);
 
@@ -471,7 +464,7 @@ export function Sidebar({
             </button>
           </div>
           <div className="project-node-list">
-          {projectsDisplay.visible.map((project) => {
+          {projects.map((project) => {
             const rows = projectRows.get(project.id) || [];
             const expanded = expandedProjectIds.includes(project.id);
             const projectSessionsLimit =
@@ -522,13 +515,6 @@ export function Sidebar({
               </div>
             );
           })}
-          {projectsDisplay.hasMore ? (
-            <SeeMoreRow
-              onClick={() =>
-                setProjectsVisibleLimit((limit) => nextSidebarVisibleLimit(limit))
-              }
-            />
-          ) : null}
           </div>
         </div>
       </div>
