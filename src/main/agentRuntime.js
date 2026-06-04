@@ -89,6 +89,7 @@ import { ipcPayloadForRenderer } from "./rendererSession.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeToolResult, toolResultContent } from "@shared/toolResult.js";
 import { computerUseSystemPromptSection } from "./tools/computerUseTools.js";
+import { rejectAllPendingConfirms } from "./confirmBridge.js";
 
 const HOOK_LOG_LIMIT = 80;
 
@@ -483,6 +484,8 @@ export class AgentRuntime {
         this.abortControllers.get(sessionId)?.abort();
         this.pendingQueues.set(sessionId, []);
         this.emit(IPC_CHANNELS.onQueueChanged, { sessionId, queue: [] });
+        rejectAllPendingConfirms();
+        this.setBusy(sessionId, false);
     }
 
     async processQueue(sessionId) {
@@ -1095,7 +1098,10 @@ export class AgentRuntime {
         return session;
     }
 
-    async maybeAutoCompact(sessionId) {
+    async maybeAutoCompact(sessionId, signal) {
+        if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+            return false;
+        }
         const contextConfig = getContextConfig(this.configStore);
         if (!contextConfig.auto_compact_enabled || this.compactingSessions.has(sessionId)) {
             return false;
@@ -1111,6 +1117,7 @@ export class AgentRuntime {
             auto: true,
             preserveBusy: Boolean(this.busyBySession.get(sessionId)),
             silent: Boolean(this.busyBySession.get(sessionId)),
+            signal,
         });
         return true;
     }
@@ -1131,7 +1138,10 @@ export class AgentRuntime {
         );
     }
 
-    async prepareContextForLlm(sessionId) {
+    async prepareContextForLlm(sessionId, signal) {
+        if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+            throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+        }
         const contextConfig = getContextConfig(this.configStore);
         let session = this.sessionStore.get(sessionId);
         const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
@@ -1146,6 +1156,7 @@ export class AgentRuntime {
             auto: true,
             preserveBusy: Boolean(this.busyBySession.get(sessionId)),
             silent: true,
+            signal,
         });
         session = this.sessionStore.get(sessionId);
         state = calculateContextWarningState(session, model, contextConfig);
@@ -1157,11 +1168,14 @@ export class AgentRuntime {
         return { blocked: false, state };
     }
 
-    async requestAgentLlm(sessionId, invoke) {
+    async requestAgentLlm(sessionId, invoke, signal) {
         let overflowRetries = 0;
 
         while (true) {
-            const prep = await this.prepareContextForLlm(sessionId);
+            if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+                throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+            }
+            const prep = await this.prepareContextForLlm(sessionId, signal);
             if (prep.blocked) {
                 return { blocked: true, state: prep.state };
             }
@@ -1184,19 +1198,20 @@ export class AgentRuntime {
                     auto: true,
                     preserveBusy: Boolean(this.busyBySession.get(sessionId)),
                     silent: true,
+                    signal,
                 });
             }
         }
     }
 
-    requestAgentChat(sessionId, chatArgsOrFactory) {
+    requestAgentChat(sessionId, chatArgsOrFactory, signal) {
         return this.requestAgentLlm(sessionId, () => {
             const chatArgs =
                 typeof chatArgsOrFactory === "function"
                     ? chatArgsOrFactory()
                     : chatArgsOrFactory;
             return this.llmClient.chat(chatArgs);
-        });
+        }, signal);
     }
 
     async prepareSubAgentContext(sessionId, messages, model) {
@@ -1361,7 +1376,10 @@ export class AgentRuntime {
     }
 
     async compactLlmContext(sessionId, options = {}) {
-        const { auto = false, preserveBusy = false, silent = false } = options;
+        const { auto = false, preserveBusy = false, silent = false, signal } = options;
+        if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+            return;
+        }
         if (this.compactingSessions.has(sessionId)) {
             return;
         }
@@ -1433,6 +1451,7 @@ export class AgentRuntime {
                         { role: "system", content: COMPACT_SUMMARIZE_SYSTEM },
                         { role: "user", content: transcript },
                     ],
+                    signal,
                 });
                 summary = formatCompactSummary(choice.message.content || "");
                 if (droppedGroups > 0 && summary) {
@@ -1511,6 +1530,9 @@ export class AgentRuntime {
                 { matchQuery: auto ? "auto" : "manual" },
             );
         } catch (error) {
+            if (error?.name === "AbortError" || this.cancelledRuns.has(sessionId)) {
+                return;
+            }
             const session = this.sessionStore.get(sessionId);
             session.meta.compactFailures = (session.meta.compactFailures ?? 0) + 1;
             this.sessionStore.save(session);
@@ -1547,7 +1569,13 @@ export class AgentRuntime {
                     : null;
                 session = this.sessionStore.get(sessionId);
                 session = this.applyMicroCompact(session);
-                await this.maybeAutoCompact(sessionId);
+                if (this.wasRunCancelled(sessionId)) {
+                    return;
+                }
+                await this.maybeAutoCompact(sessionId, signal);
+                if (this.wasRunCancelled(sessionId)) {
+                    return;
+                }
                 session = this.sessionStore.get(sessionId);
                 const model = {
                     providerKey: session.meta.providerKey,
@@ -1569,16 +1597,20 @@ export class AgentRuntime {
                         });
                     }
                 }
-                const chatResult = await this.requestAgentChat(sessionId, () => {
-                    const refreshedSession = this.sessionStore.get(sessionId);
-                    return {
-                        messages: this.messagesForLLM(refreshedSession),
-                        model,
-                        modelChain: this.modelChainForSession(refreshedSession),
-                        tools: toolSchemas,
-                        signal,
-                    };
-                });
+                const chatResult = await this.requestAgentChat(
+                    sessionId,
+                    () => {
+                        const refreshedSession = this.sessionStore.get(sessionId);
+                        return {
+                            messages: this.messagesForLLM(refreshedSession),
+                            model,
+                            modelChain: this.modelChainForSession(refreshedSession),
+                            tools: toolSchemas,
+                            signal,
+                        };
+                    },
+                    signal,
+                );
                 if (this.wasRunCancelled(sessionId)) {
                     return;
                 }
@@ -1652,6 +1684,7 @@ export class AgentRuntime {
                             planMode,
                             planFilePath,
                             executionMode: planMode ? "plan" : "goal",
+                            signal,
                         },
                         signal,
                     );
@@ -1711,6 +1744,9 @@ export class AgentRuntime {
                 message: error instanceof Error ? error.message : String(error),
             });
         } finally {
+            if (this.cancelledRuns.has(sessionId)) {
+                this.cancelledRuns.delete(sessionId);
+            }
             this.clearAbortSignal(sessionId);
             this.setBusy(sessionId, false);
         }

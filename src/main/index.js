@@ -516,7 +516,10 @@ function bootstrap() {
         getAuthMode,
     );
 
-    const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey]);
+    const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey], {
+        onTokenUsage: (model, usage) =>
+            configStore.recordModelTokenUsage(model.providerKey, model.modelId, usage),
+    });
     runtime = new AgentRuntime(
         sessionStore,
         configStore,

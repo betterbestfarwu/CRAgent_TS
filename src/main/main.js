@@ -126,7 +126,10 @@ function bootstrap() {
     configStore = new ConfigStore(appPaths.configFile);
     const primary = configStore.resolvePrimaryRef();
     sessionStore = new SessionStore(appPaths.sessionsDir, primary);
-    const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey]);
+    const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey], {
+        onTokenUsage: (model, usage) =>
+            configStore.recordModelTokenUsage(model.providerKey, model.modelId, usage),
+    });
     const toolRegistry = new ToolRegistry(appPaths.memoryFile);
     runtime = new AgentRuntime(sessionStore, configStore, llmClient, toolRegistry, () => mainWindow);
     registerIpc();

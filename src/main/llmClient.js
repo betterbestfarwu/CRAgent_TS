@@ -85,9 +85,42 @@ function logOutgoingMessages(kind, model, messages, extra = {}) {
     console.log("[CRAgent][LLM] outgoing messages\n" + JSON.stringify(payload, null, 2));
 }
 
+function extractTokenUsage(data) {
+    const usage = data?.usage;
+    if (!usage || typeof usage !== "object") {
+        return null;
+    }
+    const promptTokens = Number(usage.prompt_tokens);
+    const completionTokens = Number(usage.completion_tokens);
+    const totalTokens = Number(usage.total_tokens);
+    if (
+        !Number.isFinite(promptTokens) &&
+        !Number.isFinite(completionTokens) &&
+        !Number.isFinite(totalTokens)
+    ) {
+        return null;
+    }
+    return {
+        prompt_tokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+        completion_tokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+        total_tokens: Number.isFinite(totalTokens)
+            ? totalTokens
+            : (Number.isFinite(promptTokens) ? promptTokens : 0) +
+              (Number.isFinite(completionTokens) ? completionTokens : 0),
+    };
+}
+
 export class LlmClient {
-    constructor(resolveProvider) {
+    constructor(resolveProvider, options = {}) {
         this.resolveProvider = resolveProvider;
+        this.onTokenUsage = options.onTokenUsage;
+    }
+
+    reportTokenUsage(model, usage) {
+        if (!usage) {
+            return;
+        }
+        this.onTokenUsage?.(model, usage);
     }
 
     resolveProviderOrThrow(model) {
@@ -124,8 +157,11 @@ export class LlmClient {
 
         const data = await response.json();
         const choice = data.choices?.[0]?.message;
+        const usage = extractTokenUsage(data);
+        this.reportTokenUsage(model, usage);
         return {
             message: this.assistantMessage(choice?.content || "", undefined, model.modelId),
+            usage,
         };
     }
 
@@ -217,9 +253,12 @@ export class LlmClient {
                 arguments: call.function?.arguments || "{}",
             },
         }));
+        const usage = extractTokenUsage(data);
+        this.reportTokenUsage(model, usage);
 
         return {
             message: this.assistantMessage(choice?.content || "", toolCalls, model.modelId),
+            usage,
         };
     }
 

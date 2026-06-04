@@ -59,3 +59,11 @@ export function createToolConfirmFn(getMainWindow) {
             cancelLabel: "拒绝",
         });
 }
+
+/** Resolve any open tool-confirm dialogs as declined (e.g. user pressed Stop). */
+export function rejectAllPendingConfirms() {
+    for (const [id, resolve] of pending) {
+        pending.delete(id);
+        resolve(false);
+    }
+}

@@ -124,7 +124,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                     `Move cursor to (${args.x}, ${args.y})`,
                     context.sessionId,
                 );
-                return moveTo({ x: args.x, y: args.y });
+                return moveTo({ x: args.x, y: args.y, signal: context.signal });
             },
         },
         {
@@ -161,7 +161,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                     `${button} click at (${args.x}, ${args.y})`,
                     context.sessionId,
                 );
-                return clickAt({ x: args.x, y: args.y, button });
+                return clickAt({ x: args.x, y: args.y, button, signal: context.signal });
             },
         },
         {
@@ -190,7 +190,11 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                     `Type text${args.clear_first ? " (clear first)" : ""}: ${preview}${String(args.text ?? "").length > 120 ? "…" : ""}`,
                     context.sessionId,
                 );
-                return typeText({ text: args.text, clear_first: args.clear_first });
+                return typeText({
+                    text: args.text,
+                    clear_first: args.clear_first,
+                    signal: context.signal,
+                });
             },
         },
         {
@@ -218,7 +222,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                     `Press key: ${args.key}`,
                     context.sessionId,
                 );
-                return pressKey({ key: args.key });
+                return pressKey({ key: args.key, signal: context.signal });
             },
         },
         {
@@ -262,7 +266,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                     `Scroll ${direction} (${amount})${atHint}`,
                     context.sessionId,
                 );
-                return scroll({ direction, amount, at });
+                return scroll({ direction, amount, at, signal: context.signal });
             },
         },
     ];

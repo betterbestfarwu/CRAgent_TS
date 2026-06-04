@@ -1238,8 +1238,16 @@ export function App() {
   }
 
   async function handleCancelRun() {
-    if (!currentSession || !busy) return;
-    await window.cragent.cancelRun?.(currentSession.meta.id);
+    if (!currentSession) return;
+    const sessionId = currentSession.meta.id;
+    if (confirmRequest) {
+      confirmRequest.resolve(false);
+      setConfirmRequest(null);
+    }
+    busyBySessionRef.current.set(sessionId, false);
+    setBusyBySession((prev) => ({ ...prev, [sessionId]: false }));
+    setBusy(false);
+    await window.cragent.cancelRun?.(sessionId);
   }
 
   async function handleAuthModeChange(nextMode) {

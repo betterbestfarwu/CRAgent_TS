@@ -51,6 +51,50 @@ export class ConfigStore {
     model(providerKey, modelId) {
         return this.data.models[providerKey]?.models.find((m) => m.id === modelId);
     }
+    recordModelTokenUsage(providerKey, modelId, usage) {
+        if (!usage || !providerKey || !modelId) {
+            return this.data;
+        }
+        const promptTokens = Number(usage.prompt_tokens) || 0;
+        const completionTokens = Number(usage.completion_tokens) || 0;
+        const totalTokens = Number(usage.total_tokens) || promptTokens + completionTokens;
+        if (!promptTokens && !completionTokens && !totalTokens) {
+            return this.data;
+        }
+
+        const provider = this.data.models?.[providerKey];
+        if (!provider?.models?.length) {
+            return this.data;
+        }
+
+        const models = provider.models.map((entry) => {
+            if (entry.id !== modelId) {
+                return entry;
+            }
+            const previous = entry.cost || {};
+            return {
+                ...entry,
+                cost: {
+                    prompt_tokens: (previous.prompt_tokens || 0) + promptTokens,
+                    completion_tokens: (previous.completion_tokens || 0) + completionTokens,
+                    total_tokens: (previous.total_tokens || 0) + totalTokens,
+                },
+            };
+        });
+
+        this.data = {
+            ...this.data,
+            models: {
+                ...this.data.models,
+                [providerKey]: {
+                    ...provider,
+                    models,
+                },
+            },
+        };
+        this.persist();
+        return this.data;
+    }
     load() {
         if (fs.existsSync(this.filePath)) {
             return JSON.parse(fs.readFileSync(this.filePath, "utf-8"));

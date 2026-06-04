@@ -50,8 +50,11 @@ function escapePowerShellSingleQuoted(value) {
     return String(value).replace(/'/g, "''");
 }
 
-async function runOsascript(script) {
-    await execFileAsync("/usr/bin/osascript", ["-e", script]);
+async function runOsascript(script, signal) {
+    if (signal?.aborted) {
+        throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+    }
+    await execFileAsync("/usr/bin/osascript", ["-e", script], signal ? { signal } : {});
 }
 
 async function runPowerShell(script) {
@@ -229,6 +232,9 @@ public class NativeMouse {
 }
 
 export async function moveTo(args) {
+    if (args?.signal?.aborted) {
+        throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+    }
     const resolved = resolveGlobalPoint(args.x, args.y);
     if (process.platform === "darwin") {
         await moveMac(resolved);
@@ -240,7 +246,7 @@ export async function moveTo(args) {
     return formatPointResult("Moved cursor", resolved);
 }
 
-async function clickMac(resolved, button = "left") {
+async function clickMac(resolved, button = "left", signal) {
     await moveMac(resolved);
     const { x, y } = resolved;
     if (button === "double") {
@@ -250,7 +256,7 @@ tell application "System Events"
   delay 0.05
   click at {${x}, ${y}}
 end tell`;
-        await runOsascript(script);
+        await runOsascript(script, signal);
         return;
     }
     if (button === "right") {
@@ -258,14 +264,14 @@ end tell`;
 tell application "System Events"
   right click at {${x}, ${y}}
 end tell`;
-        await runOsascript(script);
+        await runOsascript(script, signal);
         return;
     }
     const script = `
 tell application "System Events"
   click at {${x}, ${y}}
 end tell`;
-    await runOsascript(script);
+    await runOsascript(script, signal);
 }
 
 async function clickWin(resolved, button = "left") {
@@ -298,8 +304,9 @@ Start-Sleep -Milliseconds 50
 export async function clickAt(args) {
     const resolved = resolveGlobalPoint(args.x, args.y);
     const button = args.button || "left";
+    const signal = args.signal;
     if (process.platform === "darwin") {
-        await clickMac(resolved, button);
+        await clickMac(resolved, button, signal);
     } else if (process.platform === "win32") {
         await clickWin(resolved, button);
     } else {
@@ -308,13 +315,14 @@ export async function clickAt(args) {
     return formatPointResult(`Clicked (${button})`, resolved);
 }
 
-async function typeTextMac(text, clearFirst = false) {
+async function typeTextMac(text, clearFirst = false, signal) {
     const value = String(text ?? "");
     if (clearFirst) {
         await runOsascript(
             'tell application "System Events" to keystroke "a" using command down',
+            signal,
         );
-        await runOsascript('tell application "System Events" to key code 51');
+        await runOsascript('tell application "System Events" to key code 51', signal);
     }
     if (!value) {
         return;
@@ -322,7 +330,7 @@ async function typeTextMac(text, clearFirst = false) {
     const chunkSize = 400;
     for (let index = 0; index < value.length; index += chunkSize) {
         const chunk = escapeAppleScriptString(value.slice(index, index + chunkSize));
-        await runOsascript(`tell application "System Events" to keystroke "${chunk}"`);
+        await runOsascript(`tell application "System Events" to keystroke "${chunk}"`, signal);
     }
 }
 
@@ -342,9 +350,9 @@ async function typeTextWin(text, clearFirst = false) {
     );
 }
 
-export async function typeText({ text, clear_first: clearFirst = false } = {}) {
+export async function typeText({ text, clear_first: clearFirst = false, signal } = {}) {
     if (process.platform === "darwin") {
-        await typeTextMac(text, clearFirst);
+        await typeTextMac(text, clearFirst, signal);
     } else if (process.platform === "win32") {
         await typeTextWin(text, clearFirst);
     } else {
@@ -406,13 +414,14 @@ function macModifierFlags(modifiers) {
     return flags;
 }
 
-async function pressKeyMac(rawKey) {
+async function pressKeyMac(rawKey, signal) {
     const { modifiers, key } = parseKeyChord(rawKey);
     const flags = macModifierFlags(modifiers);
     const usingClause = flags.length ? ` using {${flags.join(", ")}}` : "";
     if (MAC_KEY_CODES[key] != null) {
         await runOsascript(
             `tell application "System Events" to key code ${MAC_KEY_CODES[key]}${usingClause}`,
+            signal,
         );
         return;
     }
@@ -421,6 +430,7 @@ async function pressKeyMac(rawKey) {
     }
     await runOsascript(
         `tell application "System Events" to keystroke "${escapeAppleScriptString(key)}"${usingClause}`,
+        signal,
     );
 }
 
@@ -465,9 +475,9 @@ async function pressKeyWin(rawKey) {
     );
 }
 
-export async function pressKey({ key }) {
+export async function pressKey({ key, signal } = {}) {
     if (process.platform === "darwin") {
-        await pressKeyMac(key);
+        await pressKeyMac(key, signal);
     } else if (process.platform === "win32") {
         await pressKeyWin(key);
     } else {
@@ -524,13 +534,13 @@ for ($i = 0; $i -lt ${clicks}; $i++) {
     await runPowerShell(script);
 }
 
-export async function scroll({ direction = "down", amount = 3, at } = {}) {
+export async function scroll({ direction = "down", amount = 3, at, signal } = {}) {
     const normalized = String(direction || "down").toLowerCase();
     if (!["up", "down", "left", "right"].includes(normalized)) {
         throw new Error("direction must be up, down, left, or right");
     }
     if (at != null && at.x != null && at.y != null) {
-        await moveTo({ x: at.x, y: at.y });
+        await moveTo({ x: at.x, y: at.y, signal });
     }
     if (process.platform === "darwin") {
         await scrollMac(normalized, amount);
