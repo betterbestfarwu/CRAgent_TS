@@ -25,6 +25,7 @@ import { ComposerAtMenu } from "./ComposerAtMenu.jsx";
 import { ComposerProjectPicker } from "./ComposerProjectPicker.jsx";
 import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
 import { useFileIcons } from "./useFileIcons.js";
+import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
   getComposerFileBeforeSelection,
   getComposerMentionBeforeSelection,
@@ -114,7 +115,6 @@ export function App() {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState([]);
   const [pendingFiles, setPendingFiles] = useState([]);
-  const pendingFileIcons = useFileIcons(pendingFiles);
   const [pendingAtMentions, setPendingAtMentions] = useState([]);
   const [composerDragOver, setComposerDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -755,6 +755,22 @@ export function App() {
     if (!projectId) return null;
     return projects.find((project) => project.id === projectId) || null;
   }, [currentSession?.meta?.projectId, projects]);
+
+  const composerIconPaths = useMemo(() => {
+    const paths = [];
+    for (const file of pendingFiles) {
+      const path = file.path?.trim();
+      if (path) paths.push(path);
+    }
+    const projectDir = activeProject?.directoryPath || "";
+    for (const mention of pendingAtMentions) {
+      const path = resolveProjectFilePath(projectDir, mention.relativePath);
+      if (path) paths.push(path);
+    }
+    return paths;
+  }, [pendingFiles, pendingAtMentions, activeProject?.directoryPath]);
+
+  const composerFileIcons = useFileIcons(composerIconPaths);
 
   const active = Boolean(currentSession && currentSession.messages.length > 0);
   const hasComposerDraft =
@@ -1803,7 +1819,8 @@ export function App() {
                     onRemoveMention={removePendingAtMention}
                     files={pendingFiles}
                     onRemoveFile={removePendingFile}
-                    fileIcons={pendingFileIcons}
+                    fileIcons={composerFileIcons}
+                    projectDirectoryPath={activeProject?.directoryPath || ""}
                     textareaRef={textareaRef}
                     onResize={resizeComposer}
                     placeholder={composerPlaceholder}

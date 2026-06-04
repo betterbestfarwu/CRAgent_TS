@@ -1429,14 +1429,14 @@ body.app-sidebar-resizing {
   vertical-align: baseline;
 }
 
-.composer-file-chip .composer-at-chip-label {
+.composer-input-editor .composer-file-chip .composer-at-chip-label {
   color: var(--app-fg);
   font-size: var(--cursor-font-size);
   line-height: 24px;
   font-weight: 400;
 }
 
-.composer-file-chip .composer-at-chip-icon-btn {
+.composer-input-editor .composer-file-chip .composer-at-chip-icon-btn {
   color: var(--cursor-fg-muted);
 }
 

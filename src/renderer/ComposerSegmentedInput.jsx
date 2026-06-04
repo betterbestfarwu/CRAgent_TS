@@ -1,11 +1,16 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
-import { applyComposerTextSegmentEdit, atChipDisplayName, buildComposerSegments } from "@shared/atMention.js";
+import { applyComposerTextSegmentEdit, buildComposerSegments } from "@shared/atMention.js";
+import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
   ensureComposerCaretAnchor,
   parseComposerEditorDom,
   restoreComposerEditorCaret,
 } from "@shared/composerEditor.js";
-import { createFileChipElement, updateFileChipIconsInDom } from "./composerFileChipDom.js";
+import {
+  createFileChipElement,
+  createMentionChipElement,
+  updateComposerChipIconsInDom,
+} from "./composerFileChipDom.js";
 
 function getTextSegmentOffsets(segments) {
   const offsets = [];
@@ -25,37 +30,7 @@ function getTextSegmentOffsets(segments) {
   return offsets;
 }
 
-function createMentionChipElement(mention) {
-  const span = document.createElement("span");
-  span.className = "composer-at-chip";
-  span.contentEditable = "false";
-  span.dataset.mentionId = mention.id;
-  span.title = mention.relativePath;
-
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "composer-at-chip-icon-btn";
-  button.title = "移除";
-  button.setAttribute("aria-label", `移除 ${mention.name}`);
-  button.innerHTML =
-    '<span class="composer-at-chip-icon composer-at-chip-icon-file" aria-hidden="true">' +
-    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none">' +
-    '<path d="M4 2.5h5.2L12.5 5.8V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2"></path>' +
-    "</svg></span>" +
-    '<span class="composer-at-chip-icon composer-at-chip-icon-close" aria-hidden="true">' +
-    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none">' +
-    '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>' +
-    "</svg></span>";
-
-  const label = document.createElement("span");
-  label.className = "composer-at-chip-label";
-  label.textContent = atChipDisplayName(mention.name);
-
-  span.append(button, label);
-  return span;
-}
-
-function rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons) {
+function rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons, projectDirectoryPath) {
   const fragment = document.createDocumentFragment();
   for (const file of files) {
     const path = file.path?.trim() || "";
@@ -70,7 +45,9 @@ function rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons)
     }
     const mention = mentionById.get(segment.mentionId);
     if (mention) {
-      fragment.appendChild(createMentionChipElement(mention));
+      const absolutePath = resolveProjectFilePath(projectDirectoryPath, mention.relativePath);
+      const iconUrl = absolutePath ? fileIcons[absolutePath] : "";
+      fragment.appendChild(createMentionChipElement(mention, absolutePath, iconUrl));
     }
   }
   ensureComposerCaretAnchor(fragment);
@@ -85,6 +62,7 @@ function ComposerInlineEditor({
   files,
   onRemoveFile,
   fileIcons,
+  projectDirectoryPath = "",
   editorRef,
   onResize,
   placeholder,
@@ -106,17 +84,18 @@ function ComposerInlineEditor({
   const lastSyncedInputRef = useRef(null);
   const lastMentionSignatureRef = useRef(null);
   const lastFilesSignatureRef = useRef(null);
+  const lastProjectDirectoryPathRef = useRef(projectDirectoryPath);
   const prevMentionCountRef = useRef(mentions.length);
   const prevFileCountRef = useRef(files.length);
 
   const syncFromState = useCallback(() => {
     const root = rootRef.current;
     if (!root) return;
-    rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons);
+    rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons, projectDirectoryPath);
     lastSyncedInputRef.current = input;
     lastMentionSignatureRef.current = mentionSignature;
     lastFilesSignatureRef.current = filesSignature;
-  }, [input, mentionById, mentionSignature, segments, files, fileIcons, filesSignature]);
+  }, [input, mentionById, mentionSignature, segments, files, fileIcons, filesSignature, projectDirectoryPath]);
 
   useLayoutEffect(() => {
     if (internalEditRef.current) {
@@ -127,7 +106,8 @@ function ComposerInlineEditor({
 
     const structureChanged =
       mentionSignature !== lastMentionSignatureRef.current ||
-      filesSignature !== lastFilesSignatureRef.current;
+      filesSignature !== lastFilesSignatureRef.current ||
+      projectDirectoryPath !== lastProjectDirectoryPathRef.current;
     const inputChangedExternally = input !== lastSyncedInputRef.current;
     if (!structureChanged && !inputChangedExternally) return;
 
@@ -135,16 +115,26 @@ function ComposerInlineEditor({
     const fileAdded = files.length > prevFileCountRef.current;
     prevMentionCountRef.current = mentions.length;
     prevFileCountRef.current = files.length;
+    lastProjectDirectoryPathRef.current = projectDirectoryPath;
     syncFromState();
     if (mentionAdded || fileAdded) {
       restoreComposerEditorCaret(rootRef.current);
     }
     onResize?.();
-  }, [input, mentionSignature, filesSignature, mentions.length, files.length, onResize, syncFromState]);
+  }, [
+    input,
+    mentionSignature,
+    filesSignature,
+    projectDirectoryPath,
+    mentions.length,
+    files.length,
+    onResize,
+    syncFromState,
+  ]);
 
   useLayoutEffect(() => {
-    updateFileChipIconsInDom(rootRef.current, files, fileIcons);
-  }, [files, fileIcons]);
+    updateComposerChipIconsInDom(rootRef.current, fileIcons);
+  }, [fileIcons]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -257,6 +247,7 @@ export function ComposerSegmentedInput({
   files = [],
   onRemoveFile,
   fileIcons = {},
+  projectDirectoryPath = "",
   textareaRef,
   onResize,
   placeholder,
@@ -273,6 +264,7 @@ export function ComposerSegmentedInput({
         files={files}
         onRemoveFile={onRemoveFile}
         fileIcons={fileIcons}
+        projectDirectoryPath={projectDirectoryPath}
         editorRef={textareaRef}
         onResize={onResize}
         placeholder={placeholder}
