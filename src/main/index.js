@@ -27,6 +27,7 @@ import { createComputerUseTools } from "./tools/computerUseTools.js";
 import fs from "node:fs";
 import { normalizeAuthMode } from "@shared/authMode.js";
 import { listProjectDirectory } from "./projectBrowse.js";
+import { getFileIconsAsDataUrls } from "./fileIcons.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
 /** Packaged builds must always load bundled renderer, even if shell env has NODE_ENV=development. */
@@ -182,6 +183,9 @@ function registerIpc() {
         }
         return { ok: true, filePath };
     });
+    ipcMain.handle(IPC_CHANNELS.getFileIcons, async (_event, paths) =>
+        getFileIconsAsDataUrls(Array.isArray(paths) ? paths : []),
+    );
     ipcMain.handle(IPC_CHANNELS.listSkills, () => skillLoader.listSummaries());
     ipcMain.handle(IPC_CHANNELS.listProjects, () => sessionStore.listProjects());
     ipcMain.handle(IPC_CHANNELS.addProject, (_event, directoryPath) =>

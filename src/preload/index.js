@@ -34,6 +34,7 @@ const api = {
     platform: process.platform,
     getSnapshot: () => ipcRenderer.invoke(IPC_CHANNELS.getSnapshot),
     openConfigFile: () => ipcRenderer.invoke(IPC_CHANNELS.openConfigFile),
+    getFileIcons: (paths) => ipcRenderer.invoke(IPC_CHANNELS.getFileIcons, paths),
     listSkills: () => ipcRenderer.invoke(IPC_CHANNELS.listSkills),
     listProjects: () => ipcRenderer.invoke(IPC_CHANNELS.listProjects),
     addProject: (directoryPath) => ipcRenderer.invoke(IPC_CHANNELS.addProject, directoryPath),

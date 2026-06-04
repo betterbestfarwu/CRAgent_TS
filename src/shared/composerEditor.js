@@ -42,6 +42,10 @@ export function parseComposerEditorDom(root, mentionById) {
         if (node.nodeType !== Node.ELEMENT_NODE) return;
 
         const el = /** @type {HTMLElement} */ (node);
+        if (el.dataset?.fileId && el.classList.contains("composer-file-chip")) {
+            return;
+        }
+
         const mentionId = el.dataset?.mentionId;
         if (mentionId && el.classList.contains("composer-at-chip")) {
             const known = mentionById.get(mentionId);
@@ -100,6 +104,69 @@ export function ensureComposerCaretAnchor(fragment) {
  * @param {HTMLElement | null} root
  * @returns {string | null}
  */
+/**
+ * @param {HTMLElement | null} root
+ * @returns {string | null}
+ */
+export function getComposerFileBeforeSelection(root) {
+    if (!root) return null;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed || !root.contains(range.startContainer)) return null;
+
+    let node = range.startContainer;
+    let offset = range.startOffset;
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = /** @type {HTMLElement} */ (node);
+        if (offset > 0) {
+            const previous = element.childNodes[offset - 1];
+            const fileId = findFileIdOnNode(previous);
+            if (fileId) return fileId;
+        }
+        if (offset === 0 && element.classList?.contains("composer-file-chip")) {
+            return element.dataset.fileId ?? null;
+        }
+    }
+
+    if (node.nodeType === Node.TEXT_NODE && offset === 0) {
+        let previous = node.previousSibling;
+        while (previous?.nodeType === Node.TEXT_NODE && !(previous.textContent ?? "").replace(/\u200B/g, "").length) {
+            previous = previous.previousSibling;
+        }
+        const fileId = findFileIdOnNode(previous);
+        if (fileId) return fileId;
+    }
+
+    if (node.nodeType === Node.TEXT_NODE && offset > 0) {
+        return null;
+    }
+
+    if (node === root && offset > 0) {
+        const previous = root.childNodes[offset - 1];
+        return findFileIdOnNode(previous);
+    }
+
+    return null;
+}
+
+/**
+ * @param {Node | null | undefined} node
+ * @returns {string | null}
+ */
+function findFileIdOnNode(node) {
+    if (!node) return null;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = /** @type {HTMLElement} */ (node);
+        if (element.classList.contains("composer-file-chip") && element.dataset.fileId) {
+            return element.dataset.fileId;
+        }
+    }
+    return null;
+}
+
 export function getComposerMentionBeforeSelection(root) {
     if (!root) return null;
     const selection = window.getSelection();

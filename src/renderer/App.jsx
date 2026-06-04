@@ -24,7 +24,9 @@ import {
 import { ComposerAtMenu } from "./ComposerAtMenu.jsx";
 import { ComposerProjectPicker } from "./ComposerProjectPicker.jsx";
 import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
+import { useFileIcons } from "./useFileIcons.js";
 import {
+  getComposerFileBeforeSelection,
   getComposerMentionBeforeSelection,
   placeComposerCaretAtEnd,
 } from "@shared/composerEditor.js";
@@ -112,6 +114,7 @@ export function App() {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState([]);
   const [pendingFiles, setPendingFiles] = useState([]);
+  const pendingFileIcons = useFileIcons(pendingFiles);
   const [pendingAtMentions, setPendingAtMentions] = useState([]);
   const [composerDragOver, setComposerDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1747,7 +1750,7 @@ export function App() {
                   onDrop={(e) => {
                     e.preventDefault();
                     setComposerDragOver(false);
-                    void addImagesFromFiles(e.dataTransfer?.files);
+                    void addFilesFromPicker(e.dataTransfer?.files);
                   }}
                 >
                 {messageQueue.length > 0 ? (
@@ -1758,8 +1761,8 @@ export function App() {
                     onRemove={removeQueuedMessage}
                   />
                 ) : null}
-                {pendingImages.length || pendingFiles.length ? (
-                  <div className="composer-attachments" aria-label="待发送附件">
+                {pendingImages.length ? (
+                  <div className="composer-attachments" aria-label="待发送图片">
                     {pendingImages.map((image) => (
                       <div key={image.id} className="composer-attachment">
                         <img src={image.dataUrl} alt={image.name || "待发送图片"} />
@@ -1769,22 +1772,6 @@ export function App() {
                           title="移除图片"
                           aria-label="移除图片"
                           onClick={() => removePendingImage(image.id)}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    {pendingFiles.map((file) => (
-                      <div key={file.id} className="composer-file-attachment">
-                        <span className="composer-file-name" title={file.path || file.name}>
-                          {file.name}
-                        </span>
-                        <button
-                          type="button"
-                          className="composer-file-remove"
-                          title="移除文件"
-                          aria-label="移除文件"
-                          onClick={() => removePendingFile(file.id)}
                         >
                           ×
                         </button>
@@ -1805,14 +1792,18 @@ export function App() {
                   onCollapse={() => textareaRef.current?.focus()}
                 />
                 <div
-                  className={`composer-input-row${pendingAtMentions.length ? " has-at-mentions" : ""}`}
+                  className={`composer-input-row${pendingAtMentions.length || pendingFiles.length ? " has-at-mentions" : ""}`}
                   ref={composerInputRowRef}
                 >
-                  <ComposerSegmentedInput
+                  <div className="composer-input-surface">
+                    <ComposerSegmentedInput
                     input={input}
                     onInputChange={updateComposerInput}
                     mentions={pendingAtMentions}
                     onRemoveMention={removePendingAtMention}
+                    files={pendingFiles}
+                    onRemoveFile={removePendingFile}
+                    fileIcons={pendingFileIcons}
                     textareaRef={textareaRef}
                     onResize={resizeComposer}
                     placeholder={composerPlaceholder}
@@ -1825,23 +1816,28 @@ export function App() {
                       void addImagesFromFiles(files);
                     }}
                     onKeyDown={(e, segment) => {
-                    if (e.key === "Backspace" && pendingAtMentions.length > 0) {
-                      if (segment?.contentEditable) {
-                        const mentionId = getComposerMentionBeforeSelection(e.currentTarget);
-                        if (mentionId) {
-                          e.preventDefault();
-                          removePendingAtMention(mentionId);
-                          return;
-                        }
-                      } else {
-                        const el = e.currentTarget;
-                        const start = el?.selectionStart ?? 0;
-                        const end = el?.selectionEnd ?? 0;
-                        if (start === 0 && end === 0) {
-                          e.preventDefault();
-                          removeLastPendingAtMention();
-                          return;
-                        }
+                    if (e.key === "Backspace" && segment?.contentEditable) {
+                      const fileId = getComposerFileBeforeSelection(e.currentTarget);
+                      if (fileId) {
+                        e.preventDefault();
+                        removePendingFile(fileId);
+                        return;
+                      }
+                      const mentionId = getComposerMentionBeforeSelection(e.currentTarget);
+                      if (mentionId) {
+                        e.preventDefault();
+                        removePendingAtMention(mentionId);
+                        return;
+                      }
+                    }
+                    if (e.key === "Backspace" && pendingAtMentions.length > 0 && !segment?.contentEditable) {
+                      const el = e.currentTarget;
+                      const start = el?.selectionStart ?? 0;
+                      const end = el?.selectionEnd ?? 0;
+                      if (start === 0 && end === 0) {
+                        e.preventDefault();
+                        removeLastPendingAtMention();
+                        return;
                       }
                     }
                     if (showSlashMenu && slashNavItems.length) {
@@ -1909,6 +1905,7 @@ export function App() {
                     }
                   }}
                   />
+                  </div>
                 </div>
                 <div className="composer-toolbar-spacer" aria-hidden="true" />
                 <div className="composer-toolbar">

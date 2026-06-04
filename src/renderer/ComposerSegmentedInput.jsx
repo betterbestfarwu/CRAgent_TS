@@ -5,6 +5,7 @@ import {
   parseComposerEditorDom,
   restoreComposerEditorCaret,
 } from "@shared/composerEditor.js";
+import { createFileChipElement, updateFileChipIconsInDom } from "./composerFileChipDom.js";
 
 function getTextSegmentOffsets(segments) {
   const offsets = [];
@@ -54,8 +55,12 @@ function createMentionChipElement(mention) {
   return span;
 }
 
-function rebuildComposerEditorDom(root, segments, mentionById) {
+function rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons) {
   const fragment = document.createDocumentFragment();
+  for (const file of files) {
+    const path = file.path?.trim() || "";
+    fragment.appendChild(createFileChipElement(file, path ? fileIcons[path] : ""));
+  }
   for (const segment of segments) {
     if (segment.kind === "text") {
       if (segment.content) {
@@ -77,6 +82,9 @@ function ComposerInlineEditor({
   onInputChange,
   mentions,
   onRemoveMention,
+  files,
+  onRemoveFile,
+  fileIcons,
   editorRef,
   onResize,
   placeholder,
@@ -90,18 +98,25 @@ function ComposerInlineEditor({
     () => mentions.map((mention) => `${mention.id}:${mention.insertAt ?? "end"}`).join("|"),
     [mentions],
   );
+  const filesSignature = useMemo(
+    () => files.map((file) => `${file.id}:${file.path || ""}`).join("|"),
+    [files],
+  );
   const internalEditRef = useRef(false);
   const lastSyncedInputRef = useRef(null);
   const lastMentionSignatureRef = useRef(null);
+  const lastFilesSignatureRef = useRef(null);
   const prevMentionCountRef = useRef(mentions.length);
+  const prevFileCountRef = useRef(files.length);
 
   const syncFromState = useCallback(() => {
     const root = rootRef.current;
     if (!root) return;
-    rebuildComposerEditorDom(root, segments, mentionById);
+    rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons);
     lastSyncedInputRef.current = input;
     lastMentionSignatureRef.current = mentionSignature;
-  }, [input, mentionById, mentionSignature, segments]);
+    lastFilesSignatureRef.current = filesSignature;
+  }, [input, mentionById, mentionSignature, segments, files, fileIcons, filesSignature]);
 
   useLayoutEffect(() => {
     if (internalEditRef.current) {
@@ -110,18 +125,26 @@ function ComposerInlineEditor({
       return;
     }
 
-    const structureChanged = mentionSignature !== lastMentionSignatureRef.current;
+    const structureChanged =
+      mentionSignature !== lastMentionSignatureRef.current ||
+      filesSignature !== lastFilesSignatureRef.current;
     const inputChangedExternally = input !== lastSyncedInputRef.current;
     if (!structureChanged && !inputChangedExternally) return;
 
     const mentionAdded = mentions.length > prevMentionCountRef.current;
+    const fileAdded = files.length > prevFileCountRef.current;
     prevMentionCountRef.current = mentions.length;
+    prevFileCountRef.current = files.length;
     syncFromState();
-    if (mentionAdded) {
+    if (mentionAdded || fileAdded) {
       restoreComposerEditorCaret(rootRef.current);
     }
     onResize?.();
-  }, [input, mentionSignature, mentions.length, onResize, syncFromState]);
+  }, [input, mentionSignature, filesSignature, mentions.length, files.length, onResize, syncFromState]);
+
+  useLayoutEffect(() => {
+    updateFileChipIconsInDom(rootRef.current, files, fileIcons);
+  }, [files, fileIcons]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -132,13 +155,18 @@ function ComposerInlineEditor({
       if (!button || !root.contains(button)) return;
       event.preventDefault();
       const chip = button.closest(".composer-at-chip");
+      const fileId = chip?.dataset?.fileId;
+      if (fileId) {
+        onRemoveFile?.(fileId);
+        return;
+      }
       const mentionId = chip?.dataset?.mentionId;
       if (mentionId) onRemoveMention?.(mentionId);
     }
 
     root.addEventListener("click", handleClick);
     return () => root.removeEventListener("click", handleClick);
-  }, [onRemoveMention]);
+  }, [onRemoveFile, onRemoveMention]);
 
   function handleInput() {
     const root = rootRef.current;
@@ -226,19 +254,25 @@ export function ComposerSegmentedInput({
   onInputChange,
   mentions,
   onRemoveMention,
+  files = [],
+  onRemoveFile,
+  fileIcons = {},
   textareaRef,
   onResize,
   placeholder,
   onPaste,
   onKeyDown,
 }) {
-  if (mentions.length > 0) {
+  if (mentions.length > 0 || files.length > 0) {
     return (
       <ComposerInlineEditor
         input={input}
         onInputChange={onInputChange}
         mentions={mentions}
         onRemoveMention={onRemoveMention}
+        files={files}
+        onRemoveFile={onRemoveFile}
+        fileIcons={fileIcons}
         editorRef={textareaRef}
         onResize={onResize}
         placeholder={placeholder}

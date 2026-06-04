@@ -1,6 +1,7 @@
 export const IPC_CHANNELS = {
     getSnapshot: "app:getSnapshot",
     openConfigFile: "app:openConfigFile",
+    getFileIcons: "app:getFileIcons",
     listSkills: "skills:list",
     listProjects: "project:list",
     addProject: "project:add",
