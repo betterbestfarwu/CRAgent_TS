@@ -239,11 +239,12 @@ export function ChatView({
       if (data.action === "ready") {
         readyRef.current = true;
         syncIframeLayout();
-        syncMessages();
-        postToChat("setBusy", busy);
-        postToChat("setVerboseThinking", verboseThinkingRef.current);
         postToChat("setSessionId", sessionId || "");
         postToChat("setSessionModel", sessionModelId || "");
+        postToChat("setVerboseThinking", verboseThinkingRef.current);
+        postToChat("setPlanContext", planContextRef.current || { active: false });
+        syncMessages();
+        postToChat("setBusy", busy);
         const queue = pendingRef.current;
         pendingRef.current = [];
         queue.forEach((run) => run());

@@ -26,6 +26,7 @@
   var currentSessionId = '';
   var currentSessionModelId = '';
   var thinkingOpenState = {};
+  var messageExpandState = {};
   var planContext = { active: false };
   var planPreviewTarget = { messageId: null, runId: null };
   var PLAN_PREVIEW_MAX_HEIGHT = 280;
@@ -624,8 +625,50 @@
 
   var COLLAPSED_MAX_HEIGHT = 320;
 
+  function messageExpandStateStorageKey() {
+    return 'cragent:message-expanded:' + (currentSessionId || 'default');
+  }
+
+  function loadMessageExpandState() {
+    try {
+      var raw = sessionStorage.getItem(messageExpandStateStorageKey());
+      var parsed = raw ? JSON.parse(raw) : {};
+      messageExpandState = parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+      messageExpandState = {};
+    }
+  }
+
+  function saveMessageExpandState() {
+    try {
+      sessionStorage.setItem(messageExpandStateStorageKey(), JSON.stringify(messageExpandState));
+    } catch (_) {}
+  }
+
+  function messageContentKey(msgEl) {
+    if (!msgEl) return '';
+    if (msgEl.dataset.id) return 'msg:' + msgEl.dataset.id;
+    if (msgEl.dataset.runId) return 'run:' + msgEl.dataset.runId;
+    return '';
+  }
+
+  function hasOwnStateValue(state, key) {
+    return Boolean(key && Object.prototype.hasOwnProperty.call(state, key));
+  }
+
   function shouldExpandMessageContent(msgEl) {
+    var key = messageContentKey(msgEl);
+    if (hasOwnStateValue(messageExpandState, key)) {
+      return Boolean(messageExpandState[key]);
+    }
     return Boolean(msgEl && msgEl.dataset.expandContent === '1');
+  }
+
+  function setMessageContentExpanded(msgEl, expanded) {
+    var key = messageContentKey(msgEl);
+    if (!key) return;
+    messageExpandState[key] = Boolean(expanded);
+    saveMessageExpandState();
   }
 
   function setBubbleCollapseExpanded(wrap, expanded) {
@@ -650,7 +693,19 @@
     var last = allMsgs[allMsgs.length - 1];
     if (!last) return;
     last.dataset.expandContent = '1';
-    setBubbleCollapseExpanded(last.querySelector('.bubble-collapse.is-collapsed'), true);
+    setBubbleCollapseExpanded(last.querySelector('.bubble-collapse'), shouldExpandMessageContent(last));
+  }
+
+  function captureMessageExpandState(root) {
+    var scope = root || container;
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll('.bubble-collapse').forEach(function (wrap) {
+      var msgEl = wrap.closest('.msg');
+      var key = messageContentKey(msgEl);
+      if (!key) return;
+      messageExpandState[key] = !wrap.classList.contains('is-collapsed');
+    });
+    saveMessageExpandState();
   }
 
   function setupCollapsibleContent(contentEl) {
@@ -679,6 +734,7 @@
         var collapsed = wrap.classList.toggle('is-collapsed');
         toggle.textContent = collapsed ? '展开全文' : '收起';
         toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        setMessageContentExpanded(msgEl, !collapsed);
       });
       wrap.appendChild(toggle);
     }
@@ -706,7 +762,8 @@
   function loadThinkingOpenState() {
     try {
       var raw = sessionStorage.getItem(thinkingStateStorageKey());
-      thinkingOpenState = raw ? JSON.parse(raw) : {};
+      var parsed = raw ? JSON.parse(raw) : {};
+      thinkingOpenState = parsed && typeof parsed === 'object' ? parsed : {};
     } catch (_) {
       thinkingOpenState = {};
     }
@@ -1396,6 +1453,7 @@
     planPreviewTarget = findPlanPreviewTarget(messages);
     todoRunsById = (payload && payload.todoRuns) || {};
     var anchor = captureScrollAnchor();
+    captureMessageExpandState(container);
     var userIndex = findLastActiveRunUserIndex(messages);
     if (userIndex < 0) {
       renderMessageList(payload);
@@ -1438,6 +1496,8 @@
   function renderMessageList(payload) {
     disconnectLazyMermaid();
     batchPostProcess = true;
+    captureThinkingOpenState(container);
+    captureMessageExpandState(container);
     container.innerHTML = '';
     var messages = Array.isArray(payload) ? payload : (payload && payload.messages) || [];
     todoRunsById = (!Array.isArray(payload) && payload && payload.todoRuns) || {};
@@ -1575,8 +1635,13 @@
     setSessionId: function (sessionId) {
       var nextId = sessionId ? String(sessionId) : '';
       if (nextId === currentSessionId) return;
+      captureThinkingOpenState(container);
+      captureMessageExpandState(container);
+      disconnectLazyMermaid();
+      container.innerHTML = '';
       currentSessionId = nextId;
       loadThinkingOpenState();
+      loadMessageExpandState();
     },
     setSessionModel: function (modelId) {
       currentSessionModelId = modelId ? String(modelId) : '';
@@ -1705,6 +1770,7 @@
   }, true);
 
   loadThinkingOpenState();
+  loadMessageExpandState();
   window.app = app;
   notifyHost({ action: 'ready' });
 })();
