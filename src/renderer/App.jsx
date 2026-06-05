@@ -50,6 +50,7 @@ import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { PlanApprovalDialog } from "./PlanApprovalDialog.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { TitleBar } from "./TitleBar.jsx";
+import { shouldAutoSwitchToChatPage } from "./appNavigation.js";
 import { displayTitle } from "./sidebarUtils.js";
 import {
   isDefaultSessionTitle,
@@ -149,6 +150,7 @@ export function App() {
   const composerQuickMenuRef = useRef(null);
   const filePickerRef = useRef(null);
   const sessionIdRef = useRef(null);
+  const pageRef = useRef(page);
   const sessionErrorTimerRef = useRef(null);
   const composerInputRowRef = useRef(null);
   const textareaRef = useRef(null);
@@ -332,6 +334,10 @@ export function App() {
   useEffect(() => {
     sessionIdRef.current = currentSession?.meta.id ?? null;
   }, [currentSession?.meta.id]);
+
+  useLayoutEffect(() => {
+    pageRef.current = page;
+  }, [page]);
 
   useEffect(() => () => clearSessionError(), [clearSessionError]);
 
@@ -518,7 +524,10 @@ export function App() {
           }
           return session;
         });
-        setPage("chat");
+        // Keep Settings open when the current session refreshes in the background.
+        if (shouldAutoSwitchToChatPage(pageRef.current, isViewing)) {
+          setPage("chat");
+        }
       }
 
       setSessions((prev) => {
