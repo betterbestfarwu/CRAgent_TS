@@ -225,13 +225,10 @@ function checkEmbeddedNewline(ctx) {
         if (ch !== "\n" && ch !== "\r") continue;
         const prev = i > 0 ? content[i - 1] : "";
         if (prev === "\\") continue;
-        const next = content[i + 1];
-        if (next && !/[\s]/.test(next)) {
-            return fail(
-                BASH_SECURITY_CHECK_IDS.EMBEDDED_NEWLINE,
-                "command contains embedded newline that may run additional commands",
-            );
-        }
+        return fail(
+            BASH_SECURITY_CHECK_IDS.EMBEDDED_NEWLINE,
+            "command contains embedded newline that may run additional commands",
+        );
     }
     return null;
 }

@@ -13,11 +13,16 @@ const POSIX_BLOCKED = new Set([
     "kill",
     "killall",
     "diskutil",
+    "mount",
+    "umount",
+    "eval",
 ]);
 
 const POSIX_CONFIRM = new Set([
     "cp",
     "mv",
+    "mkdir",
+    "touch",
     "chmod",
     "chown",
     "tar",
@@ -25,6 +30,7 @@ const POSIX_CONFIRM = new Set([
     "unzip",
     "npm",
     "yarn",
+    "pnpm",
     "pip",
     "brew",
     "apt",
@@ -34,6 +40,22 @@ const POSIX_CONFIRM = new Set([
     "ln",
     "git",
     "open",
+    "tee",
+    "curl",
+    "wget",
+    "ssh",
+    "scp",
+    "sftp",
+    "ftp",
+    "rsync",
+    "nc",
+    "ncat",
+    "telnet",
+    "sed",
+    "osascript",
+    "source",
+    ".",
+    "xargs",
 ]);
 
 const POSIX_DANGEROUS_PATTERNS = [

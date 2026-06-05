@@ -169,7 +169,7 @@ export function validatePlanModeToolCall(
 /**
  * Stricter bash policy for plan mode: block write-class and state-changing commands.
  */
-export function classifyBashForPlanMode(command, runtime) {
+export function classifyBashForPlanMode(command, runtime, options = {}) {
     const trimmed = String(command || "").trim();
     if (!trimmed) {
         return { kind: "blocked", reason: "empty command" };
@@ -183,7 +183,7 @@ export function classifyBashForPlanMode(command, runtime) {
             };
         }
     }
-    const base = classifyBashCommand(trimmed, runtime);
+    const base = classifyBashCommand(trimmed, runtime, options);
     if (base.kind === "blocked") {
         return base;
     }

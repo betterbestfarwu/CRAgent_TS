@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
     BASH_SECURITY_CHECK_IDS,
     listBashSecurityCheckIds,
@@ -30,6 +33,12 @@ test("control characters", () => {
 
 test("embedded newline", () => {
     const r = scanBashSecurity("echo a\necho b");
+    assert.equal(r.ok, false);
+    assert.equal(r.checkId, BASH_SECURITY_CHECK_IDS.EMBEDDED_NEWLINE);
+});
+
+test("embedded newline followed by whitespace is still unsafe", () => {
+    const r = scanBashSecurity("echo a\n echo b");
     assert.equal(r.ok, false);
     assert.equal(r.checkId, BASH_SECURITY_CHECK_IDS.EMBEDDED_NEWLINE);
 });
@@ -156,4 +165,75 @@ test("classifyBashCommand still blocks destructive commands after security pass"
     const runtime = resolveShellRuntime("darwin");
     const r = classifyBashCommand("rm -rf ./build", runtime);
     assert.equal(r.kind, "blocked");
+});
+
+test("classifyBashCommand blocks command-position bypasses", () => {
+    const runtime = resolveShellRuntime("darwin");
+    const commands = [
+        "FOO=1 rm -rf ./build",
+        "command rm -rf ./build",
+        "env -i rm -rf ./build",
+        "/bin/rm -rf ./build",
+        'r""m -rf ./build',
+        "bash -c 'rm -rf ./build'",
+        "bash -lc 'rm -rf ./build'",
+        "sh -c 'rm -rf ./build'",
+        "(rm -rf ./build)",
+        "if true; then rm -rf ./build; fi",
+        "echo ok\n rm -rf ./build",
+    ];
+
+    for (const command of commands) {
+        assert.equal(classifyBashCommand(command, runtime).kind, "blocked", command);
+    }
+});
+
+test("classifyBashCommand confirms inline scripts without destructive content", () => {
+    const runtime = resolveShellRuntime("darwin");
+    const r = classifyBashCommand("bash -c 'echo ok'", runtime);
+    assert.equal(r.kind, "needsConfirmation");
+});
+
+test("classifyBashCommand blocks execution-in-argument injection paths", () => {
+    const runtime = resolveShellRuntime("darwin");
+    const commands = [
+        "find . -exec rm -rf {} ;",
+        "find . -delete",
+        "echo foo | xargs rm -rf",
+        "eval rm -rf ./build",
+        'python3 -c \'import os; os.system("rm -rf ./build")\'',
+        'awk \'BEGIN{system("rm -rf ./build")}\'',
+    ];
+
+    for (const command of commands) {
+        assert.equal(classifyBashCommand(command, runtime).kind, "blocked", command);
+    }
+});
+
+test("classifyBashCommand guards external path access when workspace is known", () => {
+    const runtime = resolveShellRuntime("darwin");
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-bash-ws-"));
+
+    assert.equal(
+        classifyBashCommand("cat /etc/passwd", runtime, { workspace }).kind,
+        "needsConfirmation",
+    );
+    assert.equal(
+        classifyBashCommand("touch ~/.ssh/authorized_keys", runtime, { workspace }).kind,
+        "blocked",
+    );
+    assert.equal(
+        classifyBashCommand("printf x | tee ~/.ssh/authorized_keys", runtime, { workspace }).kind,
+        "blocked",
+    );
+    assert.equal(
+        classifyBashCommand("echo x > ~/.bashrc", runtime, { workspace }).kind,
+        "blocked",
+    );
+});
+
+test("classifyBashCommand confirms network-capable commands", () => {
+    const runtime = resolveShellRuntime("darwin");
+    assert.equal(classifyBashCommand("curl https://example.com", runtime).kind, "needsConfirmation");
+    assert.equal(classifyBashCommand("wget https://example.com/file", runtime).kind, "needsConfirmation");
 });

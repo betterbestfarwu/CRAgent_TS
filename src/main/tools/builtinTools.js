@@ -218,8 +218,8 @@ export function createBuiltinTools({
                 }
                 const safety =
                     context?.executionMode === "plan"
-                        ? classifyBashForPlanMode(command, shellRuntime)
-                        : classifyBashCommand(command, shellRuntime);
+                        ? classifyBashForPlanMode(command, shellRuntime, { workspace })
+                        : classifyBashCommand(command, shellRuntime, { workspace });
                 if (safety.kind === "blocked") {
                     throw new Error(safety.reason);
                 }
@@ -405,4 +405,3 @@ export function createBuiltinTools({
 
     return tools;
 }
-
