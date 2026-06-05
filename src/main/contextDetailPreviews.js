@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isContextDividerMessage } from "@shared/chatMessages.js";
 import { getEnabledMcpServers, parseMcpToolRegistryName } from "@shared/mcpConfig.js";
+import { stripInlineImagePayloads } from "@shared/imagePayloads.js";
 import { SUB_AGENT_TYPES, subAgentSystemPrompt } from "./subAgentTypes.js";
 import { formatTodosForPrompt } from "./todoState.js";
 import { isDeferredTool } from "./toolSearch.js";
@@ -10,7 +11,7 @@ const MAX_MESSAGE_PREVIEW_CHARS = 12_000;
 const MAX_CONVERSATION_PREVIEW_CHARS = 100_000;
 
 function truncateText(text, maxChars) {
-    const value = String(text || "");
+    const value = stripInlineImagePayloads(text);
     if (value.length <= maxChars) {
         return value;
     }
@@ -101,7 +102,7 @@ export function buildSubagentDefinitionsPreview(agentTools) {
 function formatMessagePreview(message) {
     const role = message.role || "unknown";
     const name = message.name ? ` (${message.name})` : "";
-    let body = message.content || "";
+    let body = stripInlineImagePayloads(message.content);
     if (message.toolCalls?.length) {
         const calls = message.toolCalls
             .map((call) => `${call.function?.name}(${call.function?.arguments || ""})`)

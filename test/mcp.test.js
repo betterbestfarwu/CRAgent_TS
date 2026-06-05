@@ -125,6 +125,29 @@ test("formatMcpCallToolResult marks errors", () => {
     assert.match(text, /^Error: boom/);
 });
 
+test("formatMcpCallToolResult returns image blocks as structured attachments", () => {
+    const result = formatMcpCallToolResult({
+        content: [
+            { type: "text", text: "generated image" },
+            { type: "image", mimeType: "image/png", data: "QUJD" },
+        ],
+    });
+
+    assert.equal(result.content, "generated image\n[MCP image output: image/png]");
+    assert.deepEqual(result.images, [
+        { mimeType: "image/png", dataUrl: "data:image/png;base64,QUJD" },
+    ]);
+});
+
+test("formatMcpCallToolResult strips generated image base64 from structured content", () => {
+    const text = formatMcpCallToolResult({
+        structuredContent: { data: [{ b64_json: "C".repeat(4096) }] },
+    });
+
+    assert.doesNotMatch(text, /CCCC/);
+    assert.match(text, /\[image payload omitted: image/);
+});
+
 test("parseMcpArgsFromEditor splits lines", () => {
     assert.deepEqual(parseMcpArgsFromEditor("node\n/path/a.mjs\n"), ["node", "/path/a.mjs"]);
     assert.equal(formatMcpArgsForEditor(["a", "b"]), "a\nb");

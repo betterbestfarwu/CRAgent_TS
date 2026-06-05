@@ -6,6 +6,7 @@ import {
     estimateSessionContextUsage,
     estimateTextTokens,
 } from "@shared/tokenEstimator";
+import { stripInlineImagePayloads } from "@shared/imagePayloads.js";
 import { groupMessagesByApiRound } from "./contextGrouping.js";
 
 export { DEFAULT_CONTEXT_CONFIG };
@@ -226,10 +227,10 @@ export function formatMessagesForSummary(messages) {
                 const imageNote = message.images?.length
                     ? ` [${message.images.length} image(s)]`
                     : "";
-                return `User: ${message.content || ""}${imageNote}`.trimEnd();
+                return `User: ${stripInlineImagePayloads(message.content)}${imageNote}`.trimEnd();
             }
             if (message.role === "assistant") {
-                let line = `Assistant: ${message.content || ""}`.trimEnd();
+                let line = `Assistant: ${stripInlineImagePayloads(message.content)}`.trimEnd();
                 if (message.toolCalls?.length) {
                     const names = message.toolCalls
                         .map((call) => call.function?.name)
@@ -242,7 +243,7 @@ export function formatMessagesForSummary(messages) {
                 return line;
             }
             if (message.role === "tool") {
-                const body = String(message.content || "").slice(0, 1200);
+                const body = stripInlineImagePayloads(message.content).slice(0, 1200);
                 return `Tool (${message.name || "tool"}): ${body}`;
             }
             return "";

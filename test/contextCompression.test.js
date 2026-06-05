@@ -236,6 +236,19 @@ test("calculateContextWarningState exposes warning and auto thresholds", () => {
     assert.equal(state.isAtBlockingLimit, true);
 });
 
+test("inline image payload text does not block context after sanitizing estimate", () => {
+    const model = { contextWindow: 20_000, maxTokens: 1024 };
+    const dataUrl = `data:image/png;base64,${"A".repeat(400_000)}`;
+    const session = {
+        meta: { llmContextFromIndex: 0 },
+        messages: [{ role: "tool", name: "image_tool", content: `Generated ${dataUrl}` }],
+    };
+    const state = calculateContextWarningState(session, model);
+
+    assert.equal(estimateMessageTokens(session.messages[0]) < 500, true);
+    assert.equal(state.isAtBlockingLimit, false);
+});
+
 test("truncateGroupsFromHead removes oldest rounds", () => {
     const messages = [
         { role: "user", content: "round1" },

@@ -1,4 +1,5 @@
 import { isContextDividerMessage } from "./chatMessages.js";
+import { stripInlineImagePayloads } from "./imagePayloads.js";
 
 const IMAGE_TOKEN_ESTIMATE = 2000;
 const TOKEN_PADDING_RATIO = 4 / 3;
@@ -13,7 +14,7 @@ function finiteNumber(value, fallback) {
 }
 
 export function estimateTextTokens(text) {
-    const chars = String(text || "").length;
+    const chars = stripInlineImagePayloads(text).length;
     return Math.max(0, Math.ceil((chars / 4) * TOKEN_PADDING_RATIO));
 }
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isContextOverflowError, isRetryableLlmError } from "./modelFallback.js";
+import { stripInlineImagePayloads } from "@shared/imagePayloads.js";
 
 function createLlmHttpError(status, bodyText) {
     const error = new Error(`模型请求失败: ${status} ${bodyText.slice(0, 200)}`);
@@ -11,14 +12,15 @@ export function messagesToApiPayloads(messages) {
     const payloads = [];
     for (const message of messages) {
         payloads.push(messageToApiPayload(message));
-        if (message.role === "tool" && message.images?.length) {
+        const imageAttachments = (message.images || []).filter((image) => image?.dataUrl);
+        if (message.role === "tool" && imageAttachments.length) {
             const parts = [
                 {
                     type: "text",
                     text: `[Visual output from tool ${message.name || "tool"}]`,
                 },
             ];
-            for (const image of message.images) {
+            for (const image of imageAttachments) {
                 parts.push({
                     type: "image_url",
                     image_url: { url: image.dataUrl },
@@ -33,7 +35,7 @@ export function messagesToApiPayloads(messages) {
 function messageToApiPayload(message) {
     const payload = { role: message.role };
     if (message.role === "assistant") {
-        payload.content = message.content || "";
+        payload.content = stripInlineImagePayloads(message.content);
         if (message.toolCalls?.length) {
             payload.tool_calls = message.toolCalls.map((call) => ({
                 id: call.id,
@@ -47,7 +49,7 @@ function messageToApiPayload(message) {
         return payload;
     }
     if (message.role === "tool") {
-        payload.content = message.content;
+        payload.content = stripInlineImagePayloads(message.content);
         if (message.toolCallId) {
             payload.tool_call_id = message.toolCallId;
         }
@@ -59,19 +61,34 @@ function messageToApiPayload(message) {
     if (message.role === "user" && message.images?.length) {
         const parts = [];
         if (message.content) {
-            parts.push({ type: "text", text: message.content });
+            parts.push({ type: "text", text: stripInlineImagePayloads(message.content) });
         }
-        for (const image of message.images) {
+        for (const image of message.images.filter((item) => item?.dataUrl)) {
             parts.push({
                 type: "image_url",
                 image_url: { url: image.dataUrl },
             });
         }
-        payload.content = parts;
+        payload.content = parts.length ? parts : "";
         return payload;
     }
-    payload.content = message.content;
+    payload.content = stripInlineImagePayloads(message.content);
     return payload;
+}
+
+function sanitizeForLog(value) {
+    if (typeof value === "string") {
+        return stripInlineImagePayloads(value);
+    }
+    if (Array.isArray(value)) {
+        return value.map((item) => sanitizeForLog(item));
+    }
+    if (value && typeof value === "object") {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [key, sanitizeForLog(item)]),
+        );
+    }
+    return value;
 }
 
 function logOutgoingMessages(kind, model, messages, extra = {}) {
@@ -79,7 +96,7 @@ function logOutgoingMessages(kind, model, messages, extra = {}) {
         kind,
         model: `${model.providerKey}/${model.modelId}`,
         messageCount: messages.length,
-        messages,
+        messages: sanitizeForLog(messages),
         ...extra,
     };
     console.log("[CRAgent][LLM] outgoing messages\n" + JSON.stringify(payload, null, 2));

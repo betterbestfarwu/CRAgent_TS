@@ -59,6 +59,14 @@ describe("toolResult", () => {
         });
     });
 
+    it("strips inline image payloads from text results", () => {
+        const dataUrl = `data:image/png;base64,${"A".repeat(4096)}`;
+        const normalized = normalizeToolResult(`Generated: ${dataUrl}`);
+
+        assert.doesNotMatch(normalized.content, /AAAA/);
+        assert.match(normalized.content, /\[image payload omitted: image\/png/);
+    });
+
     it("detects tool errors", () => {
         assert.equal(isToolErrorResult("Error: nope"), true);
         assert.equal(isToolErrorResult({ text: "Error: nope" }), true);
@@ -87,6 +95,21 @@ describe("llmClient messagesToApiPayloads", () => {
         assert.equal(payloads[1].role, "user");
         assert.equal(Array.isArray(payloads[1].content), true);
         assert.equal(payloads[1].content[1].type, "image_url");
+    });
+
+    it("strips inline image payload text before API payloads", () => {
+        const dataUrl = `data:image/png;base64,${"A".repeat(4096)}`;
+        const payloads = messagesToApiPayloads([
+            {
+                role: "tool",
+                name: "image_tool",
+                toolCallId: "call_1",
+                content: `Generated: ${dataUrl}`,
+            },
+        ]);
+
+        assert.doesNotMatch(payloads[0].content, /AAAA/);
+        assert.match(payloads[0].content, /\[image payload omitted: image\/png/);
     });
 });
 
