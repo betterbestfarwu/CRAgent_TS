@@ -809,6 +809,38 @@ test("plan execution mode uses chat loop with read-only tool policy", async () =
     assert.match(assistant.content, /计划/);
 });
 
+test("goal session stays in goal on delivery requests when agent default is plan", async () => {
+    const { session, runtime, sessionStore, configStore } = makeRuntimeHarness({
+        chatImpl: () => ({
+            message: {
+                id: "assistant-goal",
+                role: "assistant",
+                content: "开始实现登录功能。",
+                createdAt: new Date().toISOString(),
+            },
+        }),
+    });
+    configStore.update({
+        ...configStore.get(),
+        agents: {
+            ...configStore.get().agents,
+            default: {
+                ...configStore.get().agents.default,
+                execution_mode: "plan",
+            },
+        },
+    });
+    sessionStore.updateExecutionMode(session.meta.id, "goal");
+
+    await runtime.sendUserMessage(session.meta.id, "帮我开发一个小程序登录功能");
+
+    assert.equal(sessionStore.get(session.meta.id).meta.executionMode, "goal");
+    assert.doesNotMatch(
+        runtime.buildSystemPromptContent(sessionStore.get(session.meta.id)),
+        /You are in Plan Mode\./,
+    );
+});
+
 test("rejectPlanMode appends rejection user message and stays in plan", async () => {
     const { session, runtime, sessionStore } = makeRuntimeHarness({
         chatImpl: () => ({

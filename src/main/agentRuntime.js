@@ -69,12 +69,10 @@ import {
     getPlanDisplayPath,
     planFileExists,
     readPlanFile,
-    shouldStartInPlanMode,
     validatePlanModeToolCall,
     writePlanFile,
 } from "./planMode.js";
 import { ensureSessionPlanFile } from "@shared/sessionPlanPaths.js";
-import { PLAN_MODE_AUTO_SYSTEM_HINT } from "@shared/planMessages.js";
 import {
     estimateMcpToolDefinitionTokens,
     getEnabledMcpServers,
@@ -193,19 +191,18 @@ export class AgentRuntime {
     }
 
     sessionExecutionMode(sessionOrId) {
-        const fallback = this.configStore.get().agents?.default?.execution_mode;
         if (typeof sessionOrId === "string") {
             try {
                 const session = this.sessionStore.get(sessionOrId, {
                     loadAllMessages: false,
                     hydrateImages: false,
                 });
-                return normalizeExecutionMode(session.meta.executionMode, fallback);
+                return normalizeExecutionMode(session.meta.executionMode);
             } catch {
-                return normalizeExecutionMode(undefined, fallback);
+                return normalizeExecutionMode(undefined);
             }
         }
-        return normalizeExecutionMode(sessionOrId?.meta?.executionMode, fallback);
+        return normalizeExecutionMode(sessionOrId?.meta?.executionMode);
     }
 
     executionMode(sessionOrId) {
@@ -222,15 +219,6 @@ export class AgentRuntime {
             filePath,
             displayPath: getPlanDisplayPath(),
         };
-    }
-
-    maybeAutoEnterPlanMode(sessionId, input) {
-        if (this.sessionExecutionMode(sessionId) === "plan" || !shouldStartInPlanMode(input)) {
-            return false;
-        }
-        this.resolveSessionPlan(sessionId);
-        this.sessionStore.updateExecutionMode(sessionId, "plan");
-        return true;
     }
 
     buildSystemPromptContent(session) {
@@ -940,13 +928,6 @@ export class AgentRuntime {
                 ? expandAtMentionsToAbsolute(skillInvoke.rest, projectRoot)
                 : `请按照已加载的 skill「${skillInvoke.skillName}」执行任务。`;
         }
-        const autoPlanMode = options.skipAutoPlanMode
-            ? false
-            : this.maybeAutoEnterPlanMode(sessionId, displayText || input);
-        if (autoPlanMode) {
-            messageContent = [messageContent, "", PLAN_MODE_AUTO_SYSTEM_HINT].join("\n");
-        }
-
         const promptHook = await this.runUserPromptSubmitHook(sessionId, messageContent);
         if (promptHook.blocked) {
             this.appendHookBlockedAssistant(
@@ -967,10 +948,9 @@ export class AgentRuntime {
             content: messageContent,
             createdAt: new Date().toISOString(),
             runId,
-            ...(normalizedMentions.length || autoPlanMode
-                ? { userText: displayText, ...(normalizedMentions.length ? { atMentions: normalizedMentions } : {}) }
+            ...(normalizedMentions.length
+                ? { userText: displayText, atMentions: normalizedMentions }
                 : {}),
-            ...(autoPlanMode ? { systemHint: PLAN_MODE_AUTO_SYSTEM_HINT } : {}),
             ...(skillInvoke
                 ? { skillName: skillInvoke.skillName, skillLoaded: true }
                 : {}),
@@ -1011,7 +991,6 @@ export class AgentRuntime {
             [],
             [],
             null,
-            { skipAutoPlanMode: true },
         );
         return {
             session: this.sessionStore.get(sessionId),

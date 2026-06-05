@@ -7,7 +7,8 @@ test("normalizeExecutionMode keeps explicit session mode over config default", (
     assert.equal(normalizeExecutionMode("plan", "goal"), "plan");
 });
 
-test("normalizeExecutionMode falls back when session mode is unset", () => {
+test("normalizeExecutionMode falls back to goal when session mode is unset", () => {
+    assert.equal(normalizeExecutionMode(undefined), "goal");
     assert.equal(normalizeExecutionMode(undefined, "plan"), "plan");
     assert.equal(normalizeExecutionMode(null, "goal"), "goal");
     assert.equal(normalizeExecutionMode("", "plan"), "plan");

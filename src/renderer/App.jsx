@@ -452,20 +452,25 @@ export function App() {
     });
 
     const offSession = window.cragent.onSessionChanged((session) => {
-      clearSessionError();
-      ensureProjectExpanded(session?.meta?.projectId);
-      setFocusedProjectId(session?.meta?.projectId ?? null);
-      setCurrentSession((prev) => {
-        if (
-          prev?.meta.id === session.meta.id &&
-          sessionMessagesEqual(prev.messages, session.messages) &&
-          prev.meta.updatedAt === session.meta.updatedAt
-        ) {
-          return prev;
-        }
-        return session;
-      });
-      setPage("chat");
+      const isViewing = sessionIdRef.current === session.meta.id;
+
+      if (isViewing) {
+        clearSessionError();
+        ensureProjectExpanded(session?.meta?.projectId);
+        setFocusedProjectId(session?.meta?.projectId ?? null);
+        setCurrentSession((prev) => {
+          if (
+            prev?.meta.id === session.meta.id &&
+            sessionMessagesEqual(prev.messages, session.messages) &&
+            prev.meta.updatedAt === session.meta.updatedAt
+          ) {
+            return prev;
+          }
+          return session;
+        });
+        setPage("chat");
+      }
+
       setSessions((prev) => {
         const has = prev.some((s) => s.id === session.meta.id);
         return sortSessions(
@@ -1426,12 +1431,11 @@ export function App() {
   }
 
   const executionMode = useMemo(() => {
-    const fallback = config?.agents?.default?.execution_mode;
     if (!currentSession) {
-      return normalizeExecutionMode(undefined, fallback);
+      return normalizeExecutionMode(undefined);
     }
-    return normalizeExecutionMode(currentSession.meta.executionMode, fallback);
-  }, [currentSession, config?.agents?.default?.execution_mode]);
+    return normalizeExecutionMode(currentSession.meta.executionMode);
+  }, [currentSession]);
 
   const [planFileContent, setPlanFileContent] = useState(null);
 

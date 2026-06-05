@@ -204,7 +204,7 @@ function ProjectNodeHead({ project, expanded, forceActionButtons, onSelect, onNe
           <span className="project-node-name">{project.name}</span>
         </button>
         {showActions ? (
-          <>
+          <div className="project-node-actions">
             <ProjectNodeMenu
               project={project}
               onRemove={onRemove}
@@ -222,7 +222,7 @@ function ProjectNodeHead({ project, expanded, forceActionButtons, onSelect, onNe
             >
               {ICON_PLUS}
             </button>
-          </>
+          </div>
         ) : null}
       </div>
     </div>
