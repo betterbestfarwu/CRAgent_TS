@@ -829,22 +829,6 @@ export function App() {
     return projects.find((project) => project.id === projectId) || null;
   }, [currentSession?.meta?.projectId, projects]);
 
-  const composerIconPaths = useMemo(() => {
-    const paths = [];
-    for (const file of pendingFiles) {
-      const path = file.path?.trim();
-      if (path) paths.push(path);
-    }
-    const projectDir = activeProject?.directoryPath || "";
-    for (const mention of pendingAtMentions) {
-      const path = resolveProjectFilePath(projectDir, mention.relativePath);
-      if (path) paths.push(path);
-    }
-    return paths;
-  }, [pendingFiles, pendingAtMentions, activeProject?.directoryPath]);
-
-  const composerFileIcons = useFileIcons(composerIconPaths);
-
   const active = Boolean(currentSession && currentSession.messages.length > 0);
   const hasComposerDraft =
     input.length > 0 ||
@@ -879,6 +863,29 @@ export function App() {
   const [atMenuExpanded, setAtMenuExpanded] = useState(false);
   const atMentionWasActiveRef = useRef(false);
   const atPickContextRef = useRef(null);
+
+  const composerIconPaths = useMemo(() => {
+    const paths = [];
+    for (const file of pendingFiles) {
+      const path = file.path?.trim();
+      if (path) paths.push(path);
+    }
+    const projectDir = activeProject?.directoryPath || "";
+    for (const mention of pendingAtMentions) {
+      const path = resolveProjectFilePath(projectDir, mention.relativePath);
+      if (path) paths.push(path);
+    }
+    for (const entry of atDirEntries) {
+      const path = resolveProjectFilePath(projectDir, entry.relativePath);
+      if (path) paths.push(path);
+    }
+    if (projectDir) {
+      paths.push(projectDir);
+    }
+    return paths;
+  }, [pendingFiles, pendingAtMentions, atDirEntries, activeProject?.directoryPath]);
+
+  const composerFileIcons = useFileIcons(composerIconPaths);
 
   useEffect(() => {
     if (!atMention) {
@@ -1110,12 +1117,7 @@ export function App() {
       goAtParentDirectory();
       return;
     }
-    const { entry } = item;
-    if (entry.kind === "dir") {
-      enterAtDirectory(entry.relativePath);
-      return;
-    }
-    applyAtFilePick(entry.relativePath);
+    applyAtFilePick(item.entry.relativePath);
   }
 
   function applySlashPick(name) {
@@ -1878,6 +1880,7 @@ export function App() {
                   <ComposerAtMenu
                     projectName={activeProject?.name || "项目"}
                     projectDirectoryPath={activeProject?.directoryPath || ""}
+                    fileIcons={composerFileIcons}
                     browseRelativePath={atBrowseRelativePath}
                     entries={atDirEntries}
                     filter={atPathParts.filter}

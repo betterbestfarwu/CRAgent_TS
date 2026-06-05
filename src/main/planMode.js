@@ -81,23 +81,6 @@ export function writePlanFile(sessionsDir, sessionId, content, workspace = null)
     return filePath;
 }
 
-/** Heuristic for auto-entering plan mode from goal mode on delivery-style requests. */
-export function shouldStartInPlanMode(input) {
-    const text = String(input ?? "").trim();
-    if (text.length < 10 || text.startsWith("/")) {
-        return false;
-    }
-    const deliveryAction =
-        /(?:开发|实现|搭建|创建|做一个|编写|设计|落地|重构|迁移|集成|build|implement|create|develop|scaffold)/i.test(
-            text,
-        );
-    const deliveryTarget =
-        /(?:小程序|应用|网站|系统|项目|功能|模块|服务|接口|app|application|website|service|api|feature|platform)/i.test(
-            text,
-        );
-    return deliveryAction && deliveryTarget;
-}
-
 export function readPlanApprovalDraft(sessionsDir, sessionId, workspace = null) {
     const filePath = ensureSessionPlanFile(sessionsDir, sessionId, workspace);
     const displayPath = getPlanDisplayPath();

@@ -1984,10 +1984,11 @@ body.app-sidebar-resizing {
 .at-menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  min-height: 36px;
-  padding: 6px 10px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 10px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -2023,27 +2024,73 @@ body.app-sidebar-resizing {
 
 .at-menu-item-title {
   font-size: 13px;
-  line-height: 1.25;
+  line-height: 34px;
   color: var(--app-fg);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.at-menu-item-desc {
-  margin-top: 2px;
-  font-size: 11px;
-  line-height: 1.2;
-  color: var(--sidebar-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.at-menu-item-row {
+  display: flex;
+  align-items: stretch;
+  height: 34px;
+  min-height: 34px;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.at-menu-item-row-dir {
+  cursor: pointer;
+}
+
+.at-menu-item-row-dir .at-menu-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.at-menu-item-enter-hit {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.at-menu-item-row:hover,
+.at-menu-item-row.active {
+  background: var(--sidebar-hover);
+}
+
+.at-menu-item-row .at-menu-item {
+  flex: 1;
+  min-width: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.at-menu-item-row .at-menu-item:hover,
+.at-menu-item-row .at-menu-item.active {
+  background: transparent;
 }
 
 .at-menu-item-chevron {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 34px;
   color: var(--sidebar-muted);
   flex-shrink: 0;
+}
+
+.at-menu-item-icon .composer-file-sys-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.at-menu-item-row-dir:hover .at-menu-item-chevron,
+.at-menu-item-row-dir.active .at-menu-item-chevron {
+  color: var(--app-fg);
 }
 
 .at-menu-item:hover,

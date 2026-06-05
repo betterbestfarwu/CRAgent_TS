@@ -8,7 +8,6 @@ import {
 import {
   isPlanRejectionMessage,
   parsePlanRejectionDisplay,
-  splitPlanModeAutoSystemHint,
 } from "@shared/planMessages.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
 
@@ -23,15 +22,8 @@ function toWireMessage(message, planContext) {
   }));
 
   const hasAtMentions = Boolean(message.atMentions?.length);
-  let systemHint = message.systemHint ?? null;
-  let userDisplayText = message.userText ?? null;
-  if (message.role === "user" && !systemHint && !userDisplayText) {
-    const split = splitPlanModeAutoSystemHint(message.content);
-    if (split.systemHint) {
-      systemHint = split.systemHint;
-      userDisplayText = split.userText;
-    }
-  }
+  const systemHint = message.systemHint ?? null;
+  const userDisplayText = message.userText ?? null;
   const content =
     message.role === "user"
       ? systemHint || userDisplayText != null

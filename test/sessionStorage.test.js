@@ -106,6 +106,62 @@ describe("sessionStorage", () => {
 });
 
 describe("SessionStore split layout", () => {
+    it("applies requested modes when reusing a placeholder session", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-placeholder-mode-"));
+        const sessionsDir = path.join(dir, "sessions");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        const store = new SessionStore(
+            sessionsDir,
+            { providerKey: "openai", modelId: "gpt-4o-mini" },
+            null,
+        );
+
+        const placeholder = store.listMetas()[0];
+        assert.equal(placeholder.executionMode, "goal");
+
+        const reused = store.openNewSession({
+            executionMode: "plan",
+            authMode: "autoReview",
+        });
+
+        assert.equal(reused.meta.id, placeholder.id);
+        assert.equal(reused.meta.executionMode, "plan");
+        assert.equal(reused.meta.authMode, "autoReview");
+        assert.equal(store.get(placeholder.id).meta.executionMode, "plan");
+    });
+
+    it("uses the latest default model when creating and reusing blank sessions", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-default-model-"));
+        const sessionsDir = path.join(dir, "sessions");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        let defaultModel = { providerKey: "openai", modelId: "gpt-4o-mini" };
+        const store = new SessionStore(sessionsDir, () => defaultModel, null);
+
+        const placeholder = store.listMetas()[0];
+        assert.equal(placeholder.providerKey, "openai");
+        assert.equal(placeholder.modelId, "gpt-4o-mini");
+
+        defaultModel = { providerKey: "anthropic", modelId: "claude-opus-4-5" };
+        const reused = store.openNewSession();
+        assert.equal(reused.meta.id, placeholder.id);
+        assert.equal(reused.meta.providerKey, "anthropic");
+        assert.equal(reused.meta.modelId, "claude-opus-4-5");
+        assert.equal(store.get(placeholder.id).meta.providerKey, "anthropic");
+
+        store.appendMessage(reused.meta.id, {
+            id: "u1",
+            role: "user",
+            content: "hi",
+            createdAt: new Date().toISOString(),
+        });
+
+        defaultModel = { providerKey: "google", modelId: "gemini-2.5-pro" };
+        const created = store.openNewSession();
+        assert.notEqual(created.meta.id, placeholder.id);
+        assert.equal(created.meta.providerKey, "google");
+        assert.equal(created.meta.modelId, "gemini-2.5-pro");
+    });
+
     it("appends messages without rewriting the full log", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-store-split-"));
         const sessionsDir = path.join(dir, "sessions");

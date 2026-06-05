@@ -157,8 +157,23 @@ function openNewSession(state) {
     }),
   );
   if (existing) {
+    const defaultModel = defaultModelRef(state.config);
+    const sessions = state.sessions.map((session) =>
+      session.meta.id === existing.meta.id
+        ? {
+            ...session,
+            meta: {
+              ...session.meta,
+              providerKey: defaultModel.providerKey,
+              modelId: defaultModel.modelId,
+              updatedAt: nowIso(),
+            },
+          }
+        : session,
+    );
     return {
       ...state,
+      sessions,
       currentSessionId: existing.meta.id,
     };
   }

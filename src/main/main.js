@@ -124,8 +124,10 @@ function registerIpc() {
 function bootstrap() {
     const appPaths = getAppPaths();
     configStore = new ConfigStore(appPaths.configFile);
-    const primary = configStore.resolvePrimaryRef();
-    sessionStore = new SessionStore(appPaths.sessionsDir, primary);
+    sessionStore = new SessionStore(
+        appPaths.sessionsDir,
+        () => configStore.resolvePrimaryRef(),
+    );
     const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey], {
         onTokenUsage: (model, usage) =>
             configStore.recordModelTokenUsage(model.providerKey, model.modelId, usage),

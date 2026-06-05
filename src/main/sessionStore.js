@@ -89,6 +89,13 @@ function normalizeGetOptions(options = {}) {
     };
 }
 
+function normalizeDefaultModel(model) {
+    return {
+        providerKey: String(model?.providerKey || "").trim(),
+        modelId: String(model?.modelId || "").trim(),
+    };
+}
+
 export class SessionStore {
     constructor(sessionsDir, defaultModel, projectsFile, projectsDir = null) {
         this.sessionsDir = sessionsDir;
@@ -101,6 +108,14 @@ export class SessionStore {
         this.ensureAllProjectLayouts();
         this.migrateGlobalProjectSessions();
         this.repairProjectsFile();
+    }
+
+    resolveDefaultModel() {
+        const model =
+            typeof this.defaultModel === "function"
+                ? this.defaultModel()
+                : this.defaultModel;
+        return normalizeDefaultModel(model);
     }
 
     projectSessionsDir(projectId) {
@@ -431,16 +446,42 @@ export class SessionStore {
 
     openNewSession(options = {}) {
         const normalizedProjectId = normalizeProjectId(options.projectId);
+        const defaultModel = this.resolveDefaultModel();
         const existing = this.findPlaceholderSession(normalizedProjectId);
         if (existing) {
+            const sessionsDir = this.locateSessionStorage(existing.meta.id);
+            const meta = readMeta(sessionsDir, existing.meta.id);
+            const executionMode = normalizeExecutionMode(
+                options.executionMode,
+                meta.executionMode,
+            );
+            const authMode =
+                options.authMode === undefined
+                    ? normalizeAuthMode(meta.authMode)
+                    : normalizeAuthMode(options.authMode);
+            const modelChanged =
+                meta.providerKey !== defaultModel.providerKey ||
+                meta.modelId !== defaultModel.modelId;
+            if (
+                meta.executionMode !== executionMode ||
+                meta.authMode !== authMode ||
+                modelChanged
+            ) {
+                meta.executionMode = executionMode;
+                meta.authMode = authMode;
+                meta.providerKey = defaultModel.providerKey;
+                meta.modelId = defaultModel.modelId;
+                meta.updatedAt = nowIso();
+                writeMeta(sessionsDir, meta);
+            }
             if (normalizedProjectId) {
                 this.registerProjectSession(
                     normalizedProjectId,
-                    existing.meta.id,
-                    existing.meta.title,
+                    meta.id,
+                    meta.title,
                 );
             }
-            return existing;
+            return this.get(meta.id, { loadAllMessages: true, hydrateImages: false });
         }
         return this.newSession({
             projectId: normalizedProjectId,
@@ -453,12 +494,13 @@ export class SessionStore {
         const id = randomUUID();
         const timestamp = nowIso();
         const projectId = normalizeProjectId(options.projectId);
+        const defaultModel = this.resolveDefaultModel();
         const meta = enrichMeta(
             {
                 id,
                 title: "新会话",
-                providerKey: this.defaultModel.providerKey,
-                modelId: this.defaultModel.modelId,
+                providerKey: defaultModel.providerKey,
+                modelId: defaultModel.modelId,
                 projectId,
                 executionMode: normalizeExecutionMode(options.executionMode),
                 authMode: normalizeAuthMode(options.authMode),

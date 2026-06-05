@@ -460,10 +460,9 @@ function bootstrap() {
         return agent?.tools || { enable_tools: true, enable_file_tools: true, enable_skills: true };
     };
 
-    const primary = configStore.resolvePrimaryRef();
     sessionStore = new SessionStore(
         appPaths.sessionsDir,
-        primary,
+        () => configStore.resolvePrimaryRef(),
         appPaths.projectsFile,
         appPaths.projectsDir,
     );
