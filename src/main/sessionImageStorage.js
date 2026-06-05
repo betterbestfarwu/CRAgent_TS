@@ -1,5 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import {
+    extractInlineImagePayloads,
+    hasInlineImagePayloads,
+} from "@shared/imagePayloads.js";
 
 function imagesDir(sessionsDir, sessionId) {
     return path.join(sessionsDir, "_images", sessionId);
@@ -23,7 +27,8 @@ function extForMime(mimeType) {
 
 export function sessionHasInlineImages(session) {
     return (session?.messages || []).some((message) =>
-        (message?.images || []).some((image) => Boolean(image?.dataUrl)),
+        (message?.images || []).some((image) => Boolean(image?.dataUrl)) ||
+        hasInlineImagePayloads(message?.content),
     );
 }
 
@@ -36,12 +41,21 @@ export function externalizeSessionImages(session, sessionsDir) {
     const sessionId = session.meta.id;
 
     const messages = session.messages.map((message) => {
-        if (!message?.images?.length) {
+        const extracted = extractInlineImagePayloads(message?.content);
+        const originalImages = Array.isArray(message?.images) ? message.images : [];
+        const combinedImages = extracted.images.length
+            ? [...originalImages, ...extracted.images]
+            : originalImages;
+
+        if (!combinedImages.length && !extracted.changed) {
             return message;
         }
 
-        let messageChanged = false;
-        const images = message.images.map((image, index) => {
+        let messageChanged = extracted.changed;
+        if (extracted.changed) {
+            changed = true;
+        }
+        const images = combinedImages.map((image, index) => {
             if (!image?.dataUrl) {
                 return image;
             }
@@ -64,7 +78,13 @@ export function externalizeSessionImages(session, sessionsDir) {
             return { mimeType, imageFile: fileName };
         });
 
-        return messageChanged ? { ...message, images } : message;
+        return messageChanged
+            ? {
+                  ...message,
+                  content: extracted.changed ? extracted.text : message.content,
+                  ...(images.length ? { images } : {}),
+              }
+            : message;
     });
 
     return changed ? { ...session, messages } : session;

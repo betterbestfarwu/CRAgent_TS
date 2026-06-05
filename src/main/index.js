@@ -245,6 +245,9 @@ function registerIpc() {
             sessionStore.get(sessionId, { hydrateImages: false, ...options }),
         ),
     );
+    ipcMain.handle(IPC_CHANNELS.getSessionImage, (_event, args = {}) =>
+        sessionStore.getMessageImage(args.sessionId, args.messageId, args.imageIndex),
+    );
     ipcMain.handle(IPC_CHANNELS.getSessionContextDetail, (_event, sessionId) =>
         runtime.getSessionContextDetail(sessionId),
     );

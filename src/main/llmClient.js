@@ -13,11 +13,14 @@ export function messagesToApiPayloads(messages) {
     for (const message of messages) {
         payloads.push(messageToApiPayload(message));
         const imageAttachments = (message.images || []).filter((image) => image?.dataUrl);
-        if (message.role === "tool" && imageAttachments.length) {
+        if ((message.role === "tool" || message.role === "assistant") && imageAttachments.length) {
             const parts = [
                 {
                     type: "text",
-                    text: `[Visual output from tool ${message.name || "tool"}]`,
+                    text:
+                        message.role === "tool"
+                            ? `[Visual output from tool ${message.name || "tool"}]`
+                            : "[Visual output from assistant]",
                 },
             ];
             for (const image of imageAttachments) {

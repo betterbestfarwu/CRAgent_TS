@@ -33,6 +33,27 @@ describe("sessionImageStorage", () => {
         const hydrated = hydrateSessionImages(externalized, dir);
         assert.equal(hydrated.messages[0].images[0].dataUrl, "data:image/png;base64,QUJD");
     });
+
+    it("extracts markdown data URL images from message content", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-img-content-"));
+        const session = {
+            meta: { id: "session-2" },
+            messages: [
+                {
+                    id: "msg-2",
+                    role: "assistant",
+                    content: "![image](data:image/png;base64,QUJD)",
+                },
+            ],
+        };
+
+        const externalized = externalizeSessionImages(session, dir);
+        assert.equal(externalized.messages[0].content, "");
+        assert.match(externalized.messages[0].images[0].imageFile || "", /^msg-2-0\.png$/);
+
+        const hydrated = hydrateSessionImages(externalized, dir);
+        assert.equal(hydrated.messages[0].images[0].dataUrl, "data:image/png;base64,QUJD");
+    });
 });
 
 describe("SessionStore image migration", () => {
@@ -69,5 +90,31 @@ describe("SessionStore image migration", () => {
         const raw = fs.readFileSync(messagesFile(sessionsDir, sessionId), "utf-8");
         assert.equal(raw.includes("dataUrl"), false);
         assert.equal(raw.includes("imageFile"), true);
+    });
+
+    it("can load externalized message images by message id", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-store-image-get-"));
+        const sessionsDir = path.join(dir, "sessions");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        const store = new SessionStore(
+            sessionsDir,
+            { providerKey: "openai", modelId: "gpt-4o-mini" },
+            null,
+        );
+        const session = store.newSession();
+        store.appendMessage(session.meta.id, {
+            id: "assistant-image",
+            role: "assistant",
+            content: "![image](data:image/png;base64,QUJD)",
+            createdAt: new Date().toISOString(),
+        });
+
+        const stored = store.get(session.meta.id, { hydrateImages: false });
+        assert.equal(stored.messages[0].content, "");
+        assert.equal(stored.messages[0].images[0].dataUrl, undefined);
+
+        const image = store.getMessageImage(session.meta.id, "assistant-image", 0);
+        assert.equal(image.mimeType, "image/png");
+        assert.equal(image.dataUrl, "data:image/png;base64,QUJD");
     });
 });

@@ -40,9 +40,10 @@ export function stripMessageImagesForUi(message) {
     }
 
     if (message.images?.length) {
-        next.images = message.images.map((image) => ({
+        next.images = message.images.map((image, index) => ({
+            index,
             mimeType: image.mimeType,
-            hasData: Boolean(image.dataUrl),
+            hasData: Boolean(image.dataUrl || image.imageFile),
         }));
         changed = true;
     }
@@ -57,11 +58,12 @@ export function stripSessionImagesForUi(session) {
 
     let changed = false;
     const messages = session.messages.map((message) => {
-        if (!message?.images?.length) {
+        const stripped = stripMessageImagesForUi(message);
+        if (stripped === message) {
             return message;
         }
         changed = true;
-        return stripMessageImagesForUi(message);
+        return stripped;
     });
 
     return changed ? { ...session, messages } : session;

@@ -1007,6 +1007,7 @@
       contentWrap.className = 'assistant-turn-content';
       contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
       bubble.appendChild(contentWrap);
+      appendMessageImages(bubble, contentMsg);
       postProcessRenderedContent(bubble);
       setupCollapsibleContent(contentWrap);
     } else if (shouldShowPlanPreview(null, runId)) {
@@ -1125,6 +1126,40 @@
     bubble.appendChild(hint);
   }
 
+  function buildMessageImagesElement(msg) {
+    var images = msg && Array.isArray(msg.images) ? msg.images : [];
+    if (!images.length) return null;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'msg-images';
+    images.forEach(function (image, index) {
+      if (image && image.data_url) {
+        var img = document.createElement('img');
+        img.className = 'msg-image';
+        img.src = image.data_url;
+        img.alt = 'image';
+        img.loading = 'lazy';
+        img.dataset.mimeType = image.mime_type || '';
+        img.dataset.dataUrl = image.data_url;
+        img.dataset.index = String(image.index == null ? index : image.index);
+        wrap.appendChild(img);
+        return;
+      }
+      var placeholder = document.createElement('div');
+      placeholder.className = 'msg-image-placeholder';
+      placeholder.textContent = 'Image';
+      wrap.appendChild(placeholder);
+    });
+    return wrap;
+  }
+
+  function appendMessageImages(bubble, msg) {
+    var images = buildMessageImagesElement(msg);
+    if (images) {
+      bubble.appendChild(images);
+    }
+  }
+
   function appendUserBubbleContent(bubble, msg) {
     var mentions = msg.at_mentions || [];
     var userText = String(msg.user_text || msg.content || '').trim();
@@ -1151,6 +1186,7 @@
       body.appendChild(chips);
       bubble.appendChild(body);
       appendSystemHintBlock(bubble, systemHint);
+      appendMessageImages(bubble, msg);
       return;
     }
 
@@ -1162,6 +1198,7 @@
       postProcessRenderedContent(plain);
     }
     appendSystemHintBlock(bubble, systemHint);
+    appendMessageImages(bubble, msg);
   }
 
   function buildBubble(msg) {
@@ -1181,6 +1218,7 @@
         body.className = 'bubble-collapse-body';
         body.innerHTML = window.MD.render(msg.content || '');
         bubble.appendChild(body);
+        appendMessageImages(bubble, msg);
         postProcessRenderedContent(body);
         setupCollapsibleContent(body);
       } else if (msg.role === 'user' && msg.plan_rejection) {
@@ -1207,10 +1245,12 @@
           postProcessRenderedContent(feedbackEl);
         }
         bubble.appendChild(rejectionBody);
+        appendMessageImages(bubble, msg);
       } else if (msg.role === 'user') {
         appendUserBubbleContent(bubble, msg);
       } else {
         bubble.innerHTML = window.MD.render(msg.content || '');
+        appendMessageImages(bubble, msg);
         postProcessRenderedContent(bubble);
       }
     }
@@ -1557,6 +1597,16 @@
   }
 
   document.addEventListener('click', function (e) {
+    var imageEl = e.target.closest && e.target.closest('.msg-image[data-data-url]');
+    if (imageEl) {
+      notifyHost({
+        action: 'openImage',
+        dataUrl: imageEl.dataset.dataUrl,
+        mimeType: imageEl.dataset.mimeType || '',
+      });
+      return;
+    }
+
     var btn = e.target.closest && e.target.closest('button[data-action]');
     if (!btn) return;
     var action = btn.dataset.action;

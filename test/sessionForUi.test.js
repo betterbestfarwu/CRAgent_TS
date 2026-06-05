@@ -50,6 +50,19 @@ describe("stripMessageImagesForUi", () => {
         assert.equal(stripped.images[0].hasData, true);
         assert.equal(stripped.images[0].dataUrl, undefined);
     });
+
+    it("keeps externalized image refs requestable for UI", () => {
+        const message = {
+            id: "m1",
+            role: "assistant",
+            content: "",
+            images: [{ mimeType: "image/png", imageFile: "m1-0.png" }],
+        };
+        const stripped = stripMessageImagesForUi(message);
+        assert.equal(stripped.images[0].index, 0);
+        assert.equal(stripped.images[0].hasData, true);
+        assert.equal(stripped.images[0].imageFile, undefined);
+    });
 });
 
 describe("ipcPayloadForRenderer", () => {

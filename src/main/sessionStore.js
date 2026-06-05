@@ -584,6 +584,20 @@ export class SessionStore {
         return directoryPath || null;
     }
 
+    getMessageImage(sessionId, messageId, imageIndex = 0) {
+        const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: true });
+        const message = session.messages.find((item) => item.id === messageId);
+        const index = Math.max(0, Number(imageIndex) || 0);
+        const image = message?.images?.[index];
+        if (!image?.dataUrl) {
+            throw new Error("图片不存在或无法读取");
+        }
+        return {
+            mimeType: image.mimeType || "image/png",
+            dataUrl: image.dataUrl,
+        };
+    }
+
     save(session) {
         session.meta.updatedAt = nowIso();
         this.persist(session);

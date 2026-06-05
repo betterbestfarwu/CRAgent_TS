@@ -41,6 +41,7 @@ const api = {
     listProjectDirectory: (args) => ipcRenderer.invoke(IPC_CHANNELS.listProjectDirectory, args),
     getSession: (sessionId, options) =>
         invokeUiSession(IPC_CHANNELS.getSession, sessionId, options),
+    getSessionImage: (args) => ipcRenderer.invoke(IPC_CHANNELS.getSessionImage, args),
     getSessionContextDetail: (sessionId) =>
         ipcRenderer.invoke(IPC_CHANNELS.getSessionContextDetail, sessionId),
     newSession: (args) => invokeUiSession(IPC_CHANNELS.newSession, args),

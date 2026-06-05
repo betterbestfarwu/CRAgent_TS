@@ -97,6 +97,22 @@ describe("llmClient messagesToApiPayloads", () => {
         assert.equal(payloads[1].content[1].type, "image_url");
     });
 
+    it("expands assistant images into a follow-up visual message for the API", () => {
+        const payloads = messagesToApiPayloads([
+            {
+                role: "assistant",
+                content: "",
+                images: [{ mimeType: "image/png", dataUrl: "data:image/png;base64,abc" }],
+            },
+        ]);
+
+        assert.equal(payloads.length, 2);
+        assert.equal(payloads[0].role, "assistant");
+        assert.equal(payloads[1].role, "user");
+        assert.equal(payloads[1].content[0].text, "[Visual output from assistant]");
+        assert.equal(payloads[1].content[1].type, "image_url");
+    });
+
     it("strips inline image payload text before API payloads", () => {
         const dataUrl = `data:image/png;base64,${"A".repeat(4096)}`;
         const payloads = messagesToApiPayloads([

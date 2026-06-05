@@ -10,6 +10,7 @@ export const IPC_CHANNELS = {
     openProjectDirectory: "project:openDirectory",
     listProjectDirectory: "project:listDirectory",
     getSession: "session:get",
+    getSessionImage: "session:getImage",
     getSessionContextDetail: "session:getContextDetail",
     newSession: "session:new",
     deleteSession: "session:delete",
