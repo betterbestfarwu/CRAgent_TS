@@ -2,6 +2,7 @@
 export const DEFAULT_CONTEXT_CONFIG = {
     auto_compact_enabled: true,
     session_memory_enabled: true,
+    auto_compact_threshold_percent: 85,
     compact_buffer_tokens: 13_000,
     compact_max_input_tokens: 120_000,
     compact_ptl_max_retries: 3,

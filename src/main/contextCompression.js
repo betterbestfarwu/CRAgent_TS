@@ -1,6 +1,11 @@
-import { isContextDividerMessage } from "@shared/chatMessages";
 import { DEFAULT_CONTEXT_CONFIG } from "@shared/contextConfig";
-import { estimateMessageTokens, estimateMessagesTokens, estimateTextTokens } from "@shared/tokenEstimator";
+import {
+    calculateAutoCompactThreshold,
+    estimateMessageTokens,
+    estimateMessagesTokens,
+    estimateSessionContextUsage,
+    estimateTextTokens,
+} from "@shared/tokenEstimator";
 import { groupMessagesByApiRound } from "./contextGrouping.js";
 
 export { DEFAULT_CONTEXT_CONFIG };
@@ -50,15 +55,13 @@ export function getContextConfig(configStore) {
 }
 
 export function getAutoCompactThreshold(model, contextConfig = DEFAULT_CONTEXT) {
-    const contextWindow = model?.contextWindow ?? 0;
-    if (!contextWindow) {
-        return 0;
-    }
-    const maxOutput = model?.maxTokens ?? 8192;
-    const reserved = Math.min(maxOutput, 20_000);
-    const effectiveWindow = Math.max(0, contextWindow - reserved);
-    const buffer = contextConfig.compact_buffer_tokens ?? DEFAULT_CONTEXT.compact_buffer_tokens;
-    return Math.max(0, effectiveWindow - buffer);
+    return calculateAutoCompactThreshold(model, {
+        compactBufferTokens:
+            contextConfig.compact_buffer_tokens ?? DEFAULT_CONTEXT.compact_buffer_tokens,
+        autoCompactThresholdPercent:
+            contextConfig.auto_compact_threshold_percent ??
+            DEFAULT_CONTEXT.auto_compact_threshold_percent,
+    });
 }
 
 export function shouldAutoCompact(session, model, contextConfig = DEFAULT_CONTEXT) {
@@ -98,29 +101,22 @@ export function calculateMessagesContextWarningState(
 }
 
 export function calculateContextWarningState(session, model, contextConfig = DEFAULT_CONTEXT) {
-    const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
-    const active = session.messages
-        .slice(fromIndex)
-        .filter((message) => !isContextDividerMessage(message));
-
-    let extraTokens = 0;
-    if (session.meta.contextSummary) {
-        extraTokens += estimateTextTokens(session.meta.contextSummary);
-    }
-    if (session.meta.postCompactContext) {
-        extraTokens += estimateTextTokens(session.meta.postCompactContext);
-    }
-    if (session.meta.sessionMemory) {
-        extraTokens += estimateTextTokens(session.meta.sessionMemory);
-    }
-
     const failures = session.meta.compactFailures ?? 0;
     const autoCompactEnabled =
         Boolean(contextConfig.auto_compact_enabled) && failures < MAX_CONSECUTIVE_COMPACT_FAILURES;
-    const state = calculateMessagesContextWarningState(active, model, contextConfig, extraTokens);
+    const state = estimateSessionContextUsage(session, model, {
+        compactBufferTokens:
+            contextConfig.compact_buffer_tokens ?? DEFAULT_CONTEXT.compact_buffer_tokens,
+        autoCompactThresholdPercent:
+            contextConfig.auto_compact_threshold_percent ??
+            DEFAULT_CONTEXT.auto_compact_threshold_percent,
+    });
+    const blockingLimit = Math.max(0, state.effectiveWindow - 3000);
 
     return {
         ...state,
+        blockingLimit,
+        isAtBlockingLimit: blockingLimit > 0 && state.tokens >= blockingLimit,
         isAboveAutoCompactThreshold:
             autoCompactEnabled && state.isAboveAutoCompactThreshold,
     };

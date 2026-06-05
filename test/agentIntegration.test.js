@@ -743,6 +743,54 @@ test("runLoop compacts and retries after context overflow error", async () => {
     assert.match(assistant.content, /recovered after compact/);
 });
 
+test("runLoop auto-compacts when context estimate reaches trigger percent", async () => {
+    const { session, runtime, sessionStore, configStore, llmCalls, llmCompleteCalls } =
+        makeRuntimeHarness({
+            completeImpl: () => ({
+                message: {
+                    id: "assistant-summary",
+                    role: "assistant",
+                    content: "<summary>compressed at 85 percent</summary>",
+                    createdAt: new Date().toISOString(),
+                },
+            }),
+        });
+    const config = configStore.get();
+    configStore.update({
+        ...config,
+        models: {
+            ...config.models,
+            openai: {
+                ...config.models.openai,
+                models: config.models.openai.models.map((model) =>
+                    model.id === "gpt-4o-mini"
+                        ? { ...model, contextWindow: 200_000, maxTokens: 8192 }
+                        : model,
+                ),
+            },
+        },
+    });
+
+    let working = session;
+    for (let i = 0; i < 8; i += 1) {
+        working = sessionStore.appendMessage(session.meta.id, {
+            id: `auto-compact-${i}`,
+            role: i % 2 === 0 ? "user" : "assistant",
+            content: `turn ${i} ${"x".repeat(65_000)}`,
+            createdAt: new Date().toISOString(),
+        });
+    }
+
+    await runtime.runLoop(working, "run-auto-compact-percent");
+
+    assert.ok(llmCompleteCalls.length >= 1);
+    assert.match(llmCompleteCalls[0].messages[0].content, /compress conversation history/i);
+    assert.equal(llmCalls.length, 1);
+    const updated = sessionStore.get(session.meta.id);
+    assert.match(updated.meta.contextSummary, /compressed at 85 percent/);
+    assert.ok(updated.messages.some((message) => message.role === "context_divider"));
+});
+
 test("runLoop stops with guidance when context remains blocked", async () => {
     const { session, runtime, events, sessionStore, configStore, llmCalls } = makeRuntimeHarness();
     const config = configStore.get();

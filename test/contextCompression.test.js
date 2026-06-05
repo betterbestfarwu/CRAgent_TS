@@ -22,6 +22,7 @@ import {
     shouldRefreshSessionMemory,
 } from "../src/main/sessionMemory.js";
 import {
+    DEFAULT_BOOTSTRAP_OVERHEAD,
     estimateMessageTokens,
     estimateSessionContextBreakdown,
     estimateSessionContextUsage,
@@ -91,7 +92,11 @@ test("splitMessagesForCompact preserves tool pairs", () => {
 test("shouldAutoCompact respects threshold and failure circuit breaker", () => {
     const model = { contextWindow: 200_000, maxTokens: 8192 };
     const threshold = getAutoCompactThreshold(model);
-    assert.equal(threshold, 200_000 - 8192 - 13_000);
+    assert.equal(threshold, 170_000);
+    assert.equal(
+        getAutoCompactThreshold({ contextWindow: 128_000, maxTokens: 8192 }),
+        128_000 - 8192 - 13_000,
+    );
 
     const shortSession = {
         meta: { llmContextFromIndex: 0, compactFailures: 0 },
@@ -99,7 +104,14 @@ test("shouldAutoCompact respects threshold and failure circuit breaker", () => {
     };
     assert.equal(shouldAutoCompact(shortSession, model), false);
 
-    const hugeContent = "x".repeat(threshold * 4);
+    const triggerPayloadTokens = threshold - DEFAULT_BOOTSTRAP_OVERHEAD;
+    const belowSession = {
+        meta: { llmContextFromIndex: 0, compactFailures: 0 },
+        messages: [{ role: "user", content: "x".repeat((triggerPayloadTokens - 1) * 3) }],
+    };
+    assert.equal(shouldAutoCompact(belowSession, model), false);
+
+    const hugeContent = "x".repeat(triggerPayloadTokens * 3);
     const longSession = {
         meta: { llmContextFromIndex: 0, compactFailures: 0 },
         messages: [{ role: "user", content: hugeContent }],
@@ -207,7 +219,8 @@ test("calculateMessagesContextWarningState matches session helper for active mes
     };
     const fromState = calculateContextWarningState(session, model);
     const fromMessages = calculateMessagesContextWarningState(session.messages, model);
-    assert.equal(fromState.tokens, fromMessages.tokens);
+    assert.equal(fromState.tokens, fromMessages.tokens + DEFAULT_BOOTSTRAP_OVERHEAD);
+    assert.equal(fromState.autoCompactThreshold, fromMessages.autoCompactThreshold);
     assert.equal(fromState.isAtBlockingLimit, fromMessages.isAtBlockingLimit);
 });
 
@@ -337,4 +350,17 @@ test("reconcileContextBreakdownCategories realigns categories after system promp
 
     assert.equal(categorizedTotal, targetTotal);
     assert.ok(reconciled.some((category) => category.id === "systemPrompt"));
+});
+
+test("reconcileContextBreakdownCategories keeps tiny non-zero categories visible", () => {
+    const reconciled = reconcileContextBreakdownCategories(
+        [
+            { id: "systemPrompt", label: "System prompt", color: "#9ca3af", tokens: 9000 },
+            { id: "conversation", label: "Conversation", color: "#ea580c", tokens: 1 },
+        ],
+        8000,
+    );
+
+    assert.equal(reconciled.reduce((sum, category) => sum + category.tokens, 0), 8000);
+    assert.equal(reconciled.find((category) => category.id === "conversation")?.tokens, 1);
 });

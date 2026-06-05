@@ -441,9 +441,10 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
     }));
   }
 
-  function updateContextNumber(key, rawValue, { min = 0, fallback = 0 } = {}) {
+  function updateContextNumber(key, rawValue, { min = 0, max = Infinity, fallback = 0 } = {}) {
     const parsed = Number.parseInt(String(rawValue), 10);
-    updateContext({ [key]: Number.isFinite(parsed) ? Math.max(min, parsed) : fallback });
+    const value = Number.isFinite(parsed) ? Math.max(min, parsed) : fallback;
+    updateContext({ [key]: Number.isFinite(max) ? Math.min(max, value) : value });
   }
 
   function updateProvider(patch) {
@@ -1000,8 +1001,22 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
 
             <SettingsGroup
               label="Full Compact"
-              footer="自动压缩触发点 ≈ 有效窗口 − 缓冲 tokens（200K 模型约 83%）。"
+              footer="自动压缩触发点取“有效窗口 − 缓冲 tokens”和百分比上限中更早者。"
             >
+              <SettingsNumberRow
+                title="Auto trigger percent"
+                description="自动压缩最晚触发的上下文占用百分比。"
+                min={1}
+                max={100}
+                value={contextDraft.auto_compact_threshold_percent}
+                onChange={(raw) =>
+                  updateContextNumber("auto_compact_threshold_percent", raw, {
+                    min: 1,
+                    max: 100,
+                    fallback: DEFAULT_CONTEXT_CONFIG.auto_compact_threshold_percent,
+                  })
+                }
+              />
               <SettingsNumberRow
                 title="Compact buffer"
                 description="为压缩过程预留的 tokens，越大则越早触发。"

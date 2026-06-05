@@ -289,6 +289,7 @@ export class AgentRuntime {
                 : 0;
         const breakdown = estimateSessionContextBreakdown(session, model, {
             compactBufferTokens: config.context?.compact_buffer_tokens,
+            autoCompactThresholdPercent: config.context?.auto_compact_threshold_percent,
             agentTools,
             skillsCatalogText,
             mcpTokens,

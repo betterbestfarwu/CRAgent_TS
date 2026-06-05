@@ -733,6 +733,7 @@ export function App() {
         : 0;
     const estimated = estimateSessionContextBreakdown(currentSession, model, {
       compactBufferTokens: compactBuffer,
+      autoCompactThresholdPercent: config.context?.auto_compact_threshold_percent,
       agentTools,
       skillsCatalogText,
       mcpTokens,
@@ -797,6 +798,7 @@ export function App() {
     currentSession?.meta?.sessionMemory,
     skills,
     config?.context?.compact_buffer_tokens,
+    config?.context?.auto_compact_threshold_percent,
     config?.agents,
     config?.mcp,
   ]);

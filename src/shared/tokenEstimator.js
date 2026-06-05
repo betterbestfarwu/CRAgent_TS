@@ -2,9 +2,15 @@ import { isContextDividerMessage } from "./chatMessages.js";
 
 const IMAGE_TOKEN_ESTIMATE = 2000;
 const TOKEN_PADDING_RATIO = 4 / 3;
-const DEFAULT_BOOTSTRAP_OVERHEAD = 8000;
-const DEFAULT_COMPACT_BUFFER = 13_000;
+export const DEFAULT_BOOTSTRAP_OVERHEAD = 8000;
+export const DEFAULT_COMPACT_BUFFER = 13_000;
+export const DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT = 85;
 const CONTEXT_WARNING_TOKENS = 20_000;
+
+function finiteNumber(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+}
 
 export function estimateTextTokens(text) {
     const chars = String(text || "").length;
@@ -36,6 +42,38 @@ export function estimateMessagesTokens(messages) {
     return messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 }
 
+export function calculateAutoCompactThreshold(model, options = {}) {
+    const contextWindow = Math.max(0, finiteNumber(model?.contextWindow, 0));
+    if (!contextWindow) {
+        return 0;
+    }
+
+    const maxOutput = Math.max(0, finiteNumber(model?.maxTokens, 8192));
+    const reserved = Math.min(maxOutput, 20_000);
+    const effectiveWindow = Math.max(0, contextWindow - reserved);
+    const compactBuffer = Math.max(
+        0,
+        finiteNumber(options.compactBufferTokens, DEFAULT_COMPACT_BUFFER),
+    );
+    const bufferThreshold = Math.max(0, effectiveWindow - compactBuffer);
+    if (!bufferThreshold) {
+        return 0;
+    }
+
+    const thresholdPercent = Math.min(
+        100,
+        Math.max(
+            1,
+            finiteNumber(
+                options.autoCompactThresholdPercent,
+                DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT,
+            ),
+        ),
+    );
+    const percentThreshold = Math.floor((contextWindow * thresholdPercent) / 100);
+    return Math.max(0, Math.min(bufferThreshold, percentThreshold));
+}
+
 export function estimateSessionContextUsage(session, model, options = {}) {
     const bootstrapOverhead = options.bootstrapOverhead ?? DEFAULT_BOOTSTRAP_OVERHEAD;
     const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
@@ -59,8 +97,7 @@ export function estimateSessionContextUsage(session, model, options = {}) {
     const maxOutput = model?.maxTokens ?? 8192;
     const reserved = Math.min(maxOutput, 20_000);
     const effectiveWindow = Math.max(0, contextWindow - reserved);
-    const compactBuffer = options.compactBufferTokens ?? DEFAULT_COMPACT_BUFFER;
-    const autoCompactThreshold = Math.max(0, effectiveWindow - compactBuffer);
+    const autoCompactThreshold = calculateAutoCompactThreshold(model, options);
     const warningThreshold = Math.max(0, autoCompactThreshold - CONTEXT_WARNING_TOKENS);
 
     return {
@@ -154,12 +191,32 @@ export function reconcileContextBreakdownCategories(categories, targetTotal) {
     }
 
     const scale = targetTotal / total;
+    const positiveCount = sorted.filter((category) => category.tokens > 0).length;
+    const preserveVisibleCategories = targetTotal >= positiveCount;
     const scaled = sorted.map((category) => ({
         ...category,
-        tokens: Math.floor(category.tokens * scale),
+        tokens:
+            preserveVisibleCategories && category.tokens > 0
+                ? Math.max(1, Math.floor(category.tokens * scale))
+                : Math.floor(category.tokens * scale),
     }));
 
     let remainder = targetTotal - scaled.reduce((sum, category) => sum + category.tokens, 0);
+    if (remainder < 0) {
+        let overflow = Math.abs(remainder);
+        for (const category of [...scaled].sort((left, right) => right.tokens - left.tokens)) {
+            if (overflow <= 0) {
+                break;
+            }
+            const minTokens = preserveVisibleCategories && category.tokens > 0 ? 1 : 0;
+            const removable = Math.max(0, category.tokens - minTokens);
+            const removed = Math.min(removable, overflow);
+            category.tokens -= removed;
+            overflow -= removed;
+        }
+        remainder = 0;
+    }
+
     for (const category of scaled) {
         if (remainder <= 0) {
             break;
