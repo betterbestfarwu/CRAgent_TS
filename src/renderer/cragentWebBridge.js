@@ -13,6 +13,7 @@ import {
 import { stripSessionImagesForUi } from "@shared/sessionForUi.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeAuthMode } from "@shared/authMode.js";
+import { parseModelRef } from "@shared/modelRef.js";
 import {
     applyProviderConnection,
     validateProviderConnectionFields,
@@ -118,8 +119,7 @@ function saveSessions(sessions) {
 
 function defaultModelRef(config) {
   const primary = config?.agents?.default?.model?.primary || "openai/gpt-4o-mini";
-  const [providerKey = "openai", modelId = "gpt-4o-mini"] = primary.split("/");
-  return { providerKey, modelId };
+  return parseModelRef(primary) || { providerKey: "openai", modelId: "gpt-4o-mini" };
 }
 
 function makeSession(config, projectId = null) {

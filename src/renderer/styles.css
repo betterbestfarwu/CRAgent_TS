@@ -947,7 +947,7 @@ body.app-sidebar-resizing {
 
 .session-delete:hover {
   color: var(--sidebar-fg);
-  background: var(--sidebar-hover);
+  background: transparent;
 }
 
 .main {
@@ -2841,7 +2841,8 @@ body.app-sidebar-resizing {
   color: var(--app-fg);
 }
 
-.composer-model-item:hover {
+.composer-model-item:hover,
+.composer-model-item.active {
   background: var(--sidebar-hover);
 }
 

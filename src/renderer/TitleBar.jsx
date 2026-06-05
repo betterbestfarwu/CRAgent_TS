@@ -12,27 +12,20 @@ const ICON_SEARCH = (
   </svg>
 );
 
-const ICON_PLUS = (
+const ICON_SETTINGS = (
   <svg
     viewBox="0 0 24 24"
-    width="14"
-    height="14"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    strokeWidth="1.75"
+    strokeWidth="2"
     strokeLinecap="round"
     strokeLinejoin="round"
     aria-hidden="true"
   >
-    <line x1="12" y1="3" x2="12" y2="21" />
-    <line x1="3" y1="12" x2="21" y2="12" />
-  </svg>
-);
-
-const ICON_SETTINGS = (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
     <circle cx="12" cy="12" r="3" />
-    <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+    <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831 2.34 2.34 0 0 1 2.33-4.033 2.34 2.34 0 0 0 3.319-1.915" />
   </svg>
 );
 
@@ -48,7 +41,6 @@ export function TitleBar({
   settingsActive,
   onToggleSidebar,
   onFocusSearch,
-  onNewChat,
   onOpenSettings,
 }) {
   if (!window.cragent?.isDesktop) {
@@ -92,15 +84,6 @@ export function TitleBar({
         </div>
 
         <div className="titlebar-trailing">
-          <button
-            type="button"
-            className="titlebar-icon-btn"
-            title="新建会话"
-            aria-label="新建会话"
-            onClick={onNewChat}
-          >
-            {ICON_PLUS}
-          </button>
           <button
             type="button"
             className={`titlebar-icon-btn${settingsActive ? " active" : ""}`}

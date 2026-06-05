@@ -32,6 +32,34 @@ test("ConfigStore.recordModelTokenUsage accumulates usage into model cost", () =
     assert.deepEqual(persistedModel.cost, model.cost);
 });
 
+test("ConfigStore preserves slashes inside configured model refs", () => {
+    const configFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cragent-model-ref-")), "config.json");
+    const store = new ConfigStore(configFile);
+    store.update({
+        ...store.get(),
+        agents: {
+            ...store.get().agents,
+            default: {
+                ...store.get().agents.default,
+                model: {
+                    primary: "openai/azure/o4-mini",
+                    fallbacks: ["openai/gpt-5", "openai/azure/o4-mini"],
+                },
+            },
+        },
+    });
+
+    assert.deepEqual(store.resolvePrimaryRef(), {
+        providerKey: "openai",
+        modelId: "azure/o4-mini",
+    });
+    assert.deepEqual(store.resolveModelChain("openai", "gpt-4o-mini"), [
+        { providerKey: "openai", modelId: "gpt-4o-mini" },
+        { providerKey: "openai", modelId: "gpt-5" },
+        { providerKey: "openai", modelId: "azure/o4-mini" },
+    ]);
+});
+
 test("LlmClient reports token usage from chat response", async () => {
     const usageCalls = [];
     const originalFetch = globalThis.fetch;

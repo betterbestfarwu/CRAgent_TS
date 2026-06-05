@@ -68,7 +68,7 @@ import {
     estimateMcpToolDefinitionTokens,
     getEnabledMcpServers,
 } from "@shared/mcpConfig.js";
-import { formatModelRef } from "@shared/modelRef.js";
+import { formatModelRef, parseModelRef } from "@shared/modelRef.js";
 import { filterVisibleTodoRuns, msUntilTodoRunsHide } from "@shared/todoRunsDisplay.js";
 import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
@@ -1565,11 +1565,12 @@ export function App() {
 
   async function handleModelChange(nextModel) {
     if (!currentSession) return;
-    const [providerKey, modelId] = nextModel.split("/");
+    const next = parseModelRef(nextModel);
+    if (!next) return;
     await window.cragent.updateModel({
       sessionId: currentSession.meta.id,
-      providerKey,
-      modelId,
+      providerKey: next.providerKey,
+      modelId: next.modelId,
     });
   }
 

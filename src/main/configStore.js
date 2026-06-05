@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { DEFAULT_CONTEXT_CONFIG } from "@shared/contextConfig";
+import { parseModelRef } from "@shared/modelRef.js";
 import { DEFAULT_UI_CONFIG } from "@shared/uiConfig.js";
 export class ConfigStore {
     constructor(filePath) {
@@ -26,8 +27,12 @@ export class ConfigStore {
         return this.data;
     }
     resolvePrimaryRef() {
-        const [providerKey, modelId] = this.data.agents.default.model.primary.split("/");
-        return { providerKey, modelId };
+        return (
+            parseModelRef(this.data.agents.default.model.primary) || {
+                providerKey: "",
+                modelId: "",
+            }
+        );
     }
     resolveModelChain(providerKey, modelId) {
         const primary = { providerKey, modelId };
@@ -35,16 +40,16 @@ export class ConfigStore {
         const chain = [primary];
         const seen = new Set([`${providerKey}/${modelId}`]);
         for (const ref of fallbacks) {
-            const [nextProvider, nextModel] = String(ref || "").split("/");
-            if (!nextProvider || !nextModel) {
+            const next = parseModelRef(ref);
+            if (!next) {
                 continue;
             }
-            const key = `${nextProvider}/${nextModel}`;
+            const key = `${next.providerKey}/${next.modelId}`;
             if (seen.has(key)) {
                 continue;
             }
             seen.add(key);
-            chain.push({ providerKey: nextProvider, modelId: nextModel });
+            chain.push(next);
         }
         return chain;
     }

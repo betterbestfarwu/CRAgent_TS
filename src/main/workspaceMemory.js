@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { assertPathContainedInRoot } from "./workspacePaths.js";
 
 const MAX_BOOTSTRAP_CHARS = 100_000;
 
@@ -174,10 +175,7 @@ Do not write to MEMORY.md or memory/*.md unless the user explicitly asks you to 
         const resolved = path.isAbsolute(raw)
             ? path.resolve(raw)
             : path.resolve(workspace, raw);
-        const wsPath = workspace;
-        if (resolved !== wsPath && !resolved.startsWith(`${wsPath}${path.sep}`)) {
-            throw new Error("path must stay inside workspace");
-        }
+        assertPathContainedInRoot(workspace, resolved);
         if (!this.isAllowedMemoryPath(raw, resolved, workspace)) {
             throw new Error("path not allowed for memory tools");
         }

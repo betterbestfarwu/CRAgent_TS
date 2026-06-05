@@ -1,10 +1,6 @@
-export function parseModelRef(ref) {
-    const [providerKey, modelId] = String(ref || "").split("/");
-    if (!providerKey || !modelId) {
-        return null;
-    }
-    return { providerKey, modelId };
-}
+import { parseModelRef } from "@shared/modelRef.js";
+
+export { parseModelRef };
 
 export function buildModelChain(primary, fallbackRefs = []) {
     const chain = [];

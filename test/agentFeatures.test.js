@@ -9,18 +9,23 @@ test("parseModelRef splits provider/model", () => {
         providerKey: "openai",
         modelId: "gpt-4o-mini",
     });
+    assert.deepEqual(parseModelRef("openai/azure/o4-mini"), {
+        providerKey: "openai",
+        modelId: "azure/o4-mini",
+    });
     assert.equal(parseModelRef("bad"), null);
 });
 
 test("buildModelChain deduplicates primary and fallbacks", () => {
     const chain = buildModelChain(
         { providerKey: "openai", modelId: "gpt-4o-mini" },
-        ["openai/gpt-5", "openai/gpt-4o-mini", "anthropic/claude-opus-4-5"],
+        ["openai/gpt-5", "openai/gpt-4o-mini", "anthropic/claude-opus-4-5", "openai/azure/o4-mini"],
     );
     assert.deepEqual(chain, [
         { providerKey: "openai", modelId: "gpt-4o-mini" },
         { providerKey: "openai", modelId: "gpt-5" },
         { providerKey: "anthropic", modelId: "claude-opus-4-5" },
+        { providerKey: "openai", modelId: "azure/o4-mini" },
     ]);
 });
 

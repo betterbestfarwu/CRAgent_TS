@@ -44,6 +44,33 @@ export function resolveSessionWorkspace(sessionStore, configStore, sessionId) {
     }
 }
 
+function resolveExistingRealpath(rawPath) {
+    const resolved = path.resolve(String(rawPath || ""));
+    try {
+        return fs.realpathSync(resolved);
+    } catch (error) {
+        if (error?.code !== "ENOENT") {
+            throw error;
+        }
+        const parent = path.dirname(resolved);
+        if (parent === resolved) {
+            return resolved;
+        }
+        return path.join(resolveExistingRealpath(parent), path.basename(resolved));
+    }
+}
+
+export function assertPathContainedInRoot(root, target) {
+    const resolvedRoot = resolveExistingRealpath(root);
+    const resolvedTarget = resolveExistingRealpath(target);
+    if (
+        resolvedTarget !== resolvedRoot &&
+        !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)
+    ) {
+        throw new Error("path must stay inside workspace");
+    }
+}
+
 export function resolvePathInWorkspace(workspace, rawPath) {
     const raw = String(rawPath || "").trim();
     if (!raw) {
@@ -53,10 +80,7 @@ export function resolvePathInWorkspace(workspace, rawPath) {
     const resolved = path.isAbsolute(expanded)
         ? path.resolve(expanded)
         : path.resolve(workspace, expanded);
-    const root = path.resolve(workspace);
-    if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
-        throw new Error("path must stay inside workspace");
-    }
+    assertPathContainedInRoot(workspace, resolved);
     return resolved;
 }
 
