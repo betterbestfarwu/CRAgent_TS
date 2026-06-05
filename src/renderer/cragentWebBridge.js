@@ -13,6 +13,10 @@ import {
 import { stripSessionImagesForUi } from "@shared/sessionForUi.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeAuthMode } from "@shared/authMode.js";
+import {
+    applyProviderConnection,
+    validateProviderConnectionFields,
+} from "@shared/providerConnection.js";
 
 const CONFIG_KEY = "cragent:web:config";
 const SESSIONS_KEY = "cragent:web:sessions";
@@ -645,15 +649,12 @@ export function installWebBridge() {
       if (!providerKey || !config.models?.[providerKey]) {
         return { ok: false, error: "未找到 provider" };
       }
+      const validation = validateProviderConnectionFields(connection);
+      if (!validation.ok) {
+        return { ok: false, error: validation.error };
+      }
       const existing = config.models[providerKey];
-      const provider = connection
-        ? {
-            ...existing,
-            baseUrl: connection.baseUrl ?? existing.baseUrl,
-            apiKey: connection.apiKey ?? existing.apiKey,
-            api: connection.api ?? existing.api,
-          }
-        : existing;
+      const provider = applyProviderConnection(existing, connection);
       const nextConfig = {
         ...config,
         models: {

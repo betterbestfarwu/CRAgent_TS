@@ -3095,6 +3095,26 @@ body.app-sidebar-resizing {
   flex-shrink: 0;
 }
 
+.settings-row-input-column {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: min(100%, 320px);
+  flex-shrink: 0;
+}
+
+.settings-row-input-column .settings-row-input-wrap {
+  width: 100%;
+}
+
+.settings-field-error {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--cursor-error-fg);
+  text-align: right;
+}
+
 .settings-row-input-wrap.has-action .settings-row-text {
   padding-right: 36px;
 }
@@ -3353,6 +3373,10 @@ body.app-sidebar-resizing {
   }
 
   .settings-row-input-wrap {
+    width: 100%;
+  }
+
+  .settings-row-input-column {
     width: 100%;
   }
 

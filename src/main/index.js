@@ -18,6 +18,10 @@ import { createMetaTools } from "./tools/metaTools.js";
 import { McpManager } from "./mcp/mcpManager.js";
 import { createMcpTools } from "./mcp/mcpTools.js";
 import { mcpToolRegistryName } from "@shared/mcpConfig.js";
+import {
+    applyProviderConnection,
+    validateProviderConnectionFields,
+} from "@shared/providerConnection.js";
 import { fetchProviderModelIds, mergeProviderModels } from "./modelSyncService.js";
 import { createToolConfirmFn, registerConfirmBridge } from "./confirmBridge.js";
 import { registerPlanApprovalBridge, requestPlanApproval } from "./planApprovalBridge.js";
@@ -409,24 +413,22 @@ function registerIpc() {
         if (!existing) {
             return { ok: false, error: `未找到 provider: ${providerKey}` };
         }
-        const provider = connection
-            ? {
-                  ...existing,
-                  baseUrl: connection.baseUrl ?? existing.baseUrl,
-                  apiKey: connection.apiKey ?? existing.apiKey,
-                  api: connection.api ?? existing.api,
-              }
-            : existing;
+        const validation = validateProviderConnectionFields(connection);
+        if (!validation.ok) {
+            return { ok: false, error: validation.error };
+        }
+        const provider = applyProviderConnection(existing, connection);
         configStore.updateProvider(providerKey, provider);
         try {
             const remoteIds = await fetchProviderModelIds(provider);
             const mergedProvider = mergeProviderModels(provider, remoteIds);
-            const config = configStore.updateProvider(providerKey, mergedProvider);
+            const syncedConfig = configStore.updateProvider(providerKey, mergedProvider);
             return {
                 ok: true,
                 providerKey,
                 count: mergedProvider.models.length,
-                config,
+                config: syncedConfig,
+                synced: true,
             };
         } catch (err) {
             return {

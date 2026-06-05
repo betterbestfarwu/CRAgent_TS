@@ -1,11 +1,12 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
-import { applyComposerTextSegmentEdit, buildComposerSegments } from "@shared/atMention.js";
+import { applyComposerTextSegmentEdit, buildComposerDisplaySegments, buildComposerSegments } from "@shared/atMention.js";
 import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
   ensureComposerCaretAnchor,
   getComposerEditorCaretOffset,
   parseComposerEditorDom,
   restoreComposerEditorCaret,
+  restoreComposerEditorCaretAtOffset,
 } from "@shared/composerEditor.js";
 import {
   createFileChipElement,
@@ -31,16 +32,20 @@ function getTextSegmentOffsets(segments) {
   return offsets;
 }
 
-function rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons, projectDirectoryPath) {
+function rebuildComposerEditorDom(root, segments, mentionById, fileById, fileIcons, projectDirectoryPath) {
   const fragment = document.createDocumentFragment();
-  for (const file of files) {
-    const path = file.path?.trim() || "";
-    fragment.appendChild(createFileChipElement(file, path ? fileIcons[path] : ""));
-  }
   for (const segment of segments) {
     if (segment.kind === "text") {
       if (segment.content) {
         fragment.appendChild(document.createTextNode(segment.content));
+      }
+      continue;
+    }
+    if (segment.kind === "file") {
+      const file = fileById.get(segment.fileId);
+      if (file) {
+        const path = file.path?.trim() || "";
+        fragment.appendChild(createFileChipElement(file, path ? fileIcons[path] : ""));
       }
       continue;
     }
@@ -59,6 +64,7 @@ function ComposerInlineEditor({
   input,
   onInputChange,
   onCaretChange,
+  composerCaret = 0,
   mentions,
   onRemoveMention,
   files,
@@ -72,14 +78,18 @@ function ComposerInlineEditor({
   onKeyDown,
 }) {
   const rootRef = useRef(null);
-  const segments = useMemo(() => buildComposerSegments(input, mentions), [input, mentions]);
+  const segments = useMemo(
+    () => buildComposerDisplaySegments(input, mentions, files),
+    [input, mentions, files],
+  );
   const mentionById = useMemo(() => new Map(mentions.map((mention) => [mention.id, mention])), [mentions]);
+  const fileById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
   const mentionSignature = useMemo(
     () => mentions.map((mention) => `${mention.id}:${mention.insertAt ?? "end"}`).join("|"),
     [mentions],
   );
   const filesSignature = useMemo(
-    () => files.map((file) => `${file.id}:${file.path || ""}`).join("|"),
+    () => files.map((file) => `${file.id}:${file.path || ""}:${file.insertAt ?? "end"}`).join("|"),
     [files],
   );
   const internalEditRef = useRef(false);
@@ -93,11 +103,11 @@ function ComposerInlineEditor({
   const syncFromState = useCallback(() => {
     const root = rootRef.current;
     if (!root) return;
-    rebuildComposerEditorDom(root, segments, mentionById, files, fileIcons, projectDirectoryPath);
+    rebuildComposerEditorDom(root, segments, mentionById, fileById, fileIcons, projectDirectoryPath);
     lastSyncedInputRef.current = input;
     lastMentionSignatureRef.current = mentionSignature;
     lastFilesSignatureRef.current = filesSignature;
-  }, [input, mentionById, mentionSignature, segments, files, fileIcons, filesSignature, projectDirectoryPath]);
+  }, [input, mentionById, fileById, mentionSignature, segments, files, fileIcons, filesSignature, projectDirectoryPath]);
 
   useLayoutEffect(() => {
     if (internalEditRef.current) {
@@ -115,12 +125,16 @@ function ComposerInlineEditor({
 
     const mentionAdded = mentions.length > prevMentionCountRef.current;
     const fileAdded = files.length > prevFileCountRef.current;
+    const mentionRemoved = mentions.length < prevMentionCountRef.current;
+    const fileRemoved = files.length < prevFileCountRef.current;
     prevMentionCountRef.current = mentions.length;
     prevFileCountRef.current = files.length;
     lastProjectDirectoryPathRef.current = projectDirectoryPath;
     syncFromState();
     if (mentionAdded || fileAdded) {
       restoreComposerEditorCaret(rootRef.current);
+    } else if (mentionRemoved || fileRemoved) {
+      restoreComposerEditorCaretAtOffset(rootRef.current, composerCaret);
     }
     onResize?.();
   }, [
@@ -130,6 +144,7 @@ function ComposerInlineEditor({
     projectDirectoryPath,
     mentions.length,
     files.length,
+    composerCaret,
     onResize,
     syncFromState,
   ]);
@@ -174,8 +189,14 @@ function ComposerInlineEditor({
       const known = mentionById.get(mention.id);
       return known ? { ...known, insertAt: mention.insertAt } : mention;
     });
+    const nextFiles = parsed.files
+      .map((fileRef) => {
+        const known = fileById.get(fileRef.id);
+        return known ? { ...known, insertAt: fileRef.insertAt } : null;
+      })
+      .filter(Boolean);
     internalEditRef.current = true;
-    onInputChange(parsed.text, nextMentions);
+    onInputChange(parsed.text, nextMentions, undefined, nextFiles);
     reportCaret();
     onResize?.();
   }
@@ -267,6 +288,7 @@ export function ComposerSegmentedInput({
   input,
   onInputChange,
   onCaretChange,
+  composerCaret = 0,
   mentions,
   onRemoveMention,
   files = [],
@@ -285,6 +307,7 @@ export function ComposerSegmentedInput({
         input={input}
         onInputChange={onInputChange}
         onCaretChange={onCaretChange}
+        composerCaret={composerCaret}
         mentions={mentions}
         onRemoveMention={onRemoveMention}
         files={files}

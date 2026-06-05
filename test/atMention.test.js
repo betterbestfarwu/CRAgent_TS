@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import {
     appendSpaceAfterInsertAt,
     buildAtNavItems,
+    buildComposerDisplaySegments,
     buildComposerSegments,
     buildPathTreeSegments,
     filterDirectoryEntries,
     formatAtMentionsForDisplay,
     buildInputWithAtMentions,
+    isActiveManualAtMention,
+    isAtSignKey,
     parentRelativePath,
     parseActiveAtMention,
     splitAtQueryPath,
@@ -16,6 +19,7 @@ import { expandAtMentionsToAbsolute } from "../src/main/atMentionExpand.js";
 import {
     COMPOSER_CARET_ZWSP,
     normalizeComposerEditorText,
+    shouldComposerBackspaceRemoveChip,
 } from "@shared/composerEditor.js";
 
 describe("parseActiveAtMention", () => {
@@ -45,6 +49,60 @@ describe("parseActiveAtMention", () => {
             parseActiveAtMention("https://user:pass@googleapis.com/foo"),
             null,
         );
+    });
+
+    it("detects @ mention directly after text without whitespace", () => {
+        const parsed = parseActiveAtMention("hello@src/re");
+        assert.equal(parsed?.query, "src/re");
+        assert.equal(parsed?.mentionStart, 5);
+        assert.equal(parsed?.mentionEnd, 12);
+    });
+
+    it("detects @ immediately after text", () => {
+        assert.deepEqual(parseActiveAtMention("hello@", 6), {
+            query: "",
+            mentionStart: 5,
+            mentionEnd: 6,
+        });
+    });
+
+    it("returns null for @ embedded in Chinese prose", () => {
+        assert.equal(parseActiveAtMention("文字@的"), null);
+        assert.equal(parseActiveAtMention("文字@的", 4), null);
+    });
+
+    it("detects manually typed @ after Chinese text", () => {
+        assert.deepEqual(parseActiveAtMention("文字@", 3), {
+            query: "",
+            mentionStart: 2,
+            mentionEnd: 3,
+        });
+    });
+
+    it("allows @ file mention after whitespace with Chinese query", () => {
+        const parsed = parseActiveAtMention("请查看 @文档");
+        assert.equal(parsed?.query, "文档");
+        assert.equal(parsed?.mentionStart, 4);
+    });
+});
+
+describe("manual at mention gating", () => {
+    it("detects @ key presses", () => {
+        assert.equal(isAtSignKey({ key: "@" }), true);
+        assert.equal(isAtSignKey({ key: "2", shiftKey: true }), true);
+        assert.equal(isAtSignKey({ key: "a" }), false);
+        assert.equal(isAtSignKey({ key: "@", ctrlKey: true }), false);
+    });
+
+    it("only opens menu for manually typed @ positions", () => {
+        const mention = parseActiveAtMention("文字@的");
+        assert.equal(mention, null);
+        assert.equal(isActiveManualAtMention(mention, 2), false);
+
+        const manual = parseActiveAtMention("hello@", 6);
+        assert.equal(isActiveManualAtMention(manual, 5), true);
+        assert.equal(isActiveManualAtMention(manual, null), false);
+        assert.equal(isActiveManualAtMention(manual, 4), false);
     });
 });
 
@@ -199,6 +257,61 @@ describe("buildComposerSegments", () => {
                 { kind: "text", content: "world" },
             ],
         );
+    });
+});
+
+describe("buildComposerDisplaySegments", () => {
+    it("places dragged files after @ mentions when insertAt is later", () => {
+        assert.deepEqual(
+            buildComposerDisplaySegments(" ", [{ id: "m1", insertAt: 0 }], [{ id: "f1", insertAt: 1 }]),
+            [
+                { kind: "mention", mentionId: "m1" },
+                { kind: "text", content: " " },
+                { kind: "file", fileId: "f1" },
+                { kind: "text", content: "" },
+            ],
+        );
+    });
+
+    it("keeps drag-first ordering when mention and file share insertAt 0", () => {
+        assert.deepEqual(
+            buildComposerDisplaySegments(
+                " ",
+                [{ id: "m1", insertAt: 0, attachSeq: 2 }],
+                [{ id: "f1", insertAt: 0, attachSeq: 1 }],
+            ),
+            [
+                { kind: "file", fileId: "f1" },
+                { kind: "mention", mentionId: "m1" },
+                { kind: "text", content: " " },
+            ],
+        );
+    });
+});
+
+describe("shouldComposerBackspaceRemoveChip", () => {
+    it("removes chip when text node is zwsp-only filler", () => {
+        assert.equal(shouldComposerBackspaceRemoveChip("", ""), true);
+        assert.equal(
+            shouldComposerBackspaceRemoveChip("", normalizeComposerEditorText(COMPOSER_CARET_ZWSP)),
+            true,
+        );
+    });
+
+    it("removes chip when text node is whitespace-only filler after mention", () => {
+        assert.equal(shouldComposerBackspaceRemoveChip(" ", " "), true);
+        assert.equal(
+            shouldComposerBackspaceRemoveChip(
+                " ",
+                normalizeComposerEditorText(` ${COMPOSER_CARET_ZWSP}`),
+            ),
+            true,
+        );
+    });
+
+    it("does not remove chip when user typed visible text after mention", () => {
+        assert.equal(shouldComposerBackspaceRemoveChip(" ", " hello"), false);
+        assert.equal(shouldComposerBackspaceRemoveChip("hello", "hello"), false);
     });
 });
 

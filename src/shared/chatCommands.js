@@ -50,16 +50,36 @@ export function getCommandSlashNames(command) {
  */
 export function parseActiveSlashCommand(text) {
   const value = String(text ?? "");
-  // Only treat `/` as a slash command when it starts the input or follows whitespace,
-  // so URL path segments (e.g. …/customsearch/v1) do not open the slash menu.
-  const match = value.match(/(^|\s)\/([^\s]*)$/);
-  if (!match) return null;
-  const slashStart = match.index + (match[1] === " " ? 1 : 0);
+  const slashIndex = value.lastIndexOf("/");
+  if (slashIndex === -1) return null;
+
+  const query = value.slice(slashIndex + 1);
+  if (/\s/.test(query)) return null;
+
   return {
-    query: match[2],
-    slashStart,
+    query,
+    slashStart: slashIndex,
     slashEnd: value.length,
   };
+}
+
+/**
+ * @param {{ key?: string, ctrlKey?: boolean, metaKey?: boolean, altKey?: boolean } | null | undefined} event
+ * @returns {boolean}
+ */
+export function isSlashKey(event) {
+  if (!event || event.ctrlKey || event.metaKey || event.altKey) return false;
+  return event.key === "/";
+}
+
+/**
+ * @param {{ slashStart: number } | null | undefined} slashMention
+ * @param {number | null | undefined} manualStart
+ * @returns {boolean}
+ */
+export function isActiveManualSlashCommand(slashMention, manualStart) {
+  if (!slashMention || manualStart == null) return false;
+  return manualStart === slashMention.slashStart;
 }
 
 export function matchChatCommand(input) {

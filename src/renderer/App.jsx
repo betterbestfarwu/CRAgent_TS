@@ -27,16 +27,19 @@ import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
 import { useFileIcons } from "./useFileIcons.js";
 import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
+  getComposerEditorCaretOffset,
   getComposerFileBeforeSelection,
   getComposerMentionBeforeSelection,
   placeComposerCaretAtEnd,
+  placeComposerCaretAtOffset,
 } from "@shared/composerEditor.js";
 import {
-  appendSpaceAfterInsertAt,
   atMentionFileName,
   buildAtNavItems,
   buildInputWithAtMentions,
   filterDirectoryEntries,
+  isActiveManualAtMention,
+  isAtSignKey,
   parentRelativePath,
   parseActiveAtMention,
   splitAtQueryPath,
@@ -53,7 +56,7 @@ import {
   sessionHasUserMessages,
   titleFromFirstUserMessage,
 } from "@shared/sessionTitle";
-import { parseActiveSlashCommand } from "@shared/chatCommands.js";
+import { parseActiveSlashCommand, isActiveManualSlashCommand, isSlashKey } from "@shared/chatCommands.js";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
 import {
@@ -114,6 +117,8 @@ export function App() {
   const [skills, setSkills] = useState([]);
   const [input, setInput] = useState("");
   const [composerCaret, setComposerCaret] = useState(0);
+  const [atMentionManualStart, setAtMentionManualStart] = useState(null);
+  const [slashCommandManualStart, setSlashCommandManualStart] = useState(null);
   const [pendingImages, setPendingImages] = useState([]);
   const [pendingFiles, setPendingFiles] = useState([]);
   const [pendingAtMentions, setPendingAtMentions] = useState([]);
@@ -148,6 +153,13 @@ export function App() {
   const composerInputRowRef = useRef(null);
   const textareaRef = useRef(null);
   const composerFocusAtEndRef = useRef(false);
+  const composerFocusAtCaretRef = useRef(null);
+  const composerAttachSeqRef = useRef(0);
+
+  function nextComposerAttachSeq() {
+    composerAttachSeqRef.current += 1;
+    return composerAttachSeqRef.current;
+  }
   const busyBySessionRef = useRef(new Map());
   const newChatInFlightRef = useRef(false);
   const sidebarWidthRef = useRef(sidebarWidth);
@@ -340,10 +352,13 @@ export function App() {
     }
   }
 
-  function updateComposerInput(nextInput, nextMentions = pendingAtMentions, caret) {
+  function updateComposerInput(nextInput, nextMentions = pendingAtMentions, caret, nextFiles) {
     setInput(nextInput);
     if (nextMentions !== pendingAtMentions) {
       setPendingAtMentions(nextMentions);
+    }
+    if (nextFiles !== undefined) {
+      setPendingFiles(nextFiles);
     }
     setComposerCaret(
       typeof caret === "number" && Number.isFinite(caret)
@@ -368,6 +383,41 @@ export function App() {
   function requestComposerFocusAtEnd() {
     composerFocusAtEndRef.current = true;
   }
+
+  function requestComposerFocusAtCaret(offset) {
+    composerFocusAtCaretRef.current =
+      typeof offset === "number" && Number.isFinite(offset) ? Math.max(0, offset) : 0;
+  }
+
+  function focusPrimaryComposerAtCaret(offset) {
+    const el = textareaRef.current;
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    if (el.isContentEditable) {
+      placeComposerCaretAtOffset(el, offset);
+      return true;
+    }
+    const pos = Math.max(0, Math.min(offset, el.value?.length ?? 0));
+    el.setSelectionRange(pos, pos);
+    return true;
+  }
+
+  useLayoutEffect(() => {
+    if (composerFocusAtCaretRef.current === null) return;
+    const offset = composerFocusAtCaretRef.current;
+    if (focusPrimaryComposerAtCaret(offset)) {
+      composerFocusAtCaretRef.current = null;
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      if (composerFocusAtCaretRef.current === null) return;
+      const caret = composerFocusAtCaretRef.current;
+      if (focusPrimaryComposerAtCaret(caret)) {
+        composerFocusAtCaretRef.current = null;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [input, pendingAtMentions.length, pendingFiles.length, composerCaret]);
 
   useLayoutEffect(() => {
     if (!composerFocusAtEndRef.current) return;
@@ -761,6 +811,18 @@ export function App() {
 
   const atMention = useMemo(() => parseActiveAtMention(input, composerCaret), [input, composerCaret]);
 
+  useEffect(() => {
+    if (!atMention) {
+      setAtMentionManualStart(null);
+    }
+  }, [atMention]);
+
+  useEffect(() => {
+    if (!slashMention) {
+      setSlashCommandManualStart(null);
+    }
+  }, [slashMention]);
+
   const activeProject = useMemo(() => {
     const projectId = currentSession?.meta?.projectId;
     if (!projectId) return null;
@@ -942,9 +1004,16 @@ export function App() {
     }
   }, [slashNavItems, slashMenuIndex]);
 
-  const showSlashMenu = page === "chat" && slashQuery !== null;
+  const showSlashMenu =
+    page === "chat" &&
+    slashQuery !== null &&
+    isActiveManualSlashCommand(slashMention, slashCommandManualStart);
   const showAtMenu =
-    page === "chat" && atMention !== null && Boolean(activeProject?.id) && !showSlashMenu;
+    page === "chat" &&
+    atMention !== null &&
+    isActiveManualAtMention(atMention, atMentionManualStart) &&
+    Boolean(activeProject?.id) &&
+    !showSlashMenu;
 
   useEffect(() => {
     if (showAtMenu && atMention) {
@@ -956,6 +1025,28 @@ export function App() {
     }
   }, [showAtMenu, atMention, input, composerCaret]);
   const sendButtonDisabled = !busy && !canSend;
+
+  function noteManualComposerTriggerStart(event, segment) {
+    const el = event.currentTarget;
+    const caret = segment?.contentEditable
+      ? getComposerEditorCaretOffset(el)
+      : (el?.selectionStart ?? 0);
+
+    if (isSlashKey(event)) {
+      setSlashCommandManualStart(caret);
+      setAtMentionManualStart(null);
+      return;
+    }
+    if (isAtSignKey(event)) {
+      setAtMentionManualStart(caret);
+      setSlashCommandManualStart(null);
+    }
+  }
+
+  function noteComposerTextPaste() {
+    setAtMentionManualStart(null);
+    setSlashCommandManualStart(null);
+  }
 
   function replaceActiveAtMention(nextMentionBody) {
     if (!atMention) return;
@@ -986,13 +1077,12 @@ export function App() {
 
     const mentionStart = activeAt.mentionStart;
     let nextInput = `${sourceInput.slice(0, activeAt.mentionStart)}${sourceInput.slice(activeAt.mentionEnd)}`;
-    nextInput = appendSpaceAfterInsertAt(nextInput, mentionStart);
     const name = atMentionFileName(cleanPath);
     const nextMentions = pendingAtMentions.some((mention) => mention.relativePath === cleanPath)
       ? pendingAtMentions
       : [
           ...pendingAtMentions,
-          { id: crypto.randomUUID(), name, relativePath: cleanPath, insertAt: mentionStart },
+          { id: crypto.randomUUID(), name, relativePath: cleanPath, insertAt: mentionStart, attachSeq: nextComposerAttachSeq() },
         ];
     updateComposerInput(nextInput, nextMentions);
     atPickContextRef.current = null;
@@ -1074,6 +1164,13 @@ export function App() {
       }
     }
     if (normalFiles.length) {
+      const editor = textareaRef.current;
+      const insertAt =
+        editor?.isContentEditable
+          ? getComposerEditorCaretOffset(editor)
+          : typeof composerCaret === "number" && Number.isFinite(composerCaret)
+            ? composerCaret
+            : input.length;
       setPendingFiles((prev) => {
         const seen = new Set(
           prev.map((item) => `${item.path || item.name}:${item.size}`),
@@ -1084,6 +1181,8 @@ export function App() {
             name: file.name || "file",
             size: Number(file.size || 0),
             path: typeof file.path === "string" ? file.path : "",
+            insertAt,
+            attachSeq: nextComposerAttachSeq(),
           }))
           .filter((item) => {
             const key = `${item.path || item.name}:${item.size}`;
@@ -1101,6 +1200,12 @@ export function App() {
   }
 
   function removePendingFile(fileId) {
+    const target = pendingFiles.find((file) => file.id === fileId);
+    if (target) {
+      const at = target.insertAt ?? input.length;
+      setComposerCaret(at);
+      requestComposerFocusAtCaret(at);
+    }
     setPendingFiles((prev) => prev.filter((file) => file.id !== fileId));
   }
 
@@ -1176,18 +1281,39 @@ export function App() {
   }
 
   function removePendingAtMention(mentionId) {
+    const target = pendingAtMentions.find((mention) => mention.id === mentionId);
+    if (target) {
+      const at = target.insertAt ?? input.length;
+      setComposerCaret(at);
+      requestComposerFocusAtCaret(at);
+      setInput((prev) => {
+        const tail = prev.slice(at);
+        if (/^\s*$/.test(tail) && prev.slice(0, at).trim() === "") {
+          return prev.slice(0, at);
+        }
+        return prev;
+      });
+    }
     setPendingAtMentions((prev) => prev.filter((mention) => mention.id !== mentionId));
   }
 
   function removeLastPendingAtMention() {
-    setPendingAtMentions((prev) => {
-      if (!prev.length) return prev;
-      const sorted = [...prev].sort(
-        (a, b) => (a.insertAt ?? input.length) - (b.insertAt ?? input.length),
-      );
-      const last = sorted[sorted.length - 1];
-      return prev.filter((mention) => mention.id !== last.id);
+    if (!pendingAtMentions.length) return;
+    const sorted = [...pendingAtMentions].sort(
+      (a, b) => (a.insertAt ?? input.length) - (b.insertAt ?? input.length),
+    );
+    const last = sorted[sorted.length - 1];
+    const at = last.insertAt ?? input.length;
+    setComposerCaret(at);
+    requestComposerFocusAtCaret(at);
+    setInput((prev) => {
+      const tail = prev.slice(at);
+      if (/^\s*$/.test(tail) && prev.slice(0, at).trim() === "") {
+        return prev.slice(0, at);
+      }
+      return prev;
     });
+    setPendingAtMentions((prev) => prev.filter((mention) => mention.id !== last.id));
   }
 
   const composerPlaceholder =
@@ -1228,9 +1354,12 @@ export function App() {
       setComposerQuickMenuOpen(false);
       setInput("");
       setComposerCaret(0);
+      setAtMentionManualStart(null);
+      setSlashCommandManualStart(null);
       setPendingImages([]);
       setPendingFiles([]);
       setPendingAtMentions([]);
+      composerAttachSeqRef.current = 0;
       setComposerDragOver(false);
       try {
         await window.cragent.sendChat({
@@ -1249,9 +1378,12 @@ export function App() {
 
     setInput("");
     setComposerCaret(0);
+    setAtMentionManualStart(null);
+    setSlashCommandManualStart(null);
     setPendingImages([]);
     setPendingFiles([]);
     setPendingAtMentions([]);
+    composerAttachSeqRef.current = 0;
     setComposerQuickMenuOpen(false);
     setComposerDragOver(false);
     busyBySessionRef.current.set(sessionId, true);
@@ -1836,6 +1968,7 @@ export function App() {
                     input={input}
                     onInputChange={updateComposerInput}
                     onCaretChange={setComposerCaret}
+                    composerCaret={composerCaret}
                     mentions={pendingAtMentions}
                     onRemoveMention={removePendingAtMention}
                     files={pendingFiles}
@@ -1849,11 +1982,15 @@ export function App() {
                       const files = Array.from(e.clipboardData?.files || []).filter((file) =>
                         file.type.startsWith("image/"),
                       );
-                      if (!files.length) return;
-                      e.preventDefault();
-                      void addImagesFromFiles(files);
+                      if (files.length) {
+                        e.preventDefault();
+                        void addImagesFromFiles(files);
+                        return;
+                      }
+                      noteComposerTextPaste();
                     }}
                     onKeyDown={(e, segment) => {
+                    noteManualComposerTriggerStart(e, segment);
                     if (e.key === "Backspace" && segment?.contentEditable) {
                       const fileId = getComposerFileBeforeSelection(e.currentTarget);
                       if (fileId) {

@@ -1,5 +1,7 @@
 /** @typedef {{ id: string, name: string, relativePath: string, insertAt?: number }} ComposerEditorMention */
 
+/** @typedef {{ id: string, insertAt: number }} ComposerEditorFileRef */
+
 /** Invisible caret anchor after non-editable mention chips (contenteditable). */
 export const COMPOSER_CARET_ZWSP = "\u200B";
 
@@ -24,10 +26,12 @@ export function composerEditorSnapshotKey(text, mentions) {
 /**
  * @param {HTMLElement} root
  * @param {Map<string, { id: string, name: string, relativePath: string }>} mentionById
- * @returns {{ text: string, mentions: ComposerEditorMention[] }}
+ * @returns {{ text: string, mentions: ComposerEditorMention[], files: ComposerEditorFileRef[] }}
  */
 export function parseComposerEditorDom(root, mentionById) {
     const mentions = [];
+    /** @type {ComposerEditorFileRef[]} */
+    const files = [];
     let text = "";
 
     /**
@@ -43,6 +47,10 @@ export function parseComposerEditorDom(root, mentionById) {
 
         const el = /** @type {HTMLElement} */ (node);
         if (el.dataset?.fileId && el.classList.contains("composer-file-chip")) {
+            files.push({
+                id: el.dataset.fileId,
+                insertAt: text.length,
+            });
             return;
         }
 
@@ -82,7 +90,7 @@ export function parseComposerEditorDom(root, mentionById) {
         visit(children[index], index < children.length - 1);
     }
 
-    return { text: normalizeComposerEditorText(text), mentions };
+    return { text: normalizeComposerEditorText(text), mentions, files };
 }
 
 /**
@@ -132,15 +140,13 @@ export function getComposerFileBeforeSelection(root) {
     }
 
     if (node.nodeType === Node.TEXT_NODE && offset === 0) {
-        let previous = node.previousSibling;
-        while (previous?.nodeType === Node.TEXT_NODE && !(previous.textContent ?? "").replace(/\u200B/g, "").length) {
-            previous = previous.previousSibling;
-        }
-        const fileId = findFileIdOnNode(previous);
+        const fileId = findComposerChipBeforeTextCursor(node, 0, findFileIdOnNode);
         if (fileId) return fileId;
     }
 
     if (node.nodeType === Node.TEXT_NODE && offset > 0) {
+        const fileId = findComposerChipBeforeTextCursor(node, offset, findFileIdOnNode);
+        if (fileId) return fileId;
         return null;
     }
 
@@ -164,6 +170,59 @@ function findFileIdOnNode(node) {
             return element.dataset.fileId;
         }
     }
+    return null;
+}
+
+/**
+ * @param {Node | null | undefined} previous
+ * @returns {Node | null | undefined}
+ */
+function skipEmptyComposerTextSiblings(previous) {
+    let node = previous;
+    while (node?.nodeType === Node.TEXT_NODE && !normalizeComposerEditorText(node.textContent ?? "").length) {
+        node = node.previousSibling;
+    }
+    return node;
+}
+
+/**
+ * @param {string} normalizedBefore
+ * @param {string} normalizedNode
+ * @returns {boolean}
+ */
+export function shouldComposerBackspaceRemoveChip(normalizedBefore, normalizedNode) {
+    if (!normalizedNode.length) {
+        return true;
+    }
+    if (!/^\s*$/.test(normalizedNode)) {
+        return false;
+    }
+    return normalizedBefore.length === 0 || /^\s+$/.test(normalizedBefore);
+}
+
+/**
+ * @param {Node} textNode
+ * @param {number} offset
+ * @param {(node: Node | null | undefined) => string | null} findIdOnNode
+ * @returns {string | null}
+ */
+function findComposerChipBeforeTextCursor(textNode, offset, findIdOnNode) {
+    if (textNode.nodeType !== Node.TEXT_NODE) return null;
+
+    const raw = textNode.nodeValue ?? "";
+
+    if (offset === 0) {
+        return findIdOnNode(skipEmptyComposerTextSiblings(textNode.previousSibling));
+    }
+
+    if (offset > 0) {
+        const normalizedBefore = normalizeComposerEditorText(raw.slice(0, offset));
+        const normalizedNode = normalizeComposerEditorText(raw);
+        if (shouldComposerBackspaceRemoveChip(normalizedBefore, normalizedNode)) {
+            return findIdOnNode(skipEmptyComposerTextSiblings(textNode.previousSibling));
+        }
+    }
+
     return null;
 }
 
@@ -191,15 +250,13 @@ export function getComposerMentionBeforeSelection(root) {
     }
 
     if (node.nodeType === Node.TEXT_NODE && offset === 0) {
-        let previous = node.previousSibling;
-        while (previous?.nodeType === Node.TEXT_NODE && !(previous.textContent ?? "").length) {
-            previous = previous.previousSibling;
-        }
-        const mentionId = findMentionIdOnNode(previous);
+        const mentionId = findComposerChipBeforeTextCursor(node, 0, findMentionIdOnNode);
         if (mentionId) return mentionId;
     }
 
     if (node.nodeType === Node.TEXT_NODE && offset > 0) {
+        const mentionId = findComposerChipBeforeTextCursor(node, offset, findMentionIdOnNode);
+        if (mentionId) return mentionId;
         return null;
     }
 
@@ -319,6 +376,110 @@ export function getComposerEditorCaretOffset(root) {
 }
 
 /**
+ * @param {string} raw
+ * @param {number} normalizedPrefixLength
+ * @returns {number}
+ */
+function rawOffsetForNormalizedPrefix(raw, normalizedPrefixLength) {
+    if (normalizedPrefixLength <= 0) return 0;
+    let normalized = 0;
+    for (let index = 0; index < raw.length; index += 1) {
+        if (raw[index] === COMPOSER_CARET_ZWSP) continue;
+        normalized += 1;
+        if (normalized >= normalizedPrefixLength) {
+            return index + 1;
+        }
+    }
+    return raw.length;
+}
+
+/**
+ * Place a collapsed selection at a logical text offset in the composer editor.
+ * @param {HTMLElement} root
+ * @param {number} targetOffset
+ * @returns {boolean}
+ */
+export function placeComposerCaretAtOffset(root, targetOffset) {
+    const goal = Math.max(0, Math.floor(targetOffset));
+    let cursor = 0;
+    let placed = false;
+    const range = document.createRange();
+
+    /**
+     * @param {Node} node
+     * @param {boolean} blockBreakAfter
+     */
+    function visit(node, blockBreakAfter = false) {
+        if (placed) return;
+        if (node.nodeType === Node.TEXT_NODE) {
+            const raw = node.nodeValue ?? "";
+            const normalizedLength = normalizeComposerEditorText(raw).length;
+            if (goal <= cursor) {
+                range.setStart(node, 0);
+                range.collapse(true);
+                placed = true;
+                return;
+            }
+            if (goal <= cursor + normalizedLength) {
+                const rawOffset = rawOffsetForNormalizedPrefix(raw, goal - cursor);
+                range.setStart(node, rawOffset);
+                range.collapse(true);
+                placed = true;
+                return;
+            }
+            cursor += normalizedLength;
+            return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+        const el = /** @type {HTMLElement} */ (node);
+        if (el.dataset?.fileId && el.classList.contains("composer-file-chip")) {
+            return;
+        }
+        if (el.dataset?.mentionId && el.classList.contains("composer-at-chip")) {
+            return;
+        }
+
+        if (el.tagName === "BR") {
+            if (goal <= cursor) {
+                range.setStartBefore(node);
+                range.collapse(true);
+                placed = true;
+                return;
+            }
+            cursor += 1;
+            return;
+        }
+
+        const isBlock = el.tagName === "DIV" || el.tagName === "P";
+        const children = Array.from(el.childNodes);
+        for (let index = 0; index < children.length; index += 1) {
+            visit(children[index], index < children.length - 1 && isBlock);
+            if (placed) return;
+        }
+        if (isBlock && el !== root && blockBreakAfter) {
+            if (cursor > 0) cursor += 1;
+        }
+    }
+
+    const children = Array.from(root.childNodes);
+    for (let index = 0; index < children.length; index += 1) {
+        visit(children[index], index < children.length - 1);
+        if (placed) break;
+    }
+
+    if (!placed) {
+        placeComposerCaretAtEnd(root);
+        return false;
+    }
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return true;
+}
+
+/**
  * @param {HTMLElement} root
  */
 export function placeComposerCaretAtEnd(root) {
@@ -346,6 +507,23 @@ export function restoreComposerEditorCaret(root) {
     if (!root) return;
     const apply = () => {
         placeComposerCaretAtEnd(root);
+        if (typeof root.focus === "function") {
+            root.focus({ preventScroll: true });
+        }
+    };
+    apply();
+    requestAnimationFrame(apply);
+    window.setTimeout(apply, 0);
+}
+
+/**
+ * @param {HTMLElement | null | undefined} root
+ * @param {number} offset
+ */
+export function restoreComposerEditorCaretAtOffset(root, offset) {
+    if (!root) return;
+    const apply = () => {
+        placeComposerCaretAtOffset(root, offset);
         if (typeof root.focus === "function") {
             root.focus({ preventScroll: true });
         }

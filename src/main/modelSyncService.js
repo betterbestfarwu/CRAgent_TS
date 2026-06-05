@@ -1,3 +1,5 @@
+import { hasValidProviderApiKey } from "@shared/providerConnection.js";
+
 function normalizeBaseUrl(baseUrl) {
     return String(baseUrl || "").replace(/\/+$/, "");
 }
@@ -45,7 +47,7 @@ export async function fetchProviderModelIds(provider) {
     if (!baseUrl) {
         throw new Error("Base URL 不能为空");
     }
-    if (!apiKey || apiKey.includes("REPLACE_ME")) {
+    if (!hasValidProviderApiKey(apiKey)) {
         throw new Error("请先配置有效 API Key");
     }
 

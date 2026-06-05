@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfig";
 import { ensureMcpConfigShape } from "@shared/mcpConfig.js";
 import { mergeUiConfig } from "@shared/uiConfig.js";
+import { validateProviderConnectionFields } from "@shared/providerConnection.js";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { withConfigFileLinks } from "./ConfigFileLink.jsx";
 import { SingleDotIcon } from "./DotGridAnimator.jsx";
@@ -292,6 +293,7 @@ function SettingsTextRow({
   onChange,
   type = "text",
   action = null,
+  error = "",
 }) {
   return (
     <div className="settings-row settings-row-field">
@@ -299,15 +301,18 @@ function SettingsTextRow({
         <div className="settings-row-title">{title}</div>
         {description ? <div className="settings-row-description">{description}</div> : null}
       </div>
-      <div className={`settings-row-input-wrap${action ? " has-action" : ""}`}>
-        <input
-          className="settings-row-text"
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          aria-label={title}
-        />
-        {action}
+      <div className="settings-row-input-column">
+        <div className={`settings-row-input-wrap${action ? " has-action" : ""}`}>
+          <input
+            className="settings-row-text"
+            type={type}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            aria-label={title}
+          />
+          {action}
+        </div>
+        {error ? <p className="settings-field-error">{error}</p> : null}
       </div>
     </div>
   );
@@ -347,7 +352,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
   const [modelStateFilter, setModelStateFilter] = useState("all");
   const [showApiKey, setShowApiKey] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
-  const [modelsError, setModelsError] = useState("");
+  const [providerSyncErrors, setProviderSyncErrors] = useState({});
   const [providerDialog, setProviderDialog] = useState(null);
   const [deleteProviderConfirmOpen, setDeleteProviderConfirmOpen] = useState(false);
   const modelsPanelRef = useRef(null);
@@ -371,6 +376,22 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
   const selectedProvider = selectedProviderKey
     ? draftConfig.models?.[selectedProviderKey]
     : null;
+  const selectedProviderSyncError = selectedProviderKey
+    ? providerSyncErrors[selectedProviderKey] || ""
+    : "";
+
+  function setProviderSyncError(providerKey, message) {
+    if (!providerKey) return;
+    setProviderSyncErrors((prev) => {
+      if (!message) {
+        if (!(providerKey in prev)) return prev;
+        const next = { ...prev };
+        delete next[providerKey];
+        return next;
+      }
+      return { ...prev, [providerKey]: message };
+    });
+  }
 
   const filteredModels = useMemo(() => {
     const models = selectedProvider?.models || [];
@@ -441,10 +462,10 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
 
   function addProvider(providerKey) {
     if (draftConfig.models?.[providerKey]) {
-      setModelsError(`Provider「${providerKey}」已存在。`);
+      setProviderSyncError(selectedProviderKey, `Provider「${providerKey}」已存在。`);
       return;
     }
-    setModelsError("");
+    setProviderSyncError(selectedProviderKey, "");
     setDraftConfig((prev) => ({
       ...prev,
       models: {
@@ -463,10 +484,18 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
       return;
     }
     if (draftConfig.models?.[nextProviderKey]) {
-      setModelsError(`Provider「${nextProviderKey}」已存在。`);
+      setProviderSyncError(selectedProviderKey, `Provider「${nextProviderKey}」已存在。`);
       return;
     }
-    setModelsError("");
+    setProviderSyncError(selectedProviderKey, "");
+    setProviderSyncErrors((prev) => {
+      const next = { ...prev };
+      if (selectedProviderKey in next) {
+        next[nextProviderKey] = next[selectedProviderKey];
+        delete next[selectedProviderKey];
+      }
+      return next;
+    });
     setDraftConfig((prev) => {
       const provider = prev.models[selectedProviderKey];
       const { [selectedProviderKey]: _removed, ...restModels } = prev.models;
@@ -500,7 +529,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
     if (!selectedProviderKey) return;
     const keyToDelete = selectedProviderKey;
     const remainingKeys = providerKeys.filter((key) => key !== keyToDelete);
-    setModelsError("");
+    setProviderSyncError(keyToDelete, "");
     setDraftConfig((prev) => {
       const { [keyToDelete]: _removed, ...restModels } = prev.models;
       const defaultModel = prev.agents?.default?.model || {};
@@ -571,22 +600,28 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
   }
 
   async function handleSyncModels() {
-    if (!selectedProviderKey || !onSyncProviderModels || !selectedProvider) {
-      setModelsError("模型同步功能未就绪，请重启应用。");
+    const providerKey = selectedProviderKey;
+    if (!providerKey || !onSyncProviderModels || !selectedProvider) {
+      setProviderSyncError(providerKey, "模型同步功能未就绪，请重启应用。");
+      return;
+    }
+    const connection = {
+      baseUrl: selectedProvider.baseUrl ?? "",
+      apiKey: selectedProvider.apiKey ?? "",
+      api: selectedProvider.api ?? "",
+    };
+    const validation = validateProviderConnectionFields(connection);
+    if (!validation.ok) {
+      setProviderSyncError(providerKey, validation.error);
       return;
     }
     setSyncLoading(true);
-    setModelsError("");
+    setProviderSyncError(providerKey, "");
     try {
-      const connection = {
-        baseUrl: selectedProvider.baseUrl || "",
-        apiKey: selectedProvider.apiKey || "",
-        api: selectedProvider.api || "",
-      };
-      const result = await onSyncProviderModels(selectedProviderKey, connection);
+      const result = await onSyncProviderModels(providerKey, connection);
       setDraftConfig(clone(result.config));
     } catch (err) {
-      setModelsError(err instanceof Error ? err.message : String(err));
+      setProviderSyncError(providerKey, err instanceof Error ? err.message : String(err));
     } finally {
       setSyncLoading(false);
     }
@@ -786,7 +821,11 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
                     title="Base URL"
                     description="Provider API 的根地址。"
                     value={selectedProvider.baseUrl || ""}
-                    onChange={(value) => updateProvider({ baseUrl: value })}
+                    onChange={(value) => {
+                      updateProvider({ baseUrl: value });
+                      setProviderSyncError(selectedProviderKey, "");
+                    }}
+                    error={selectedProviderSyncError}
                     action={
                       <button
                         type="button"
@@ -871,7 +910,6 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
                   )}
                 </SettingsGroup>
 
-                {modelsError ? <p className="settings-error">{modelsError}</p> : null}
               </>
             )}
           </section>

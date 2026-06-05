@@ -1,5 +1,39 @@
 /** @typedef {{ name: string, kind: "dir" | "file", relativePath: string }} ProjectDirEntry */
 
+const CJK_CHAR_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+
+/**
+ * @param {string | null | undefined} char
+ * @returns {boolean}
+ */
+export function isCjkChar(char) {
+    return CJK_CHAR_PATTERN.test(String(char ?? ""));
+}
+
+/**
+ * @param {string} query
+ * @returns {boolean}
+ */
+export function looksLikeEmailDomainQuery(query) {
+    return /^[\w%+.-]*\.[\w.-]+/.test(String(query ?? ""));
+}
+
+/**
+ * @param {string} query
+ * @param {boolean} explicitMention
+ * @returns {boolean}
+ */
+export function isFileMentionQuery(query, explicitMention) {
+    const value = String(query ?? "");
+    if (!value) return true;
+    if (/[/\\]/.test(value)) return true;
+    if (/^[\w.%+\-]*$/.test(value)) return true;
+    if (CJK_CHAR_PATTERN.test(value)) {
+        return explicitMention;
+    }
+    return false;
+}
+
 /**
  * Active `@` mention at the composer caret (or end of text when caret is omitted).
  * @param {string} text
@@ -13,16 +47,53 @@ export function parseActiveAtMention(text, caretIndex) {
             ? Math.max(0, Math.min(caretIndex, value.length))
             : value.length;
     const before = value.slice(0, caret);
-    // Only treat `@` as a file mention when it starts the input or follows whitespace,
-    // so emails and URL userinfo (e.g. user@host) do not open the @ menu.
-    const match = before.match(/(^|\s)@([^\s@]*)$/);
-    if (!match) return null;
-    const mentionStart = match.index + (match[1] === " " ? 1 : 0);
+    const atIndex = before.lastIndexOf("@");
+    if (atIndex === -1) return null;
+
+    const query = before.slice(atIndex + 1);
+    if (/[\s@]/.test(query)) return null;
+
+    const charBefore = atIndex > 0 ? before[atIndex - 1] : null;
+    const atStart = atIndex === 0;
+    const afterWhitespace = charBefore !== null && /\s/.test(charBefore);
+    const afterAsciiWord = charBefore !== null && /[A-Za-z0-9_]/.test(charBefore);
+    const explicitMention = atStart || afterWhitespace;
+
+    if (afterAsciiWord && looksLikeEmailDomainQuery(query)) {
+        return null;
+    }
+
+    if (!isFileMentionQuery(query, explicitMention)) {
+        return null;
+    }
+
     return {
-        query: match[2],
-        mentionStart,
+        query,
+        mentionStart: atIndex,
         mentionEnd: caret,
     };
+}
+
+/**
+ * @param {{ key?: string, code?: string, shiftKey?: boolean, ctrlKey?: boolean, metaKey?: boolean, altKey?: boolean } | null | undefined} event
+ * @returns {boolean}
+ */
+export function isAtSignKey(event) {
+    if (!event || event.ctrlKey || event.metaKey || event.altKey) return false;
+    if (event.key === "@") return true;
+    if (event.key === "2" && event.shiftKey) return true;
+    if (event.code === "Digit2" && event.shiftKey) return true;
+    return false;
+}
+
+/**
+ * @param {{ mentionStart: number } | null | undefined} atMention
+ * @param {number | null | undefined} manualStart
+ * @returns {boolean}
+ */
+export function isActiveManualAtMention(atMention, manualStart) {
+    if (!atMention || manualStart == null) return false;
+    return manualStart === atMention.mentionStart;
 }
 
 /**
@@ -129,6 +200,8 @@ export function formatAtMentionsForDisplay(text) {
 
 /** @typedef {{ kind: "text", content: string } | { kind: "mention", mentionId: string }} ComposerSegment */
 
+/** @typedef {{ kind: "text", content: string } | { kind: "mention", mentionId: string } | { kind: "file", fileId: string }} ComposerDisplaySegment */
+
 /**
  * @param {string} text
  * @param {Array<{ id: string, insertAt?: number }>} mentions
@@ -166,6 +239,72 @@ export function buildComposerSegments(text, mentions) {
     if (!segments.length) {
         segments.push({ kind: "text", content: "" });
     } else if (segments[segments.length - 1].kind === "mention") {
+        segments.push({ kind: "text", content: "" });
+    }
+
+    return segments;
+}
+
+/**
+ * Merge text, @ mention chips, and dragged file chips in logical caret order.
+ * @param {string} text
+ * @param {Array<{ id: string, insertAt?: number }>} mentions
+ * @param {Array<{ id: string, insertAt?: number }>} files
+ * @returns {ComposerDisplaySegment[]}
+ */
+export function buildComposerDisplaySegments(text, mentions, files) {
+    const value = String(text ?? "");
+    const textLength = value.length;
+    /** @type {Array<{ kind: "mention" | "file", id: string, insertAt: number, attachSeq: number }>} */
+    const items = [];
+    for (const mention of mentions || []) {
+        items.push({
+            kind: "mention",
+            id: mention.id,
+            insertAt: resolveMentionInsertAt(mention, textLength),
+            attachSeq: typeof mention.attachSeq === "number" ? mention.attachSeq : Number.MAX_SAFE_INTEGER,
+        });
+    }
+    for (const file of files || []) {
+        items.push({
+            kind: "file",
+            id: file.id,
+            insertAt: resolveMentionInsertAt(file, textLength),
+            attachSeq: typeof file.attachSeq === "number" ? file.attachSeq : Number.MAX_SAFE_INTEGER,
+        });
+    }
+    items.sort((a, b) => a.insertAt - b.insertAt || a.attachSeq - b.attachSeq);
+
+    /** @type {ComposerDisplaySegment[]} */
+    const segments = [];
+    let cursor = 0;
+    let index = 0;
+
+    while (index < items.length) {
+        const insertAt = items[index].insertAt;
+        if (insertAt > cursor) {
+            segments.push({ kind: "text", content: value.slice(cursor, insertAt) });
+            cursor = insertAt;
+        }
+        const groupAt = insertAt;
+        while (index < items.length && items[index].insertAt === groupAt) {
+            const item = items[index];
+            if (item.kind === "mention") {
+                segments.push({ kind: "mention", mentionId: item.id });
+            } else {
+                segments.push({ kind: "file", fileId: item.id });
+            }
+            index += 1;
+        }
+    }
+
+    if (cursor < textLength) {
+        segments.push({ kind: "text", content: value.slice(cursor) });
+    }
+
+    if (!segments.length) {
+        segments.push({ kind: "text", content: "" });
+    } else if (segments[segments.length - 1].kind !== "text") {
         segments.push({ kind: "text", content: "" });
     }
 
