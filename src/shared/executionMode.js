@@ -12,11 +12,8 @@ export const EXECUTION_MODES = {
 export const EXECUTION_MODE_IDS = Object.keys(EXECUTION_MODES);
 
 export function normalizeExecutionMode(value, fallback = "goal") {
-    if (value === "plan") {
-        return "plan";
+    if (value === "plan" || value === "goal") {
+        return value;
     }
-    if (fallback === "plan") {
-        return "plan";
-    }
-    return "goal";
+    return fallback === "plan" ? "plan" : "goal";
 }
