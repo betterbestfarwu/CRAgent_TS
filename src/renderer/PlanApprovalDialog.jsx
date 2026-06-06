@@ -51,16 +51,7 @@ export function PlanApprovalDialog({
   }, [onClose]);
 
   return (
-    <div
-      className="confirm-overlay"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          event.preventDefault();
-          dismiss(event);
-        }
-      }}
-    >
+    <div className="confirm-overlay" role="presentation">
       <div
         className="confirm-dialog plan-approval-dialog"
         role="dialog"

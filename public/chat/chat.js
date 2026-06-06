@@ -539,7 +539,7 @@
       mermaidModalEl = document.createElement('div');
       mermaidModalEl.className = 'mermaid-modal';
       mermaidModalEl.innerHTML =
-        '<div class="mermaid-modal-backdrop" data-action="close-mermaid-modal"></div>' +
+        '<div class="mermaid-modal-backdrop"></div>' +
         '<div class="mermaid-modal-panel" role="dialog" aria-modal="true">' +
           '<button type="button" class="mermaid-modal-close icon-btn" data-action="close-mermaid-modal" aria-label="关闭">×</button>' +
           '<div class="mermaid-modal-body"></div>' +

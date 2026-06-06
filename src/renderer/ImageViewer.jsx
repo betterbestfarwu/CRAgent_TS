@@ -14,11 +14,7 @@ export function ImageViewer({ src, alt = "图片", onClose }) {
   if (!src) return null;
 
   return (
-    <div
-      className="image-viewer-overlay"
-      role="presentation"
-      onClick={onClose}
-    >
+    <div className="image-viewer-overlay" role="presentation">
       <div
         className="image-viewer-panel"
         role="dialog"

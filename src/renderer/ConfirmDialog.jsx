@@ -22,7 +22,7 @@ export function ConfirmDialog({
   }, [onClose]);
 
   return (
-    <div className="confirm-overlay" role="presentation" onClick={() => onClose(false)}>
+    <div className="confirm-overlay" role="presentation">
       <div
         className="confirm-dialog"
         role="alertdialog"

@@ -175,7 +175,7 @@ function ProviderNameDialog({ title, initialName = "", onClose, onConfirm }) {
   }
 
   return (
-    <div className="confirm-overlay" role="presentation" onClick={onClose}>
+    <div className="confirm-overlay" role="presentation">
       <form
         className="confirm-dialog provider-name-dialog"
         role="dialog"
