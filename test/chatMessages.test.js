@@ -8,6 +8,8 @@ import {
     CONTEXT_DIVIDER_ROLE,
     dedupeConsecutiveContextDividers,
     sessionHasActiveLlmContext,
+    stableUserWireMessage,
+    userImagesWireFingerprint,
 } from "../src/shared/chatMessages.js";
 
 function divider(content) {
@@ -103,6 +105,62 @@ test("appendedMessagesNeedFullRender for standalone assistant notice without run
         { id: "a2", role: "assistant", content: "当前上下文过短，暂无需压缩。" },
     ];
     assert.equal(appendedMessagesNeedFullRender(messages, 2), true);
+});
+
+test("userImagesWireFingerprint ignores transient data_url and image_src", () => {
+    const previous = [
+        {
+            id: "u1",
+            role: "user",
+            images: [
+                {
+                    index: 0,
+                    has_data: true,
+                    image_file: "u1-0.png",
+                    data_url: "data:image/png;base64,AAA",
+                },
+            ],
+        },
+    ];
+    const next = [
+        {
+            id: "u1",
+            role: "user",
+            images: [
+                {
+                    index: 0,
+                    has_data: true,
+                    image_file: "u1-0.png",
+                    image_src: "cragent-session://local/s1/u1-0.png",
+                },
+            ],
+        },
+    ];
+    assert.equal(userImagesWireFingerprint(previous), userImagesWireFingerprint(next));
+});
+
+test("stableUserWireMessage drops transient image payloads", () => {
+    const wire = {
+        id: "u1",
+        role: "user",
+        content: "pic",
+        images: [
+            {
+                index: 0,
+                mime_type: "image/png",
+                has_data: true,
+                image_file: "u1-0.png",
+                data_url: "data:image/png;base64,AAA",
+                image_src: "cragent-session://local/s1/u1-0.png",
+            },
+        ],
+    };
+    assert.deepEqual(stableUserWireMessage(wire), {
+        id: "u1",
+        role: "user",
+        content: "pic",
+        images: [{ index: 0, mime_type: "image/png", has_data: true, image_file: "u1-0.png" }],
+    });
 });
 
 test("collectMessagesUpToTurn keeps only prefix through selected turn", () => {

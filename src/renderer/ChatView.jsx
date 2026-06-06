@@ -4,12 +4,14 @@ import {
   appendedMessagesNeedFullRender,
   dedupeConsecutiveContextDividers,
   getMessageModelId,
+  stableUserWireMessage,
+  userImagesWireFingerprint,
 } from "@shared/chatMessages.js";
 import {
   isPlanRejectionMessage,
   parsePlanRejectionDisplay,
 } from "@shared/planMessages.js";
-import { buildSessionImageUrl } from "@shared/sessionImageUrl.js";
+import { resolveSessionImageWireFields } from "@shared/sessionImageUrl.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
 
 function wireMessageRunId(message) {
@@ -30,18 +32,7 @@ function userImageWireChanged(nextMessages, previousMessages) {
   if (!previousMessages?.length || nextMessages.length !== previousMessages.length) {
     return false;
   }
-  for (let index = 0; index < nextMessages.length; index += 1) {
-    if (nextMessages[index]?.role !== "user") {
-      continue;
-    }
-    if (
-      JSON.stringify(nextMessages[index]?.images ?? null) !==
-      JSON.stringify(previousMessages[index]?.images ?? null)
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return userImagesWireFingerprint(nextMessages) !== userImagesWireFingerprint(previousMessages);
 }
 
 function canPatchActiveRunUpdate(messages, previousMessages) {
@@ -59,7 +50,17 @@ function canPatchActiveRunUpdate(messages, previousMessages) {
   if (nextIndex !== messages.length) return false;
 
   for (let index = 0; index <= userIndex; index += 1) {
-    if (JSON.stringify(messages[index]) !== JSON.stringify(previousMessages[index])) {
+    const nextMessage = messages[index];
+    const previousMessage = previousMessages[index];
+    const nextKey =
+      nextMessage?.role === "user"
+        ? JSON.stringify(stableUserWireMessage(nextMessage))
+        : JSON.stringify(nextMessage);
+    const previousKey =
+      previousMessage?.role === "user"
+        ? JSON.stringify(stableUserWireMessage(previousMessage))
+        : JSON.stringify(previousMessage);
+    if (nextKey !== previousKey) {
       return false;
     }
   }
@@ -91,22 +92,11 @@ function toWireMessage(message, planContext, sessionId) {
           : formatAtMentionsForDisplay(message.content)
       : message.content;
   const images = message.images?.length
-    ? message.images.map((image, index) => {
-        const actualIndex = image.index ?? index;
-        const dataUrl = image.dataUrl || null;
-        const imageSrc =
-          useDirectImageSrc && !dataUrl && image.imageFile && sessionId
-            ? buildSessionImageUrl(sessionId, image.imageFile)
-            : null;
-        return {
-          index: actualIndex,
-          mime_type: image.mimeType || "",
-          has_data: Boolean(image.hasData || image.imageFile || dataUrl),
-          ...(image.imageFile ? { image_file: image.imageFile } : {}),
-          ...(imageSrc ? { image_src: imageSrc } : {}),
-          ...(dataUrl ? { data_url: dataUrl } : {}),
-        };
-      })
+    ? message.images.map((image, index) =>
+        resolveSessionImageWireFields(sessionId, message.id, image, index, {
+          useDirectImageSrc,
+        }),
+      )
     : null;
 
   return {

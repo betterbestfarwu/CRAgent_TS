@@ -51,6 +51,39 @@ export function getMessageRunId(message) {
     return message?.runId ?? message?.run_id ?? null;
 }
 
+/** Stable wire fingerprint for user image metadata (ignores data_url vs image_src churn). */
+export function userImagesWireFingerprint(messages) {
+    return JSON.stringify(
+        (messages || [])
+            .filter((message) => message?.role === "user")
+            .map((message) => ({
+                id: message.id,
+                images: (message.images || []).map((image, index) => ({
+                    i: image?.index ?? index,
+                    h: Boolean(image?.has_data),
+                    f: image?.image_file || "",
+                })),
+            })),
+    );
+}
+
+/** User wire payload for patch checks; drops transient image src payloads. */
+export function stableUserWireMessage(message) {
+    if (!message || message.role !== "user") {
+        return message;
+    }
+    const stable = { ...message };
+    if (stable.images) {
+        stable.images = stable.images.map((image, index) => ({
+            index: image?.index ?? index,
+            mime_type: image?.mime_type || "",
+            has_data: Boolean(image?.has_data),
+            image_file: image?.image_file || "",
+        }));
+    }
+    return stable;
+}
+
 /**
  * True when chat iframe should renderAll instead of patchActiveRun for new tail
  * messages (context dividers; assistant-only hook blocks without a user turn).

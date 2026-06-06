@@ -1178,16 +1178,7 @@
         frame.appendChild(img);
         wrap.appendChild(frame);
         rendered += 1;
-        return;
       }
-      if (!image || !image.has_data) {
-        return;
-      }
-      var placeholder = document.createElement('div');
-      placeholder.className = 'msg-image-placeholder';
-      placeholder.textContent = 'Loading…';
-      wrap.appendChild(placeholder);
-      rendered += 1;
     });
     if (!rendered) return null;
     return wrap;
