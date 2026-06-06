@@ -1,7 +1,6 @@
 @import url("../cursor-theme.css");
 
 :root {
-  --bubble-collapse-max: 320px;
   --chat-gutter-x: 16px;
   --chat-inner-x: 12px;
   --bg: var(--cursor-bg-editor);
@@ -40,6 +39,18 @@ html.session-switch-rendering body,
 html.session-switch-rendering #messages,
 .messages-buffer {
   overflow-anchor: none;
+}
+
+html.session-switch-rendering,
+html.session-switch-rendering body {
+  scrollbar-color: transparent transparent;
+}
+
+html.session-switch-rendering::-webkit-scrollbar-thumb,
+html.session-switch-rendering::-webkit-scrollbar-thumb:hover,
+html.session-switch-rendering body::-webkit-scrollbar-thumb,
+html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
+  background-color: transparent;
 }
 
 /* WebKit scrollbars — transparent track, thin rounded thumb. */
@@ -134,16 +145,6 @@ html.session-switch-rendering #messages,
   min-width: 0;
 }
 
-.bubble-collapse {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-}
-
 .bubble-collapse-body,
 .assistant-turn-content {
   width: 100%;
@@ -161,8 +162,8 @@ html.session-switch-rendering #messages,
 
 .msg-image {
   display: block;
-  max-width: min(240px, 100%);
-  max-height: 180px;
+  width: min(240px, 100%);
+  height: 120px;
   border-radius: 8px;
   object-fit: cover;
   border: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.08));
@@ -183,43 +184,6 @@ html.session-switch-rendering #messages,
 .msg.user .msg-images:last-child,
 .msg.user .msg-text:last-child {
   margin-bottom: 0;
-}
-
-.bubble-collapse:first-child {
-  margin-top: 0;
-}
-
-.bubble-collapse.is-collapsed .bubble-collapse-body {
-  max-height: var(--bubble-collapse-max);
-  overflow-x: auto;
-  overflow-y: hidden;
-  position: relative;
-}
-
-.bubble-collapse.is-collapsed .bubble-collapse-body::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 48px;
-  pointer-events: none;
-  background: linear-gradient(to bottom, transparent, var(--bubble-bg));
-}
-
-.bubble-collapse-toggle {
-  align-self: flex-start;
-  border: 0;
-  background: transparent;
-  color: var(--link);
-  font-size: var(--cursor-font-size-sm);
-  line-height: var(--cursor-line-height-tight);
-  padding: 2px 0;
-  cursor: pointer;
-}
-
-.bubble-collapse-toggle:hover {
-  text-decoration: underline;
 }
 
 .msg.user .bubble,
