@@ -319,6 +319,10 @@ export function installWebBridge() {
       return { ok: false, error: "Web 演示模式暂不支持打开本地项目文件夹。" };
     },
 
+    async openSessionDirectory() {
+      return { ok: false, error: "Web 演示模式暂不支持打开本地会话文件夹。" };
+    },
+
     async listProjectDirectory() {
       return { relativePath: "", entries: [] };
     },

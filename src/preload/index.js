@@ -51,6 +51,8 @@ const api = {
         ipcRenderer.invoke(IPC_CHANNELS.getSessionContextDetail, sessionId),
     newSession: (args) => invokeUiSession(IPC_CHANNELS.newSession, args),
     deleteSession: (sessionId) => invokeUiSession(IPC_CHANNELS.deleteSession, sessionId),
+    openSessionDirectory: (sessionId) =>
+        ipcRenderer.invoke(IPC_CHANNELS.openSessionDirectory, sessionId),
     deleteMessages: (args) => invokeUiSession(IPC_CHANNELS.deleteMessages, args),
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),
     exitPlanMode: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.exitPlanMode, sessionId),
@@ -58,6 +60,7 @@ const api = {
     readPlanContent: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.readPlanContent, sessionId),
     cancelRun: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.cancelRun, sessionId),
     removeQueuedMessage: (args) => ipcRenderer.invoke(IPC_CHANNELS.removeQueuedMessage, args),
+    reorderQueuedMessages: (args) => ipcRenderer.invoke(IPC_CHANNELS.reorderQueuedMessages, args),
     updateAuthMode: (args) => invokeUiSession(IPC_CHANNELS.updateAuthMode, args),
     updateExecutionMode: (args) => invokeUiSession(IPC_CHANNELS.updateExecutionMode, args),
     updateSessionProject: (args) => invokeUiSession(IPC_CHANNELS.updateSessionProject, args),

@@ -71,6 +71,7 @@ import {
 import { formatModelRef, parseModelRef } from "@shared/modelRef.js";
 import { filterVisibleTodoRuns, msUntilTodoRunsHide } from "@shared/todoRunsDisplay.js";
 import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
+import { mergePreservedMessageImages } from "@shared/sessionForUi.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 
 const COMPOSER_LINE_HEIGHT = 24;
@@ -478,6 +479,9 @@ export function App() {
     const offMessage = window.cragent.onMessageAppended(({ sessionId, message }) => {
       setCurrentSession((prev) => {
         if (!prev || prev.meta.id !== sessionId) return prev;
+        if (prev.messages.some((item) => item.id === message.id)) {
+          return prev;
+        }
         const messages = [...prev.messages, message];
         return {
           ...prev,
@@ -522,7 +526,10 @@ export function App() {
           ) {
             return prev;
           }
-          return session;
+          return {
+            ...session,
+            messages: mergePreservedMessageImages(prev?.messages, session.messages),
+          };
         });
         // Keep Settings open when the current session refreshes in the background.
         if (shouldAutoSwitchToChatPage(pageRef.current, isViewing)) {
@@ -1463,6 +1470,29 @@ export function App() {
     });
   }
 
+  function reorderQueuedMessages(fromIndex, toIndex) {
+    if (!currentSession || fromIndex === toIndex) return;
+    setMessageQueue((prev) => {
+      if (
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= prev.length ||
+        toIndex >= prev.length
+      ) {
+        return prev;
+      }
+      const next = [...prev];
+      const [item] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, item);
+      return next;
+    });
+    void window.cragent.reorderQueuedMessages?.({
+      sessionId: currentSession.meta.id,
+      fromIndex,
+      toIndex,
+    });
+  }
+
   async function handleNewChat(projectId) {
     if (newChatInFlightRef.current) return;
     newChatInFlightRef.current = true;
@@ -1942,6 +1972,7 @@ export function App() {
                     open={queuePanelOpen}
                     onToggle={() => setQueuePanelOpen((prev) => !prev)}
                     onRemove={removeQueuedMessage}
+                    onReorder={reorderQueuedMessages}
                   />
                 ) : null}
                 {pendingImages.length ? (

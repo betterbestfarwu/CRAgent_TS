@@ -32,6 +32,7 @@ import fs from "node:fs";
 import { normalizeAuthMode } from "@shared/authMode.js";
 import { listProjectDirectory } from "./projectBrowse.js";
 import { getFileIconsAsDataUrls } from "./fileIcons.js";
+import { legacySessionFile, metaFile, sessionDir } from "./sessionStorage.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
 /** Packaged builds must always load bundled renderer, even if shell env has NODE_ENV=development. */
@@ -271,6 +272,22 @@ function registerIpc() {
             }),
         );
     });
+    ipcMain.handle(IPC_CHANNELS.openSessionDirectory, async (_event, sessionId) => {
+        const id = String(sessionId || "").trim();
+        if (!id) {
+            throw new Error("缺少 sessionId");
+        }
+        const sessionsDir = sessionStore.locateSessionStorage(id);
+        const metaPath = metaFile(sessionsDir, id);
+        const legacyPath = legacySessionFile(sessionsDir, id);
+        const revealPath = fs.existsSync(metaPath)
+            ? metaPath
+            : fs.existsSync(legacyPath)
+              ? legacyPath
+              : sessionDir(sessionsDir, id);
+        shell.showItemInFolder(revealPath);
+        return { ok: true, directoryPath: sessionDir(sessionsDir, id) };
+    });
     ipcMain.handle(IPC_CHANNELS.deleteMessages, (_event, args) => {
         const session = sessionStore.removeMessages(args.sessionId, args.messageIds);
         mainWindow?.webContents.send(
@@ -334,6 +351,9 @@ function registerIpc() {
     });
     ipcMain.handle(IPC_CHANNELS.removeQueuedMessage, (_event, args) =>
         runtime.removeQueuedMessage(args.sessionId, args.messageId),
+    );
+    ipcMain.handle(IPC_CHANNELS.reorderQueuedMessages, (_event, args) =>
+        runtime.reorderQueuedMessages(args.sessionId, args.fromIndex, args.toIndex),
     );
     ipcMain.handle(IPC_CHANNELS.updateAuthMode, (_event, args) => {
         const session = sessionStore.updateAuthMode(args.sessionId, args.authMode);

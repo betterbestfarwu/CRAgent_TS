@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { readSessionMetaFromFile } from "../src/main/sessionMeta.js";
 import { ipcPayloadForRenderer } from "../src/main/rendererSession.js";
-import { stripMessageImagesForUi, stripSessionImagesForUi } from "../src/shared/sessionForUi.js";
+import { stripMessageImagesForUi, stripSessionImagesForUi, mergePreservedMessageImages } from "../src/shared/sessionForUi.js";
 import { IPC_CHANNELS } from "../src/shared/ipc.js";
 
 describe("stripSessionImagesForUi", () => {
@@ -74,6 +74,30 @@ describe("stripMessageImagesForUi", () => {
         const stripped = stripMessageImagesForUi(message, { preserveDataUrl: true });
         assert.equal(stripped.images[0].hasData, true);
         assert.equal(stripped.images[0].dataUrl, "data:image/png;base64,BBBB");
+    });
+});
+
+describe("mergePreservedMessageImages", () => {
+    it("keeps preview dataUrl when a session refresh strips image payloads", () => {
+        const prevMessages = [
+            {
+                id: "m1",
+                role: "user",
+                content: "pic",
+                images: [{ index: 0, mimeType: "image/png", hasData: true, dataUrl: "data:image/png;base64,AAAA" }],
+            },
+        ];
+        const nextMessages = [
+            {
+                id: "m1",
+                role: "user",
+                content: "pic",
+                images: [{ index: 0, mimeType: "image/png", hasData: true }],
+            },
+        ];
+
+        const merged = mergePreservedMessageImages(prevMessages, nextMessages);
+        assert.equal(merged[0].images[0].dataUrl, "data:image/png;base64,AAAA");
     });
 });
 

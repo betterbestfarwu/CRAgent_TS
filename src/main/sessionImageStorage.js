@@ -18,17 +18,22 @@ function legacyGlobalImagesDir(sessionsDir, sessionId) {
     return path.join(sessionsDir, "_images", sessionId);
 }
 
-function resolveImagesDir(sessionsDir, sessionId) {
-    for (const dir of [
+function candidateImageDirs(sessionsDir, sessionId) {
+    return [
         imagesDir(sessionsDir, sessionId),
         legacySplitImagesDir(sessionsDir, sessionId),
         legacyGlobalImagesDir(sessionsDir, sessionId),
-    ]) {
-        if (fs.existsSync(dir)) {
-            return dir;
+    ];
+}
+
+function resolveImageFilePath(sessionsDir, sessionId, imageFile) {
+    for (const dir of candidateImageDirs(sessionsDir, sessionId)) {
+        const filePath = path.join(dir, imageFile);
+        if (fs.existsSync(filePath)) {
+            return filePath;
         }
     }
-    return imagesDir(sessionsDir, sessionId);
+    return null;
 }
 
 function extForMime(mimeType) {
@@ -118,7 +123,6 @@ export function hydrateSessionImages(session, sessionsDir) {
     }
 
     const sessionId = session.meta.id;
-    const dir = resolveImagesDir(sessionsDir, sessionId);
     let changed = false;
 
     const messages = session.messages.map((message) => {
@@ -131,8 +135,8 @@ export function hydrateSessionImages(session, sessionsDir) {
             if (image?.dataUrl || !image?.imageFile) {
                 return image;
             }
-            const filePath = path.join(dir, image.imageFile);
-            if (!fs.existsSync(filePath)) {
+            const filePath = resolveImageFilePath(sessionsDir, sessionId, image.imageFile);
+            if (!filePath) {
                 return image;
             }
             const mimeType = image.mimeType || "image/png";
@@ -152,11 +156,7 @@ export function deleteSessionImages(sessionId, sessionsDir) {
     if (!sessionId || !sessionsDir) {
         return;
     }
-    for (const dir of [
-        imagesDir(sessionsDir, sessionId),
-        legacySplitImagesDir(sessionsDir, sessionId),
-        legacyGlobalImagesDir(sessionsDir, sessionId),
-    ]) {
+    for (const dir of candidateImageDirs(sessionsDir, sessionId)) {
         if (fs.existsSync(dir)) {
             fs.rmSync(dir, { recursive: true, force: true });
         }

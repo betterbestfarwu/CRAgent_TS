@@ -80,6 +80,37 @@ describe("sessionImageStorage", () => {
         assert.equal(hydrated.messages[0].images[0].dataUrl, "data:image/png;base64,QUJD");
     });
 
+    it("hydrates images even when a newer session _images directory also exists", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-img-mixed-"));
+        const legacyDir = path.join(dir, "_images", "session-mixed");
+        const newDir = path.join(sessionDir(dir, "session-mixed"), "_images");
+        fs.mkdirSync(legacyDir, { recursive: true });
+        fs.mkdirSync(newDir, { recursive: true });
+        fs.writeFileSync(path.join(legacyDir, "msg-old-0.png"), Buffer.from("OLD"));
+        fs.writeFileSync(path.join(newDir, "msg-new-0.png"), Buffer.from("NEW"));
+        const session = {
+            meta: { id: "session-mixed" },
+            messages: [
+                {
+                    id: "msg-old",
+                    role: "user",
+                    content: "old",
+                    images: [{ mimeType: "image/png", imageFile: "msg-old-0.png" }],
+                },
+                {
+                    id: "msg-new",
+                    role: "user",
+                    content: "new",
+                    images: [{ mimeType: "image/png", imageFile: "msg-new-0.png" }],
+                },
+            ],
+        };
+
+        const hydrated = hydrateSessionImages(session, dir);
+        assert.equal(hydrated.messages[0].images[0].dataUrl, "data:image/png;base64,T0xE");
+        assert.equal(hydrated.messages[1].images[0].dataUrl, "data:image/png;base64,TkVX");
+    });
+
     it("hydrates images from legacy split _Images storage", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-img-split-legacy-"));
         const legacyDir = path.join(sessionDir(dir, "session-split-legacy"), "_Images");

@@ -468,6 +468,23 @@ export class AgentRuntime {
         this.emit(IPC_CHANNELS.onQueueChanged, { sessionId, queue: [...queue] });
     }
 
+    reorderQueuedMessages(sessionId, fromIndex, toIndex) {
+        const queue = this.pendingQueues.get(sessionId) || [];
+        if (
+            fromIndex < 0 ||
+            toIndex < 0 ||
+            fromIndex >= queue.length ||
+            toIndex >= queue.length ||
+            fromIndex === toIndex
+        ) {
+            return;
+        }
+        const [item] = queue.splice(fromIndex, 1);
+        queue.splice(toIndex, 0, item);
+        this.pendingQueues.set(sessionId, queue);
+        this.emit(IPC_CHANNELS.onQueueChanged, { sessionId, queue: [...queue] });
+    }
+
     cancelRun(sessionId) {
         this.cancelledRuns.add(sessionId);
         this.abortControllers.get(sessionId)?.abort();

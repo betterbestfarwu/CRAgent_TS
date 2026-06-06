@@ -15,6 +15,16 @@ const ICON_TRASH = (
   </svg>
 );
 
+const ICON_SHARE = (
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+    <circle cx="18" cy="5" r="3" />
+    <circle cx="6" cy="12" r="3" />
+    <circle cx="18" cy="19" r="3" />
+    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+  </svg>
+);
+
 const ICON_SEARCH = (
   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
     <circle cx="11" cy="11" r="7" />
@@ -271,18 +281,32 @@ function SessionRow({ meta, active, busy, unread, forceActionButtons, onSelect, 
           <span className="session-title">{displayTitle(meta)}</span>
         </button>
         {showActions ? (
-          <button
-            type="button"
-            className="session-delete"
-            title="删除会话"
-            aria-label="删除会话"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(meta);
-            }}
-          >
-            {ICON_TRASH}
-          </button>
+          <div className="session-row-actions">
+            <button
+              type="button"
+              className="session-share"
+              title="在 Finder 中显示会话"
+              aria-label="在 Finder 中显示会话"
+              onClick={(e) => {
+                e.stopPropagation();
+                void window.cragent?.openSessionDirectory?.(meta.id);
+              }}
+            >
+              {ICON_SHARE}
+            </button>
+            <button
+              type="button"
+              className="session-delete"
+              title="删除会话"
+              aria-label="删除会话"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(meta);
+              }}
+            >
+              {ICON_TRASH}
+            </button>
+          </div>
         ) : null}
       </div>
     </div>

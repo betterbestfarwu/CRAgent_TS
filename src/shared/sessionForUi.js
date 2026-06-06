@@ -53,6 +53,72 @@ export function stripMessageImagesForUi(message, options = {}) {
     return changed ? next : message;
 }
 
+export function messageImageKey(messageId, image, index) {
+    return `${messageId}:${image?.index ?? index}`;
+}
+
+/** Keep inline image previews when a session refresh strips dataUrl payloads. */
+export function mergePreservedMessageImages(prevMessages, nextMessages) {
+    if (!nextMessages?.length) {
+        return nextMessages || [];
+    }
+    if (!prevMessages?.length) {
+        return nextMessages;
+    }
+
+    const dataUrlByKey = new Map();
+    for (const message of prevMessages) {
+        if (!message?.id || !message.images?.length) {
+            continue;
+        }
+        message.images.forEach((image, index) => {
+            if (!image?.dataUrl) {
+                return;
+            }
+            dataUrlByKey.set(messageImageKey(message.id, image, index), {
+                dataUrl: image.dataUrl,
+                mimeType: image.mimeType,
+            });
+        });
+    }
+
+    if (!dataUrlByKey.size) {
+        return nextMessages;
+    }
+
+    let changed = false;
+    const messages = nextMessages.map((message) => {
+        if (!message?.id || !message.images?.length) {
+            return message;
+        }
+
+        let messageChanged = false;
+        const images = message.images.map((image, index) => {
+            if (image?.dataUrl) {
+                return image;
+            }
+            const preserved = dataUrlByKey.get(messageImageKey(message.id, image, index));
+            if (!preserved) {
+                return image;
+            }
+            messageChanged = true;
+            return {
+                ...image,
+                dataUrl: preserved.dataUrl,
+                ...(image.mimeType ? {} : { mimeType: preserved.mimeType }),
+            };
+        });
+
+        if (!messageChanged) {
+            return message;
+        }
+        changed = true;
+        return { ...message, images };
+    });
+
+    return changed ? messages : nextMessages;
+}
+
 export function stripSessionImagesForUi(session) {
     if (!session?.messages?.length) {
         return session;

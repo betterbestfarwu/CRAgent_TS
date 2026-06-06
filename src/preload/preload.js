@@ -48,6 +48,8 @@ const api = {
         ipcRenderer.invoke(IPC_CHANNELS.getSessionContextDetail, sessionId),
     newSession: (args) => invokeUiSession(IPC_CHANNELS.newSession, args),
     deleteSession: (sessionId) => invokeUiSession(IPC_CHANNELS.deleteSession, sessionId),
+    openSessionDirectory: (sessionId) =>
+        ipcRenderer.invoke(IPC_CHANNELS.openSessionDirectory, sessionId),
     deleteMessages: (args) => invokeUiSession(IPC_CHANNELS.deleteMessages, args),
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),
     exitPlanMode: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.exitPlanMode, sessionId),
