@@ -4,9 +4,23 @@ import {
     extractInlineImagePayloads,
     hasInlineImagePayloads,
 } from "@shared/imagePayloads.js";
+import { sessionDir } from "./sessionStorage.js";
 
 function imagesDir(sessionsDir, sessionId) {
+    return path.join(sessionDir(sessionsDir, sessionId), "_Images");
+}
+
+function legacyImagesDir(sessionsDir, sessionId) {
     return path.join(sessionsDir, "_images", sessionId);
+}
+
+function resolveImagesDir(sessionsDir, sessionId) {
+    const next = imagesDir(sessionsDir, sessionId);
+    if (fs.existsSync(next)) {
+        return next;
+    }
+    const legacy = legacyImagesDir(sessionsDir, sessionId);
+    return fs.existsSync(legacy) ? legacy : next;
 }
 
 function extForMime(mimeType) {
@@ -96,7 +110,7 @@ export function hydrateSessionImages(session, sessionsDir) {
     }
 
     const sessionId = session.meta.id;
-    const dir = imagesDir(sessionsDir, sessionId);
+    const dir = resolveImagesDir(sessionsDir, sessionId);
     let changed = false;
 
     const messages = session.messages.map((message) => {
@@ -130,8 +144,9 @@ export function deleteSessionImages(sessionId, sessionsDir) {
     if (!sessionId || !sessionsDir) {
         return;
     }
-    const dir = imagesDir(sessionsDir, sessionId);
-    if (fs.existsSync(dir)) {
-        fs.rmSync(dir, { recursive: true, force: true });
+    for (const dir of [imagesDir(sessionsDir, sessionId), legacyImagesDir(sessionsDir, sessionId)]) {
+        if (fs.existsSync(dir)) {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
     }
 }

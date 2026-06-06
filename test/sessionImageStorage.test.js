@@ -9,7 +9,7 @@ import {
     sessionHasInlineImages,
 } from "../src/main/sessionImageStorage.js";
 import { SessionStore } from "../src/main/sessionStore.js";
-import { messagesFile, metaFile } from "../src/main/sessionStorage.js";
+import { messagesFile, metaFile, sessionDir } from "../src/main/sessionStorage.js";
 
 describe("sessionImageStorage", () => {
     it("externalizes inline images to disk and removes dataUrl from session", () => {
@@ -29,6 +29,10 @@ describe("sessionImageStorage", () => {
         const externalized = externalizeSessionImages(session, dir);
         assert.equal(sessionHasInlineImages(externalized), false);
         assert.match(externalized.messages[0].images[0].imageFile || "", /^msg-1-0\.png$/);
+        assert.equal(
+            fs.existsSync(path.join(sessionDir(dir, "session-1"), "_Images", "msg-1-0.png")),
+            true,
+        );
 
         const hydrated = hydrateSessionImages(externalized, dir);
         assert.equal(hydrated.messages[0].images[0].dataUrl, "data:image/png;base64,QUJD");
@@ -52,6 +56,27 @@ describe("sessionImageStorage", () => {
         assert.match(externalized.messages[0].images[0].imageFile || "", /^msg-2-0\.png$/);
 
         const hydrated = hydrateSessionImages(externalized, dir);
+        assert.equal(hydrated.messages[0].images[0].dataUrl, "data:image/png;base64,QUJD");
+    });
+
+    it("hydrates images from legacy global _images storage", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-img-legacy-"));
+        const legacyDir = path.join(dir, "_images", "session-legacy");
+        fs.mkdirSync(legacyDir, { recursive: true });
+        fs.writeFileSync(path.join(legacyDir, "msg-1-0.png"), Buffer.from("ABC"));
+        const session = {
+            meta: { id: "session-legacy" },
+            messages: [
+                {
+                    id: "msg-1",
+                    role: "user",
+                    content: "pic",
+                    images: [{ mimeType: "image/png", imageFile: "msg-1-0.png" }],
+                },
+            ],
+        };
+
+        const hydrated = hydrateSessionImages(session, dir);
         assert.equal(hydrated.messages[0].images[0].dataUrl, "data:image/png;base64,QUJD");
     });
 });

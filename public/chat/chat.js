@@ -626,7 +626,7 @@
   var COLLAPSED_MAX_HEIGHT = 320;
 
   function messageExpandStateStorageKey() {
-    return 'cragent:message-expanded:' + (currentSessionId || 'default');
+    return 'cragent:message-expanded:v2:' + (currentSessionId || 'default');
   }
 
   function loadMessageExpandState() {
@@ -696,18 +696,6 @@
     setBubbleCollapseExpanded(last.querySelector('.bubble-collapse'), shouldExpandMessageContent(last));
   }
 
-  function captureMessageExpandState(root) {
-    var scope = root || container;
-    if (!scope || !scope.querySelectorAll) return;
-    scope.querySelectorAll('.bubble-collapse').forEach(function (wrap) {
-      var msgEl = wrap.closest('.msg');
-      var key = messageContentKey(msgEl);
-      if (!key) return;
-      messageExpandState[key] = !wrap.classList.contains('is-collapsed');
-    });
-    saveMessageExpandState();
-  }
-
   function setupCollapsibleContent(contentEl) {
     if (!contentEl) return;
 
@@ -752,7 +740,7 @@
 
   function hasVisibleAssistantContent(msg) {
     if (!msg || msg.role !== 'assistant') return false;
-    return String(msg.content || '').trim().length > 0;
+    return String(msg.content || '').trim().length > 0 || Boolean(msg.images && msg.images.length);
   }
 
   function thinkingStateStorageKey() {
@@ -801,21 +789,6 @@
     } else {
       delete thinkingOpenState[key];
     }
-    saveThinkingOpenState();
-  }
-
-  function captureThinkingOpenState(root) {
-    var scope = root || container;
-    if (!scope || !scope.querySelectorAll) return;
-    scope.querySelectorAll('details.thinking-group, details.thinking-step').forEach(function (el) {
-      var key = el.dataset.thinkingKey;
-      if (!key) return;
-      if (el.open) {
-        thinkingOpenState[key] = true;
-      } else {
-        delete thinkingOpenState[key];
-      }
-    });
     saveThinkingOpenState();
   }
 
@@ -1359,6 +1332,11 @@
   function afterRenderScroll(wasNearBottom, prevScrollTop, prevScrollHeight) {
     requestAnimationFrame(function () {
       restoreScrollAfterRender(wasNearBottom, prevScrollTop, prevScrollHeight);
+      if (wasNearBottom) {
+        requestAnimationFrame(function () {
+          restoreScrollAfterRender(true, prevScrollTop, prevScrollHeight);
+        });
+      }
     });
   }
 
@@ -1395,8 +1373,6 @@
     var thinking = buildRunThinking(split.thinkingMessages);
     var bubble = turn.querySelector('.bubble');
     if (!bubble) return;
-
-    captureThinkingOpenState(turn);
 
     var thinkingScopeId = resolveThinkingScopeId(runId, thinking.ids);
     bubble.innerHTML = renderTodoBlockHtml(runId) + renderThinkingBlockHtml(thinking, thinkingScopeId);
@@ -1453,7 +1429,6 @@
     planPreviewTarget = findPlanPreviewTarget(messages);
     todoRunsById = (payload && payload.todoRuns) || {};
     var anchor = captureScrollAnchor();
-    captureMessageExpandState(container);
     var userIndex = findLastActiveRunUserIndex(messages);
     if (userIndex < 0) {
       renderMessageList(payload);
@@ -1471,7 +1446,6 @@
 
     var split = splitRunMessages(collected.runMessages);
     if (split.finalReply) {
-      captureThinkingOpenState(turn);
       var thinking = buildRunThinking(split.thinkingMessages);
       var nextTurn = buildAssistantTurn({
         thinking: thinking,
@@ -1496,8 +1470,6 @@
   function renderMessageList(payload) {
     disconnectLazyMermaid();
     batchPostProcess = true;
-    captureThinkingOpenState(container);
-    captureMessageExpandState(container);
     container.innerHTML = '';
     var messages = Array.isArray(payload) ? payload : (payload && payload.messages) || [];
     todoRunsById = (!Array.isArray(payload) && payload && payload.todoRuns) || {};
@@ -1635,8 +1607,6 @@
     setSessionId: function (sessionId) {
       var nextId = sessionId ? String(sessionId) : '';
       if (nextId === currentSessionId) return;
-      captureThinkingOpenState(container);
-      captureMessageExpandState(container);
       disconnectLazyMermaid();
       container.innerHTML = '';
       currentSessionId = nextId;

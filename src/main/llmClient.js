@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { isContextOverflowError, isRetryableLlmError } from "./modelFallback.js";
-import { stripInlineImagePayloads } from "@shared/imagePayloads.js";
+import {
+    extractInlineImagePayloads,
+    stripInlineImagePayloads,
+} from "@shared/imagePayloads.js";
 
 function createLlmHttpError(status, bodyText) {
     const error = new Error(`模型请求失败: ${status} ${bodyText.slice(0, 200)}`);
@@ -33,6 +36,115 @@ export function messagesToApiPayloads(messages) {
         }
     }
     return payloads;
+}
+
+function normalizeDataUrlImage(url, mimeType = "image/png") {
+    if (typeof url !== "string") {
+        return null;
+    }
+    const trimmed = url.trim();
+    if (!trimmed) {
+        return null;
+    }
+    if (trimmed.startsWith("data:image/")) {
+        const match = /^data:([^;]+);/i.exec(trimmed);
+        return {
+            mimeType: match?.[1] || mimeType,
+            dataUrl: trimmed,
+        };
+    }
+    return null;
+}
+
+function imageFromBlock(block) {
+    if (!block || typeof block !== "object") {
+        return null;
+    }
+
+    const directUrl = normalizeDataUrlImage(
+        block.image_url?.url || block.url || block.dataUrl,
+        block.mimeType || block.mime_type,
+    );
+    if (directUrl) {
+        return directUrl;
+    }
+
+    const mimeType =
+        block.mimeType ||
+        block.mime_type ||
+        block.inline_data?.mime_type ||
+        block.source?.media_type ||
+        "image/png";
+    const encoded =
+        block.data ||
+        block.b64_json ||
+        block.image_base64 ||
+        block.base64_image ||
+        block.inline_data?.data ||
+        block.source?.data;
+    if (typeof encoded === "string" && encoded.trim()) {
+        return {
+            mimeType,
+            dataUrl: `data:${mimeType};base64,${encoded.replace(/\s/g, "")}`,
+        };
+    }
+
+    return null;
+}
+
+export function parseAssistantContent(content) {
+    if (typeof content === "string") {
+        const extracted = extractInlineImagePayloads(content);
+        return {
+            content: extracted.text,
+            images: extracted.images.length ? extracted.images : undefined,
+        };
+    }
+
+    const blocks = Array.isArray(content)
+        ? content
+        : Array.isArray(content?.parts)
+          ? content.parts
+          : content
+            ? [content]
+            : [];
+    const parts = [];
+    const images = [];
+
+    for (const block of blocks) {
+        if (typeof block === "string") {
+            const extracted = extractInlineImagePayloads(block);
+            if (extracted.text) {
+                parts.push(extracted.text);
+            }
+            if (extracted.images.length) {
+                images.push(...extracted.images);
+            }
+            continue;
+        }
+        if (!block || typeof block !== "object") {
+            continue;
+        }
+        const text = block.text ?? block.content ?? block.output_text;
+        if (typeof text === "string" && text.trim()) {
+            const extracted = extractInlineImagePayloads(text);
+            if (extracted.text) {
+                parts.push(extracted.text);
+            }
+            if (extracted.images.length) {
+                images.push(...extracted.images);
+            }
+        }
+        const image = imageFromBlock(block);
+        if (image) {
+            images.push(image);
+        }
+    }
+
+    return {
+        content: parts.join("\n").trim(),
+        images: images.length ? images : undefined,
+    };
 }
 
 function messageToApiPayload(message) {
@@ -177,10 +289,16 @@ export class LlmClient {
 
         const data = await response.json();
         const choice = data.choices?.[0]?.message;
+        const parsed = parseAssistantContent(choice?.content);
         const usage = extractTokenUsage(data);
         this.reportTokenUsage(model, usage);
         return {
-            message: this.assistantMessage(choice?.content || "", undefined, model.modelId),
+            message: this.assistantMessage(
+                parsed.content,
+                undefined,
+                model.modelId,
+                parsed.images,
+            ),
             usage,
         };
     }
@@ -265,6 +383,7 @@ export class LlmClient {
 
         const data = await response.json();
         const choice = data.choices?.[0]?.message;
+        const parsed = parseAssistantContent(choice?.content);
         const toolCalls = choice?.tool_calls?.map((call) => ({
             id: call.id,
             type: call.type || "function",
@@ -277,7 +396,12 @@ export class LlmClient {
         this.reportTokenUsage(model, usage);
 
         return {
-            message: this.assistantMessage(choice?.content || "", toolCalls, model.modelId),
+            message: this.assistantMessage(
+                parsed.content,
+                toolCalls,
+                model.modelId,
+                parsed.images,
+            ),
             usage,
         };
     }
@@ -328,7 +452,7 @@ export class LlmClient {
         };
     }
 
-    assistantMessage(content, toolCalls, modelId) {
+    assistantMessage(content, toolCalls, modelId, images) {
         return {
             id: randomUUID(),
             role: "assistant",
@@ -336,6 +460,7 @@ export class LlmClient {
             createdAt: new Date().toISOString(),
             ...(modelId ? { modelId } : {}),
             ...(toolCalls?.length ? { toolCalls } : {}),
+            ...(images?.length ? { images } : {}),
         };
     }
 }

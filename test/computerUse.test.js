@@ -5,7 +5,7 @@ import {
     normalizeToolResult,
     toolResultContent,
 } from "../src/shared/toolResult.js";
-import { messagesToApiPayloads } from "../src/main/llmClient.js";
+import { messagesToApiPayloads, parseAssistantContent } from "../src/main/llmClient.js";
 import { shouldRequireToolConfirmation } from "../src/main/authPolicy.js";
 import { ToolRegistry } from "../src/main/toolRegistry.js";
 import { createComputerUseTools } from "../src/main/tools/computerUseTools.js";
@@ -126,6 +126,38 @@ describe("llmClient messagesToApiPayloads", () => {
 
         assert.doesNotMatch(payloads[0].content, /AAAA/);
         assert.match(payloads[0].content, /\[image payload omitted: image\/png/);
+    });
+});
+
+describe("llmClient parseAssistantContent", () => {
+    it("extracts assistant image blocks from multimodal content arrays", () => {
+        const parsed = parseAssistantContent([
+            { type: "text", text: "Here is the render" },
+            {
+                type: "image_url",
+                image_url: { url: "data:image/png;base64,QUJD" },
+            },
+        ]);
+
+        assert.equal(parsed.content, "Here is the render");
+        assert.deepEqual(parsed.images, [
+            { mimeType: "image/png", dataUrl: "data:image/png;base64,QUJD" },
+        ]);
+    });
+
+    it("supports image-only assistant replies", () => {
+        const parsed = parseAssistantContent([
+            {
+                type: "image",
+                mimeType: "image/png",
+                data: "QUJD",
+            },
+        ]);
+
+        assert.equal(parsed.content, "");
+        assert.deepEqual(parsed.images, [
+            { mimeType: "image/png", dataUrl: "data:image/png;base64,QUJD" },
+        ]);
     });
 });
 

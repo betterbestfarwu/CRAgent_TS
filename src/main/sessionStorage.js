@@ -305,15 +305,21 @@ export function moveSessionStorage(fromDir, toDir, sessionId) {
         }
         fs.renameSync(fromLegacy, toLegacy);
     }
-    const fromImages = path.join(fromDir, "_images", sessionId);
-    if (fs.existsSync(fromImages)) {
-        const imagesRoot = path.join(toDir, "_images");
-        fs.mkdirSync(imagesRoot, { recursive: true });
-        const toImages = path.join(imagesRoot, sessionId);
-        if (fs.existsSync(toImages)) {
-            fs.rmSync(toImages, { recursive: true, force: true });
+    const fromSplitImages = path.join(fromSplit, "_Images");
+    const toSplitImages = path.join(toSplit, "_Images");
+    if (fs.existsSync(fromSplitImages)) {
+        if (fs.existsSync(toSplitImages)) {
+            fs.rmSync(toSplitImages, { recursive: true, force: true });
         }
-        fs.renameSync(fromImages, toImages);
+        fs.renameSync(fromSplitImages, toSplitImages);
+    }
+    const fromLegacyImages = path.join(fromDir, "_images", sessionId);
+    if (fs.existsSync(fromLegacyImages)) {
+        fs.mkdirSync(toSplit, { recursive: true });
+        if (fs.existsSync(toSplitImages)) {
+            fs.rmSync(toSplitImages, { recursive: true, force: true });
+        }
+        fs.renameSync(fromLegacyImages, toSplitImages);
     }
 }
 
