@@ -27,6 +27,7 @@
   var currentSessionId = '';
   var currentSessionModelId = '';
   var pendingSessionSwitch = false;
+  var sessionSwitchRenderToken = 0;
   var thinkingOpenState = {};
   var messageExpandState = {};
   var planContext = { active: false };
@@ -688,7 +689,8 @@
   }
 
   function applyDefaultExpandToLastMessage() {
-    var allMsgs = container.querySelectorAll('.msg');
+    var root = arguments.length > 0 && arguments[0] ? arguments[0] : container;
+    var allMsgs = root.querySelectorAll('.msg');
     allMsgs.forEach(function (el) {
       delete el.dataset.expandContent;
     });
@@ -1387,7 +1389,17 @@
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
   }
 
-  function stabilizeSessionSwitchScroll() {
+  function afterAnimationFrames(count, fn) {
+    if (count <= 0) {
+      fn();
+      return;
+    }
+    requestAnimationFrame(function () {
+      afterAnimationFrames(count - 1, fn);
+    });
+  }
+
+  function stabilizeSessionSwitchScroll(onComplete) {
     document.documentElement.classList.add('session-switch-rendering');
     scrollToBottomImmediate();
     requestAnimationFrame(function () {
@@ -1395,8 +1407,32 @@
       requestAnimationFrame(function () {
         scrollToBottomImmediate();
         document.documentElement.classList.remove('session-switch-rendering');
+        if (onComplete) onComplete();
       });
     });
+  }
+
+  function createSessionSwitchBuffer() {
+    var next = document.createElement('div');
+    next.className = 'messages-buffer session-switch-buffer';
+    next.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(next);
+    return next;
+  }
+
+  function commitSessionSwitchBuffer(buffer, token) {
+    if (!buffer) return;
+    if (token !== sessionSwitchRenderToken) {
+      buffer.remove();
+      return;
+    }
+    var fragment = document.createDocumentFragment();
+    while (buffer.firstChild) {
+      fragment.appendChild(buffer.firstChild);
+    }
+    container.replaceChildren(fragment);
+    buffer.remove();
+    stabilizeSessionSwitchScroll();
   }
 
   function captureScrollAnchor() {
@@ -1526,10 +1562,11 @@
     afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
   }
 
-  function renderMessageList(payload, onPostProcessComplete) {
+  function renderMessageList(payload, onPostProcessComplete, targetContainer) {
+    var target = targetContainer || container;
     disconnectLazyMermaid();
     batchPostProcess = true;
-    container.innerHTML = '';
+    target.innerHTML = '';
     var messages = Array.isArray(payload) ? payload : (payload && payload.messages) || [];
     todoRunsById = (!Array.isArray(payload) && payload && payload.todoRuns) || {};
     planPreviewTarget = findPlanPreviewTarget(messages);
@@ -1538,12 +1575,12 @@
     while (index < messages.length) {
       var msg = messages[index];
       if (isContextDivider(msg)) {
-        container.appendChild(buildContextDivider(msg));
+        target.appendChild(buildContextDivider(msg));
         index += 1;
         continue;
       }
       if (msg.role === 'user') {
-        container.appendChild(buildBubble(msg));
+        target.appendChild(buildBubble(msg));
         var runId = msg.run_id;
         if (runId) {
           var collected = collectRunMessagesForUser(messages, index);
@@ -1556,7 +1593,7 @@
               split.finalReply ? messageModelId(split.finalReply) : '',
               runMessages,
             );
-            container.appendChild(
+            target.appendChild(
               buildAssistantTurn({
                 thinking: thinking,
                 thinkingIds: thinking.ids.concat(split.finalReply ? [split.finalReply.id] : []),
@@ -1597,7 +1634,7 @@
           legacyFinal = legacyNext;
           index += 1;
         }
-        container.appendChild(
+        target.appendChild(
           buildAssistantTurn({
             thinking: legacyThinking,
             thinkingIds: legacyThinking.ids.concat(legacyFinal ? [legacyFinal.id] : []),
@@ -1614,16 +1651,16 @@
         );
         continue;
       }
-      container.appendChild(buildBubble(msg));
+      target.appendChild(buildBubble(msg));
       index += 1;
     }
-    applyDefaultExpandToLastMessage();
-    applyThinkingOpenState(container);
+    applyDefaultExpandToLastMessage(target);
+    applyThinkingOpenState(target);
     } finally {
       batchPostProcess = false;
       requestAnimationFrame(function () {
-        postProcessRenderedContent(container);
-        if (onPostProcessComplete) onPostProcessComplete();
+        postProcessRenderedContent(target);
+        if (onPostProcessComplete) onPostProcessComplete(target);
       });
     }
   }
@@ -1635,8 +1672,13 @@
         pendingSessionSwitch = false;
       }
       if (isSessionSwitch) {
-        renderMessageList(list);
-        stabilizeSessionSwitchScroll();
+        var token = sessionSwitchRenderToken;
+        var buffer = createSessionSwitchBuffer();
+        renderMessageList(list, function () {
+          afterAnimationFrames(3, function () {
+            commitSessionSwitchBuffer(buffer, token);
+          });
+        }, buffer);
         return;
       }
       var anchor = captureScrollAnchor();
@@ -1677,6 +1719,7 @@
       var nextId = sessionId ? String(sessionId) : '';
       if (nextId === currentSessionId) return;
       pendingSessionSwitch = true;
+      sessionSwitchRenderToken += 1;
       disconnectLazyMermaid();
       currentSessionId = nextId;
       loadThinkingOpenState();

@@ -37,7 +37,8 @@ html, body {
 
 html.session-switch-rendering,
 html.session-switch-rendering body,
-html.session-switch-rendering #messages {
+html.session-switch-rendering #messages,
+.messages-buffer {
   overflow-anchor: none;
 }
 
@@ -64,7 +65,8 @@ html.session-switch-rendering #messages {
   background: transparent;
 }
 
-#messages {
+#messages,
+.messages-buffer {
   padding: 16px var(--chat-gutter-x) 16px;
   display: flex;
   flex-direction: column;
@@ -75,6 +77,16 @@ html.session-switch-rendering #messages {
   overflow-x: hidden;
   overflow-anchor: auto;
   box-sizing: border-box;
+}
+
+.session-switch-buffer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  width: 100%;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .msg {
@@ -983,7 +995,8 @@ html.session-switch-rendering #messages {
 }
 
 @media (max-width: 834px) {
-  #messages {
+  #messages,
+  .messages-buffer {
     padding: 12px var(--chat-gutter-x) 28px;
   }
 
