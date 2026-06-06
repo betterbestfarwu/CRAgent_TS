@@ -44,7 +44,7 @@ export function stripMessageImagesForUi(message, options = {}) {
         next.images = message.images.map((image, index) => ({
             index,
             mimeType: image.mimeType,
-            hasData: Boolean(image.dataUrl || image.imageFile),
+            hasData: Boolean(image.dataUrl || image.imageFile || image.hasData),
             ...(preserveDataUrl && image.dataUrl ? { dataUrl: image.dataUrl } : {}),
         }));
         changed = true;

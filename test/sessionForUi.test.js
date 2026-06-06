@@ -64,6 +64,18 @@ describe("stripMessageImagesForUi", () => {
         assert.equal(stripped.images[0].imageFile, undefined);
     });
 
+    it("keeps hasData when a session payload is stripped twice", () => {
+        const message = {
+            id: "m1",
+            role: "user",
+            content: "pic",
+            images: [{ mimeType: "image/png", imageFile: "m1-0.png" }],
+        };
+        const once = stripMessageImagesForUi(message);
+        const twice = stripMessageImagesForUi(once);
+        assert.equal(twice.images[0].hasData, true);
+    });
+
     it("can preserve inline image data for immediate preview events", () => {
         const message = {
             id: "m1",

@@ -223,6 +223,7 @@ export function ChatView({
   }, [postToChat, sessionId]);
 
   useEffect(() => {
+    imageDataRef.current = {};
     setImageDataByKey({});
   }, [sessionId]);
 
