@@ -35,6 +35,12 @@ html, body {
   scrollbar-color: var(--cursor-scrollbar-thumb) transparent;
 }
 
+html.session-switch-rendering,
+html.session-switch-rendering body,
+html.session-switch-rendering #messages {
+  overflow-anchor: none;
+}
+
 /* WebKit scrollbars — transparent track, thin rounded thumb. */
 ::-webkit-scrollbar {
   width: 6px;

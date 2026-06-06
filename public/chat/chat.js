@@ -1387,9 +1387,16 @@
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
   }
 
-  function stabilizeScrollToBottom() {
+  function stabilizeSessionSwitchScroll() {
+    document.documentElement.classList.add('session-switch-rendering');
     scrollToBottomImmediate();
-    requestAnimationFrame(scrollToBottomImmediate);
+    requestAnimationFrame(function () {
+      scrollToBottomImmediate();
+      requestAnimationFrame(function () {
+        scrollToBottomImmediate();
+        document.documentElement.classList.remove('session-switch-rendering');
+      });
+    });
   }
 
   function captureScrollAnchor() {
@@ -1628,7 +1635,8 @@
         pendingSessionSwitch = false;
       }
       if (isSessionSwitch) {
-        renderMessageList(list, stabilizeScrollToBottom);
+        renderMessageList(list);
+        stabilizeSessionSwitchScroll();
         return;
       }
       var anchor = captureScrollAnchor();
