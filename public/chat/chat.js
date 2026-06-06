@@ -26,6 +26,7 @@
   var verboseThinking = false;
   var currentSessionId = '';
   var currentSessionModelId = '';
+  var pendingSessionSwitch = false;
   var thinkingOpenState = {};
   var messageExpandState = {};
   var planContext = { active: false };
@@ -1382,6 +1383,15 @@
     });
   }
 
+  function scrollToBottomImmediate() {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
+  }
+
+  function stabilizeScrollToBottom() {
+    scrollToBottomImmediate();
+    requestAnimationFrame(scrollToBottomImmediate);
+  }
+
   function captureScrollAnchor() {
     return {
       wasNearBottom: isNearBottom(),
@@ -1509,7 +1519,7 @@
     afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
   }
 
-  function renderMessageList(payload) {
+  function renderMessageList(payload, onPostProcessComplete) {
     disconnectLazyMermaid();
     batchPostProcess = true;
     container.innerHTML = '';
@@ -1606,12 +1616,21 @@
       batchPostProcess = false;
       requestAnimationFrame(function () {
         postProcessRenderedContent(container);
+        if (onPostProcessComplete) onPostProcessComplete();
       });
     }
   }
 
   var app = {
     renderAll: function (list) {
+      var isSessionSwitch = pendingSessionSwitch;
+      if (isSessionSwitch) {
+        pendingSessionSwitch = false;
+      }
+      if (isSessionSwitch) {
+        renderMessageList(list, stabilizeScrollToBottom);
+        return;
+      }
       var anchor = captureScrollAnchor();
       renderMessageList(list);
       afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
@@ -1649,8 +1668,8 @@
     setSessionId: function (sessionId) {
       var nextId = sessionId ? String(sessionId) : '';
       if (nextId === currentSessionId) return;
+      pendingSessionSwitch = true;
       disconnectLazyMermaid();
-      container.innerHTML = '';
       currentSessionId = nextId;
       loadThinkingOpenState();
       loadMessageExpandState();

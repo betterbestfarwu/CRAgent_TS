@@ -1,5 +1,4 @@
 import {
-  startTransition,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -1545,14 +1544,12 @@ export function App() {
     const session = await window.cragent.getSession(sessionId, {
       messageLimit: DEFAULT_UI_MESSAGE_PAGE,
     });
-    startTransition(() => {
-      setCurrentSession(session);
-      setFocusedProjectId(session?.meta?.projectId ?? null);
-      ensureProjectExpanded(session?.meta?.projectId);
-      setBusy(busyBySessionRef.current.get(sessionId) ?? false);
-      setPage("chat");
-      if (compactLayout) setSidebarOpen(false);
-    });
+    setCurrentSession(session);
+    setFocusedProjectId(session?.meta?.projectId ?? null);
+    ensureProjectExpanded(session?.meta?.projectId);
+    setBusy(busyBySessionRef.current.get(sessionId) ?? false);
+    setPage("chat");
+    if (compactLayout) setSidebarOpen(false);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         textareaRef.current?.focus();

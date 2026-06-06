@@ -153,6 +153,7 @@ export function ChatView({
   const messagesRef = useRef(messages);
   const todoRunsRef = useRef(todoRuns);
   const wireSnapshotRef = useRef({ ids: [], todoJson: "", wireJson: "", wireMessages: [] });
+  const syncedSessionIdRef = useRef("");
   const verboseThinkingRef = useRef(verboseThinking);
   const planContextRef = useRef(planContext);
   const imageDataRef = useRef({});
@@ -177,6 +178,13 @@ export function ChatView({
   }, []);
 
   const syncMessages = useCallback(() => {
+    const nextSessionId = sessionId || "";
+    if (syncedSessionIdRef.current !== nextSessionId) {
+      postToChat("setSessionId", nextSessionId);
+      syncedSessionIdRef.current = nextSessionId;
+      wireSnapshotRef.current = { ids: [], todoJson: "", wireJson: "", wireMessages: [] };
+    }
+
     const wireMessages = dedupeConsecutiveContextDividers(messagesRef.current || []).map((message) =>
       toWireMessage(message, planContextRef.current, sessionId, imageDataRef.current),
     );
@@ -288,8 +296,8 @@ export function ChatView({
 
       if (data.action === "ready") {
         readyRef.current = true;
+        syncedSessionIdRef.current = "";
         syncIframeLayout();
-        postToChat("setSessionId", sessionId || "");
         postToChat("setSessionModel", sessionModelId || "");
         postToChat("setVerboseThinking", verboseThinkingRef.current);
         postToChat("setPlanContext", planContextRef.current || { active: false });
@@ -327,17 +335,8 @@ export function ChatView({
 
   useEffect(() => {
     if (!readyRef.current) return;
-    postToChat("setSessionId", sessionId || "");
-  }, [sessionId, postToChat]);
-
-  useEffect(() => {
-    if (!readyRef.current) return;
     postToChat("setSessionModel", sessionModelId || "");
   }, [sessionModelId, postToChat]);
-
-  useEffect(() => {
-    wireSnapshotRef.current = { ids: [], todoJson: "", wireJson: "", wireMessages: [] };
-  }, [sessionId]);
 
   useEffect(() => {
     if (!readyRef.current) return;
