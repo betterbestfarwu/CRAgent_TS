@@ -29,7 +29,6 @@
   var pendingSessionSwitch = false;
   var sessionSwitchRenderToken = 0;
   var thinkingOpenState = {};
-  var messageExpandState = {};
   var planContext = { active: false };
   var planPreviewTarget = { messageId: null, runId: null };
   var PLAN_PREVIEW_MAX_HEIGHT = 280;
@@ -613,127 +612,15 @@
     if (!bubbleEl) return '';
     var turnContent = bubbleEl.querySelector('.assistant-turn-content');
     if (turnContent) return turnContent.innerText.trim();
-    var body = bubbleEl.querySelector('.bubble-collapse-body');
-    if (body) return body.innerText.trim();
     var userBody = bubbleEl.querySelector('.msg-user-body');
     if (userBody) return userBody.innerText.trim();
     var msgText = bubbleEl.querySelector('.msg-text');
     if (msgText) return msgText.innerText.trim();
     var clone = bubbleEl.cloneNode(true);
-    clone.querySelectorAll('.thinking-block, .thinking, .bubble-collapse-toggle').forEach(function (node) {
+    clone.querySelectorAll('.thinking-block, .thinking').forEach(function (node) {
       node.remove();
     });
     return clone.innerText.trim();
-  }
-
-  var COLLAPSED_MAX_HEIGHT = 320;
-
-  function messageExpandStateStorageKey() {
-    return 'cragent:message-expanded:v2:' + (currentSessionId || 'default');
-  }
-
-  function loadMessageExpandState() {
-    try {
-      var raw = sessionStorage.getItem(messageExpandStateStorageKey());
-      var parsed = raw ? JSON.parse(raw) : {};
-      messageExpandState = parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (_) {
-      messageExpandState = {};
-    }
-  }
-
-  function saveMessageExpandState() {
-    try {
-      sessionStorage.setItem(messageExpandStateStorageKey(), JSON.stringify(messageExpandState));
-    } catch (_) {}
-  }
-
-  function messageContentKey(msgEl) {
-    if (!msgEl) return '';
-    if (msgEl.dataset.id) return 'msg:' + msgEl.dataset.id;
-    if (msgEl.dataset.runId) return 'run:' + msgEl.dataset.runId;
-    return '';
-  }
-
-  function hasOwnStateValue(state, key) {
-    return Boolean(key && Object.prototype.hasOwnProperty.call(state, key));
-  }
-
-  function shouldExpandMessageContent(msgEl) {
-    var key = messageContentKey(msgEl);
-    if (hasOwnStateValue(messageExpandState, key)) {
-      return Boolean(messageExpandState[key]);
-    }
-    return Boolean(msgEl && msgEl.dataset.expandContent === '1');
-  }
-
-  function setMessageContentExpanded(msgEl, expanded) {
-    var key = messageContentKey(msgEl);
-    if (!key) return;
-    messageExpandState[key] = Boolean(expanded);
-    saveMessageExpandState();
-  }
-
-  function setBubbleCollapseExpanded(wrap, expanded) {
-    if (!wrap) return;
-    if (expanded) {
-      wrap.classList.remove('is-collapsed');
-    } else {
-      wrap.classList.add('is-collapsed');
-    }
-    var toggle = wrap.querySelector('.bubble-collapse-toggle');
-    if (toggle) {
-      toggle.textContent = expanded ? '收起' : '展开全文';
-      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    }
-  }
-
-  function applyDefaultExpandToLastMessage() {
-    var root = arguments.length > 0 && arguments[0] ? arguments[0] : container;
-    var allMsgs = root.querySelectorAll('.msg');
-    allMsgs.forEach(function (el) {
-      delete el.dataset.expandContent;
-    });
-    var last = allMsgs[allMsgs.length - 1];
-    if (!last) return;
-    last.dataset.expandContent = '1';
-    setBubbleCollapseExpanded(last.querySelector('.bubble-collapse'), shouldExpandMessageContent(last));
-  }
-
-  function setupCollapsibleContent(contentEl) {
-    if (!contentEl) return;
-
-    function attach() {
-      if (contentEl.closest('.bubble-collapse')) return;
-      if (contentEl.scrollHeight <= COLLAPSED_MAX_HEIGHT) return;
-
-      var msgEl = contentEl.closest('.msg');
-      var expandByDefault = shouldExpandMessageContent(msgEl);
-
-      var wrap = document.createElement('div');
-      wrap.className = 'bubble-collapse' + (expandByDefault ? '' : ' is-collapsed');
-      var parent = contentEl.parentNode;
-      parent.insertBefore(wrap, contentEl);
-      wrap.appendChild(contentEl);
-      contentEl.classList.add('bubble-collapse-body');
-
-      var toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = 'bubble-collapse-toggle';
-      toggle.textContent = expandByDefault ? '收起' : '展开全文';
-      toggle.setAttribute('aria-expanded', expandByDefault ? 'true' : 'false');
-      toggle.addEventListener('click', function () {
-        var collapsed = wrap.classList.toggle('is-collapsed');
-        toggle.textContent = collapsed ? '展开全文' : '收起';
-        toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        setMessageContentExpanded(msgEl, !collapsed);
-      });
-      wrap.appendChild(toggle);
-    }
-
-    requestAnimationFrame(function () {
-      requestAnimationFrame(attach);
-    });
   }
 
   function isProcessMessage(msg) {
@@ -1063,7 +950,6 @@
       bubble.appendChild(contentWrap);
       appendMessageImages(bubble, contentMsg);
       postProcessRenderedContent(bubble);
-      setupCollapsibleContent(contentWrap);
     } else if (shouldShowPlanPreview(null, runId)) {
       prependPlanSection(bubble, null, { showPreview: true });
     }
@@ -1190,6 +1076,12 @@
     });
   }
 
+  function userTextNeedsMarkdownRender(text) {
+    var s = String(text || '');
+    if (!s) return false;
+    return /[*_`#[\]]|^>\s|^\d+\.\s|^-\s/m.test(s);
+  }
+
   function appendSystemHintBlock(bubble, systemHint) {
     var hintText = String(systemHint || '').trim();
     if (!hintText) return;
@@ -1202,30 +1094,102 @@
     bubble.appendChild(hint);
   }
 
+  function dataUrlToBlobSrc(dataUrl) {
+    if (!dataUrl || String(dataUrl).indexOf('data:') !== 0) {
+      return { src: dataUrl, blobUrl: null };
+    }
+    try {
+      var text = String(dataUrl);
+      var comma = text.indexOf(',');
+      if (comma < 0) {
+        return { src: dataUrl, blobUrl: null };
+      }
+      var mime = (text.slice(0, comma).match(/^data:([^;]+)/i) || [])[1] || 'application/octet-stream';
+      var base64 = text.slice(comma + 1).replace(/\s/g, '');
+      var binary = atob(base64);
+      var len = binary.length;
+      var bytes = new Uint8Array(len);
+      for (var i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+      var blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      return { src: blobUrl, blobUrl: blobUrl };
+    } catch (_) {
+      return { src: dataUrl, blobUrl: null };
+    }
+  }
+
+  function revokeMessageImageBlobUrls(root) {
+    var scope = root || container;
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll('img.msg-image[data-blob-url]').forEach(function (img) {
+      var url = img.dataset.blobUrl;
+      if (!url) return;
+      try {
+        URL.revokeObjectURL(url);
+      } catch (_) {}
+    });
+  }
+
+  function replaceImageWithPlaceholder(img) {
+    if (!img) return;
+    var host = img.closest('.msg-image-frame') || img;
+    if (!host.parentNode) return;
+    if (img.dataset.blobUrl) {
+      try {
+        URL.revokeObjectURL(img.dataset.blobUrl);
+      } catch (_) {}
+    }
+    var placeholder = document.createElement('div');
+    placeholder.className = 'msg-image-placeholder';
+    placeholder.textContent = 'Image';
+    host.replaceWith(placeholder);
+  }
+
   function buildMessageImagesElement(msg) {
     var images = msg && Array.isArray(msg.images) ? msg.images : [];
     if (!images.length) return null;
 
     var wrap = document.createElement('div');
     wrap.className = 'msg-images';
+    var rendered = 0;
     images.forEach(function (image, index) {
-      if (image && image.data_url) {
+      var imageSrc = image && (image.data_url || image.image_src) ? (image.data_url || image.image_src) : '';
+      if (imageSrc) {
+        var frame = document.createElement('div');
+        frame.className = 'msg-image-frame';
         var img = document.createElement('img');
+        var resolved = image.data_url ? dataUrlToBlobSrc(image.data_url) : { src: imageSrc, blobUrl: null };
         img.className = 'msg-image';
-        img.src = image.data_url;
+        img.src = resolved.src;
         img.alt = 'image';
-        img.loading = 'lazy';
         img.dataset.mimeType = image.mime_type || '';
-        img.dataset.dataUrl = image.data_url;
+        if (image.data_url) {
+          img.dataset.dataUrl = image.data_url;
+        }
+        if (image.image_src) {
+          img.dataset.imageSrc = image.image_src;
+        }
+        if (resolved.blobUrl) {
+          img.dataset.blobUrl = resolved.blobUrl;
+        }
         img.dataset.index = String(image.index == null ? index : image.index);
-        wrap.appendChild(img);
+        img.onerror = function () {
+          replaceImageWithPlaceholder(img);
+        };
+        frame.appendChild(img);
+        wrap.appendChild(frame);
+        rendered += 1;
+        return;
+      }
+      if (!image || !image.has_data) {
         return;
       }
       var placeholder = document.createElement('div');
       placeholder.className = 'msg-image-placeholder';
-      placeholder.textContent = 'Image';
+      placeholder.textContent = 'Loading…';
       wrap.appendChild(placeholder);
+      rendered += 1;
     });
+    if (!rendered) return null;
     return wrap;
   }
 
@@ -1233,6 +1197,31 @@
     var images = buildMessageImagesElement(msg);
     if (images) {
       bubble.appendChild(images);
+    }
+  }
+
+  function userBubbleHasText(bubble) {
+    return Boolean(bubble && bubble.querySelector('.msg-text, .msg-user-body, .msg-system-hint'));
+  }
+
+  function userBubbleHasImages(bubble) {
+    return Boolean(
+      bubble &&
+        bubble.querySelector('.msg-images .msg-image, .msg-images .msg-image-frame, .msg-images .msg-image-placeholder'),
+    );
+  }
+
+  function applyUserBubbleLayout(bubble) {
+    if (!bubble) return;
+    bubble.classList.remove('bubble--text-only', 'bubble--image-only', 'bubble--text-image');
+    var hasText = userBubbleHasText(bubble);
+    var hasImages = userBubbleHasImages(bubble);
+    if (hasText && hasImages) {
+      bubble.classList.add('bubble--text-image');
+    } else if (hasText) {
+      bubble.classList.add('bubble--text-only');
+    } else if (hasImages) {
+      bubble.classList.add('bubble--image-only');
     }
   }
 
@@ -1245,8 +1234,8 @@
       var body = document.createElement('div');
       body.className = 'msg-user-body';
       if (userText) {
-        var text = document.createElement('div');
-        text.className = 'msg-text';
+        var text = document.createElement('span');
+        text.className = 'msg-text msg-text--plain';
         text.textContent = userText;
         body.appendChild(text);
       }
@@ -1267,11 +1256,19 @@
     }
 
     if (userText) {
-      var plain = document.createElement('div');
-      plain.className = 'msg-text';
-      plain.innerHTML = window.MD.render(formatAtMentionsForDisplayInline(userText));
+      var displayText = formatAtMentionsForDisplayInline(userText);
+      var plain;
+      if (userTextNeedsMarkdownRender(displayText)) {
+        plain = document.createElement('div');
+        plain.className = 'msg-text';
+        plain.innerHTML = window.MD.render(displayText);
+        postProcessRenderedContent(plain);
+      } else {
+        plain = document.createElement('span');
+        plain.className = 'msg-text msg-text--plain';
+        plain.textContent = displayText;
+      }
       bubble.appendChild(plain);
-      postProcessRenderedContent(plain);
     }
     appendSystemHintBlock(bubble, systemHint);
     appendMessageImages(bubble, msg);
@@ -1291,12 +1288,10 @@
           showPreview: shouldShowPlanPreview(msg, msg.run_id || ''),
         });
         var body = document.createElement('div');
-        body.className = 'bubble-collapse-body';
         body.innerHTML = window.MD.render(msg.content || '');
         bubble.appendChild(body);
         appendMessageImages(bubble, msg);
         postProcessRenderedContent(body);
-        setupCollapsibleContent(body);
       } else if (msg.role === 'user' && msg.plan_rejection) {
         var rejectionBody = document.createElement('div');
         rejectionBody.className = 'plan-rejection-body';
@@ -1322,8 +1317,10 @@
         }
         bubble.appendChild(rejectionBody);
         appendMessageImages(bubble, msg);
+        applyUserBubbleLayout(bubble);
       } else if (msg.role === 'user') {
         appendUserBubbleContent(bubble, msg);
+        applyUserBubbleLayout(bubble);
       } else {
         bubble.innerHTML = window.MD.render(msg.content || '');
         appendMessageImages(bubble, msg);
@@ -1558,13 +1555,13 @@
       patchInProgressRunTurn(turn, collected.runId, collected.runMessages);
     }
 
-    applyDefaultExpandToLastMessage();
     afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
   }
 
   function renderMessageList(payload, onPostProcessComplete, targetContainer) {
     var target = targetContainer || container;
     disconnectLazyMermaid();
+    revokeMessageImageBlobUrls(target);
     batchPostProcess = true;
     target.innerHTML = '';
     var messages = Array.isArray(payload) ? payload : (payload && payload.messages) || [];
@@ -1654,7 +1651,6 @@
       target.appendChild(buildBubble(msg));
       index += 1;
     }
-    applyDefaultExpandToLastMessage(target);
     applyThinkingOpenState(target);
     } finally {
       batchPostProcess = false;
@@ -1688,12 +1684,12 @@
     appendMessage: function (m) {
       var anchor = captureScrollAnchor();
       container.appendChild(isContextDivider(m) ? buildContextDivider(m) : buildBubble(m));
-      applyDefaultExpandToLastMessage();
       afterRenderScroll(anchor.wasNearBottom, anchor.prevScrollTop, anchor.prevScrollHeight);
     },
     removeMessage: function (id) {
       var el = container.querySelector('.msg[data-id="' + id + '"]');
       if (el) {
+        revokeMessageImageBlobUrls(el);
         el.remove();
         return;
       }
@@ -1723,7 +1719,6 @@
       disconnectLazyMermaid();
       currentSessionId = nextId;
       loadThinkingOpenState();
-      loadMessageExpandState();
     },
     setSessionModel: function (modelId) {
       currentSessionModelId = modelId ? String(modelId) : '';
@@ -1744,11 +1739,12 @@
   }
 
   document.addEventListener('click', function (e) {
-    var imageEl = e.target.closest && e.target.closest('.msg-image[data-data-url]');
+    var imageEl = e.target.closest && e.target.closest('.msg-image[data-data-url], .msg-image[data-image-src]');
     if (imageEl) {
       notifyHost({
         action: 'openImage',
-        dataUrl: imageEl.dataset.dataUrl,
+        dataUrl: imageEl.dataset.dataUrl || '',
+        src: imageEl.dataset.imageSrc || imageEl.dataset.dataUrl || '',
         mimeType: imageEl.dataset.mimeType || '',
       });
       return;
@@ -1857,7 +1853,6 @@
   }, true);
 
   loadThinkingOpenState();
-  loadMessageExpandState();
   window.app = app;
   notifyHost({ action: 'ready' });
 })();

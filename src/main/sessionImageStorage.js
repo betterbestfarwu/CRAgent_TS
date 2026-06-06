@@ -20,10 +20,26 @@ function legacyGlobalImagesDir(sessionsDir, sessionId) {
 
 function candidateImageDirs(sessionsDir, sessionId) {
     return [
-        imagesDir(sessionsDir, sessionId),
         legacySplitImagesDir(sessionsDir, sessionId),
+        imagesDir(sessionsDir, sessionId),
         legacyGlobalImagesDir(sessionsDir, sessionId),
     ];
+}
+
+function mimeTypeFromImageFile(imageFile) {
+    switch (path.extname(String(imageFile || "")).toLowerCase()) {
+        case ".png":
+            return "image/png";
+        case ".jpg":
+        case ".jpeg":
+            return "image/jpeg";
+        case ".webp":
+            return "image/webp";
+        case ".gif":
+            return "image/gif";
+        default:
+            return "";
+    }
 }
 
 function resolveImageFilePath(sessionsDir, sessionId, imageFile) {
@@ -34,6 +50,10 @@ function resolveImageFilePath(sessionsDir, sessionId, imageFile) {
         }
     }
     return null;
+}
+
+export function getSessionImageFilePath(sessionsDir, sessionId, imageFile) {
+    return resolveImageFilePath(sessionsDir, sessionId, imageFile);
 }
 
 function extForMime(mimeType) {
@@ -117,6 +137,22 @@ export function externalizeSessionImages(session, sessionsDir) {
     return changed ? { ...session, messages } : session;
 }
 
+export function readSessionImageFile(sessionsDir, sessionId, imageFile, mimeType = "") {
+    if (!sessionsDir || !sessionId || !imageFile) {
+        return null;
+    }
+    const filePath = resolveImageFilePath(sessionsDir, sessionId, imageFile);
+    if (!filePath) {
+        return null;
+    }
+    const resolvedMime =
+        mimeType || mimeTypeFromImageFile(imageFile) || "image/png";
+    return {
+        mimeType: resolvedMime,
+        dataUrl: `data:${resolvedMime};base64,${fs.readFileSync(filePath).toString("base64")}`,
+    };
+}
+
 export function hydrateSessionImages(session, sessionsDir) {
     if (!session?.messages?.length || !sessionsDir) {
         return session;
@@ -135,15 +171,18 @@ export function hydrateSessionImages(session, sessionsDir) {
             if (image?.dataUrl || !image?.imageFile) {
                 return image;
             }
-            const filePath = resolveImageFilePath(sessionsDir, sessionId, image.imageFile);
-            if (!filePath) {
+            const hydrated = readSessionImageFile(
+                sessionsDir,
+                sessionId,
+                image.imageFile,
+                image.mimeType,
+            );
+            if (!hydrated?.dataUrl) {
                 return image;
             }
-            const mimeType = image.mimeType || "image/png";
-            const dataUrl = `data:${mimeType};base64,${fs.readFileSync(filePath).toString("base64")}`;
             messageChanged = true;
             changed = true;
-            return { mimeType, dataUrl };
+            return hydrated;
         });
 
         return messageChanged ? { ...message, images } : message;

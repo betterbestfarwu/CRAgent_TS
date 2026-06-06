@@ -3,6 +3,8 @@
 :root {
   --chat-gutter-x: 16px;
   --chat-inner-x: 12px;
+  --user-bubble-max-width: 80%;
+  --user-image-max-size: 200px;
   --bg: var(--cursor-bg-editor);
   --fg: var(--cursor-fg);
   --muted: var(--cursor-fg-muted);
@@ -113,8 +115,10 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
 
 .msg.user {
   align-self: flex-end;
-  align-items: stretch;
+  align-items: flex-end;
   width: fit-content;
+  max-width: var(--user-bubble-max-width);
+  min-width: 0;
 }
 
 .msg.assistant,
@@ -145,7 +149,6 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
   min-width: 0;
 }
 
-.bubble-collapse-body,
 .assistant-turn-content {
   width: 100%;
   max-width: 100%;
@@ -158,23 +161,38 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
+  width: auto;
+  max-width: var(--user-image-max-size);
+}
+
+.msg-image-frame {
+  display: inline-block;
+  line-height: 0;
+  max-width: var(--user-image-max-size);
+  max-height: var(--user-image-max-size);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.08));
 }
 
 .msg-image {
   display: block;
-  width: min(240px, 100%);
-  height: 120px;
-  border-radius: 8px;
-  object-fit: cover;
-  border: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.08));
+  max-width: var(--user-image-max-size);
+  max-height: var(--user-image-max-size);
+  width: auto;
+  height: auto;
+  object-fit: contain;
   cursor: zoom-in;
 }
 
 .msg-image-placeholder {
   display: grid;
   place-items: center;
-  width: min(240px, 100%);
-  height: 120px;
+  min-width: 120px;
+  min-height: 80px;
+  max-width: var(--user-image-max-size);
+  max-height: var(--user-image-max-size);
+  padding: 20px 24px;
   border-radius: 8px;
   border: 1px dashed var(--bubble-border, rgba(0, 0, 0, 0.16));
   color: var(--muted, #6b7280);
@@ -194,9 +212,92 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
 
 .msg.user .bubble {
   align-self: flex-end;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: var(--user-bubble-max-width);
+  min-width: 0;
+  padding: 4px var(--chat-inner-x);
+}
+
+/* 仅文本：按内容自然宽度收缩，上限 80%，无 200px 下限 */
+.msg.user .bubble.bubble--text-only {
+  display: inline-block;
+  vertical-align: top;
   width: fit-content;
   max-width: 100%;
-  padding: 4px var(--chat-inner-x);
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+/* 覆盖 .bubble > * { min-width: 0 }，避免 shrink-to-fit 把中文压成逐字换行 */
+.msg.user .bubble.bubble--text-only > * {
+  min-width: max-content;
+  max-width: 100%;
+}
+
+.msg.user .bubble.bubble--text-only .msg-text--plain {
+  display: inline;
+  min-width: max-content;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.msg.user .bubble.bubble--text-only .msg-text:not(.msg-text--plain),
+.msg.user .bubble.bubble--text-only .msg-user-body,
+.msg.user .bubble.bubble--text-only .msg-system-hint {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  min-width: max-content;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.msg.user .bubble.bubble--text-only .msg-text > :first-child {
+  margin-top: 0;
+}
+
+.msg.user .bubble.bubble--text-only .msg-text > :last-child {
+  margin-bottom: 0;
+}
+
+/* MD.render 的 <p> 在 shrink-to-fit 气泡里会塌成极窄宽；改为按内容撑开 */
+.msg.user .bubble.bubble--text-only .msg-text:not(.msg-text--plain) p {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+/* 仅图片 */
+.msg.user .bubble.bubble--image-only {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: fit-content;
+  min-width: 0;
+  padding: 4px;
+}
+
+/* 文本 + 图片 */
+.msg.user .bubble.bubble--text-image {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: max(var(--user-image-max-size), fit-content);
+  min-width: min(var(--user-image-max-size), 100%);
+}
+
+
+.msg.user .msg-images {
+  align-self: flex-start;
+  flex: 0 0 auto;
+  max-width: var(--user-image-max-size);
 }
 
 .msg.tool .bubble {

@@ -2,7 +2,6 @@ const LAYOUT_VARS = [
   "--chat-gutter-x",
   "--chat-inner-x",
   "--chat-bg",
-  "--bubble-collapse-max",
 ];
 
 /** Copy shell chat layout tokens from the renderer into the chat iframe document. */

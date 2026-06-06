@@ -45,6 +45,7 @@ export function stripMessageImagesForUi(message, options = {}) {
             index,
             mimeType: image.mimeType,
             hasData: Boolean(image.dataUrl || image.imageFile || image.hasData),
+            ...(image.imageFile ? { imageFile: image.imageFile } : {}),
             ...(preserveDataUrl && image.dataUrl ? { dataUrl: image.dataUrl } : {}),
         }));
         changed = true;
@@ -55,6 +56,46 @@ export function stripMessageImagesForUi(message, options = {}) {
 
 export function messageImageKey(messageId, image, index) {
     return `${messageId}:${image?.index ?? index}`;
+}
+
+/** Merge preview image data when an appended event arrives after session sync. */
+export function mergeAppendedMessagePreview(existing, incoming) {
+    if (!existing || !incoming || existing.id !== incoming.id) {
+        return incoming;
+    }
+    if (!incoming.images?.length) {
+        return incoming;
+    }
+    const incomingHasPreview = incoming.images.some((image) => image?.dataUrl);
+    if (!incomingHasPreview) {
+        return existing;
+    }
+    if (!existing.images?.length) {
+        return incoming;
+    }
+
+    let changed = false;
+    const images = existing.images.map((image, index) => {
+        const incomingImage =
+            incoming.images[index] ??
+            incoming.images.find(
+                (candidate) => (candidate?.index ?? -1) === (image?.index ?? index),
+            );
+        if (!incomingImage?.dataUrl || image?.dataUrl) {
+            return image;
+        }
+        changed = true;
+        return {
+            ...image,
+            dataUrl: incomingImage.dataUrl,
+            mimeType: image.mimeType || incomingImage.mimeType,
+        };
+    });
+
+    if (!changed) {
+        return existing;
+    }
+    return { ...existing, ...incoming, images };
 }
 
 /** Keep inline image previews when a session refresh strips dataUrl payloads. */

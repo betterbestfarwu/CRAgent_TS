@@ -70,7 +70,10 @@ import {
 import { formatModelRef, parseModelRef } from "@shared/modelRef.js";
 import { filterVisibleTodoRuns, msUntilTodoRunsHide } from "@shared/todoRunsDisplay.js";
 import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
-import { mergePreservedMessageImages } from "@shared/sessionForUi.js";
+import {
+  mergeAppendedMessagePreview,
+  mergePreservedMessageImages,
+} from "@shared/sessionForUi.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 
 const COMPOSER_LINE_HEIGHT = 24;
@@ -478,8 +481,15 @@ export function App() {
     const offMessage = window.cragent.onMessageAppended(({ sessionId, message }) => {
       setCurrentSession((prev) => {
         if (!prev || prev.meta.id !== sessionId) return prev;
-        if (prev.messages.some((item) => item.id === message.id)) {
-          return prev;
+        const existingIndex = prev.messages.findIndex((item) => item.id === message.id);
+        if (existingIndex >= 0) {
+          const merged = mergeAppendedMessagePreview(prev.messages[existingIndex], message);
+          if (merged === prev.messages[existingIndex]) {
+            return prev;
+          }
+          const messages = [...prev.messages];
+          messages[existingIndex] = merged;
+          return { ...prev, messages };
         }
         const messages = [...prev.messages, message];
         return {
@@ -2417,7 +2427,7 @@ export function App() {
       ) : null}
       {viewerImage ? (
         <ImageViewer
-          src={viewerImage.dataUrl}
+          src={viewerImage.src || viewerImage.dataUrl}
           onClose={() => setViewerImage(null)}
         />
       ) : null}

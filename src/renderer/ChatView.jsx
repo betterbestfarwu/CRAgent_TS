@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { formatAtMentionsForDisplay } from "@shared/atMention.js";
 import {
   appendedMessagesNeedFullRender,
@@ -9,11 +9,8 @@ import {
   isPlanRejectionMessage,
   parsePlanRejectionDisplay,
 } from "@shared/planMessages.js";
+import { buildSessionImageUrl } from "@shared/sessionImageUrl.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
-
-function imageKey(sessionId, messageId, index) {
-  return `${sessionId || ""}:${messageId || ""}:${index}`;
-}
 
 function wireMessageRunId(message) {
   return message?.run_id || "";
@@ -27,6 +24,24 @@ function findLastActiveRunUserIndex(messages) {
     }
   }
   return -1;
+}
+
+function userImageWireChanged(nextMessages, previousMessages) {
+  if (!previousMessages?.length || nextMessages.length !== previousMessages.length) {
+    return false;
+  }
+  for (let index = 0; index < nextMessages.length; index += 1) {
+    if (nextMessages[index]?.role !== "user") {
+      continue;
+    }
+    if (
+      JSON.stringify(nextMessages[index]?.images ?? null) !==
+      JSON.stringify(previousMessages[index]?.images ?? null)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function canPatchActiveRunUpdate(messages, previousMessages) {
@@ -51,7 +66,8 @@ function canPatchActiveRunUpdate(messages, previousMessages) {
   return true;
 }
 
-function toWireMessage(message, planContext, sessionId, imageDataByKey) {
+function toWireMessage(message, planContext, sessionId) {
+  const useDirectImageSrc = window.cragent?.isDesktop === true;
   const toolCalls = message.toolCalls?.map((call) => ({
     ...(call.id ? { id: call.id } : {}),
     name: call.function?.name || call.name || "tool",
@@ -77,15 +93,18 @@ function toWireMessage(message, planContext, sessionId, imageDataByKey) {
   const images = message.images?.length
     ? message.images.map((image, index) => {
         const actualIndex = image.index ?? index;
-        const loaded = imageDataByKey[imageKey(sessionId, message.id, actualIndex)];
-        const inlineDataUrl = image.dataUrl || null;
+        const dataUrl = image.dataUrl || null;
+        const imageSrc =
+          useDirectImageSrc && !dataUrl && image.imageFile && sessionId
+            ? buildSessionImageUrl(sessionId, image.imageFile)
+            : null;
         return {
           index: actualIndex,
-          mime_type: loaded?.mimeType || image.mimeType || "",
-          has_data: Boolean(image.hasData || loaded?.dataUrl || inlineDataUrl),
-          ...((loaded?.dataUrl || inlineDataUrl)
-            ? { data_url: loaded?.dataUrl || inlineDataUrl }
-            : {}),
+          mime_type: image.mimeType || "",
+          has_data: Boolean(image.hasData || image.imageFile || dataUrl),
+          ...(image.imageFile ? { image_file: image.imageFile } : {}),
+          ...(imageSrc ? { image_src: imageSrc } : {}),
+          ...(dataUrl ? { data_url: dataUrl } : {}),
         };
       })
     : null;
@@ -156,13 +175,10 @@ export function ChatView({
   const syncedSessionIdRef = useRef("");
   const verboseThinkingRef = useRef(verboseThinking);
   const planContextRef = useRef(planContext);
-  const imageDataRef = useRef({});
-  const [imageDataByKey, setImageDataByKey] = useState({});
   messagesRef.current = messages;
   todoRunsRef.current = todoRuns;
   verboseThinkingRef.current = verboseThinking;
   planContextRef.current = planContext;
-  imageDataRef.current = imageDataByKey;
 
   const syncIframeLayout = useCallback(() => {
     injectChatLayout(iframeRef.current?.contentDocument ?? null);
@@ -186,7 +202,7 @@ export function ChatView({
     }
 
     const wireMessages = dedupeConsecutiveContextDividers(messagesRef.current || []).map((message) =>
-      toWireMessage(message, planContextRef.current, sessionId, imageDataRef.current),
+      toWireMessage(message, planContextRef.current, sessionId),
     );
     const ids = wireMessages.map((message) => message.id);
     const todoJson = JSON.stringify(todoRunsRef.current || {});
@@ -208,6 +224,10 @@ export function ChatView({
       idsSame &&
       wireJson !== prev.wireJson &&
       canPatchActiveRunUpdate(wireMessages, prev.wireMessages);
+    const userImagesChanged =
+      idsSame &&
+      wireJson !== prev.wireJson &&
+      userImageWireChanged(wireMessages, prev.wireMessages);
 
     if (todosOnly) {
       postToChat("updateTodoRuns", todoRunsRef.current || {});
@@ -216,7 +236,7 @@ export function ChatView({
         messages: wireMessages,
         todoRuns: todoRunsRef.current || {},
       });
-    } else if (activeRunUpdated) {
+    } else if (activeRunUpdated && !userImagesChanged) {
       postToChat("patchActiveRun", {
         messages: wireMessages,
         todoRuns: todoRunsRef.current || {},
@@ -230,55 +250,6 @@ export function ChatView({
 
     wireSnapshotRef.current = { ids, todoJson, wireJson, wireMessages };
   }, [postToChat, sessionId]);
-
-  useEffect(() => {
-    imageDataRef.current = {};
-    setImageDataByKey({});
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (!sessionId || !window.cragent?.getSessionImage) return;
-    const targets = [];
-    for (const message of messages || []) {
-      if (!message?.id || !message.images?.length) continue;
-      message.images.forEach((image, index) => {
-        if (!image?.hasData && !image?.dataUrl) return;
-        const actualIndex = image.index ?? index;
-        const key = imageKey(sessionId, message.id, actualIndex);
-        if (imageDataRef.current[key]) return;
-        targets.push({ key, messageId: message.id, imageIndex: actualIndex });
-      });
-    }
-    if (!targets.length) return;
-
-    let cancelled = false;
-    for (const target of targets) {
-      window.cragent
-        .getSessionImage({
-          sessionId,
-          messageId: target.messageId,
-          imageIndex: target.imageIndex,
-        })
-        .then((image) => {
-          if (cancelled || !image?.dataUrl) return;
-          setImageDataByKey((current) => {
-            if (current[target.key]) return current;
-            return {
-              ...current,
-              [target.key]: {
-                mimeType: image.mimeType || "",
-                dataUrl: image.dataUrl,
-              },
-            };
-          });
-        })
-        .catch(() => {});
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, messages]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -317,9 +288,10 @@ export function ChatView({
         void onFork?.(data.id);
       }
 
-      if (data.action === "openImage" && data.dataUrl) {
+      if (data.action === "openImage" && (data.dataUrl || data.src)) {
         onOpenImage?.({
-          dataUrl: data.dataUrl,
+          dataUrl: data.dataUrl || "",
+          src: data.src || data.dataUrl || "",
           mimeType: data.mimeType || "",
         });
       }
@@ -341,7 +313,7 @@ export function ChatView({
   useEffect(() => {
     if (!readyRef.current) return;
     syncMessages();
-  }, [messages, todoRuns, imageDataByKey, syncMessages]);
+  }, [messages, todoRuns, syncMessages]);
 
   useEffect(() => {
     if (!readyRef.current) return;

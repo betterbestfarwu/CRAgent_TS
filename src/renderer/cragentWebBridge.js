@@ -259,6 +259,44 @@ export function installWebBridge() {
       return { ok: false, error: "Web 演示模式暂不支持打开本地 config.json。" };
     },
 
+    async getSessionImage({
+      sessionId,
+      messageId,
+      imageIndex = 0,
+      imageFile = null,
+      mimeType = null,
+    } = {}) {
+      const { sessions } = ensureState();
+      const session = sessions.find((item) => item.meta.id === sessionId);
+      const message = session?.messages?.find((item) => item.id === messageId);
+      const index = Math.max(0, Number(imageIndex) || 0);
+      const image = message?.images?.[index];
+      const resolved =
+        image ||
+        (imageFile
+          ? { mimeType: mimeType || "image/png", dataUrl: null, imageFile }
+          : null);
+      if (resolved?.dataUrl) {
+        return {
+          mimeType: resolved.mimeType || mimeType || "image/png",
+          dataUrl: resolved.dataUrl,
+        };
+      }
+      const fileName = String(imageFile || resolved?.imageFile || "").trim();
+      const stored = fileName
+        ? session?.messages
+            ?.flatMap((item) => item.images || [])
+            .find((entry) => entry?.imageFile === fileName || entry?.dataUrl)
+        : null;
+      if (stored?.dataUrl) {
+        return {
+          mimeType: stored.mimeType || mimeType || "image/png",
+          dataUrl: stored.dataUrl,
+        };
+      }
+      throw new Error("图片不存在或无法读取");
+    },
+
     async getSession(sessionId, options = {}) {
       const { sessions } = ensureState();
       const session = sessions.find((item) => item.meta.id === sessionId);

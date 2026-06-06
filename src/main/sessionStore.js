@@ -33,6 +33,7 @@ import {
     deleteSessionImages,
     externalizeSessionImages,
     hydrateSessionImages,
+    readSessionImageFile,
     sessionHasInlineImages,
 } from "./sessionImageStorage.js";
 import {
@@ -585,18 +586,53 @@ export class SessionStore {
         return directoryPath || null;
     }
 
-    getMessageImage(sessionId, messageId, imageIndex = 0) {
-        const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: true });
+    getMessageImage(sessionId, messageId, imageIndex = 0, imageFile = null, mimeType = null) {
+        const sessionsDir = this.locateSessionStorage(sessionId);
+        const cleanFile = String(imageFile || "").trim();
+        if (cleanFile) {
+            const direct = readSessionImageFile(
+                sessionsDir,
+                sessionId,
+                cleanFile,
+                mimeType || undefined,
+            );
+            if (direct?.dataUrl) {
+                return direct;
+            }
+        }
+
+        const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
         const message = session.messages.find((item) => item.id === messageId);
         const index = Math.max(0, Number(imageIndex) || 0);
         const image = message?.images?.[index];
-        if (!image?.dataUrl) {
-            throw new Error("图片不存在或无法读取");
+        if (image?.imageFile) {
+            const fromFile = readSessionImageFile(
+                sessionsDir,
+                sessionId,
+                image.imageFile,
+                image.mimeType || mimeType || undefined,
+            );
+            if (fromFile?.dataUrl) {
+                return fromFile;
+            }
         }
-        return {
-            mimeType: image.mimeType || "image/png",
-            dataUrl: image.dataUrl,
-        };
+        if (image?.dataUrl) {
+            return {
+                mimeType: image.mimeType || mimeType || "image/png",
+                dataUrl: image.dataUrl,
+            };
+        }
+
+        const hydrated = this.get(sessionId, { loadAllMessages: true, hydrateImages: true });
+        const hydratedMessage = hydrated.messages.find((item) => item.id === messageId);
+        const hydratedImage = hydratedMessage?.images?.[index];
+        if (hydratedImage?.dataUrl) {
+            return {
+                mimeType: hydratedImage.mimeType || mimeType || "image/png",
+                dataUrl: hydratedImage.dataUrl,
+            };
+        }
+        throw new Error("图片不存在或无法读取");
     }
 
     save(session) {

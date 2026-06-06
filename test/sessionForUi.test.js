@@ -5,7 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { readSessionMetaFromFile } from "../src/main/sessionMeta.js";
 import { ipcPayloadForRenderer } from "../src/main/rendererSession.js";
-import { stripMessageImagesForUi, stripSessionImagesForUi, mergePreservedMessageImages } from "../src/shared/sessionForUi.js";
+import {
+    stripMessageImagesForUi,
+    stripSessionImagesForUi,
+    mergePreservedMessageImages,
+    mergeAppendedMessagePreview,
+} from "../src/shared/sessionForUi.js";
 import { IPC_CHANNELS } from "../src/shared/ipc.js";
 
 describe("stripSessionImagesForUi", () => {
@@ -61,7 +66,7 @@ describe("stripMessageImagesForUi", () => {
         const stripped = stripMessageImagesForUi(message);
         assert.equal(stripped.images[0].index, 0);
         assert.equal(stripped.images[0].hasData, true);
-        assert.equal(stripped.images[0].imageFile, undefined);
+        assert.equal(stripped.images[0].imageFile, "m1-0.png");
     });
 
     it("keeps hasData when a session payload is stripped twice", () => {
@@ -86,6 +91,26 @@ describe("stripMessageImagesForUi", () => {
         const stripped = stripMessageImagesForUi(message, { preserveDataUrl: true });
         assert.equal(stripped.images[0].hasData, true);
         assert.equal(stripped.images[0].dataUrl, "data:image/png;base64,BBBB");
+    });
+});
+
+describe("mergeAppendedMessagePreview", () => {
+    it("adds preview dataUrl when session sync already inserted the message", () => {
+        const existing = {
+            id: "m1",
+            role: "user",
+            content: "pic",
+            images: [{ index: 0, mimeType: "image/png", hasData: true }],
+        };
+        const incoming = {
+            id: "m1",
+            role: "user",
+            content: "pic",
+            images: [{ index: 0, mimeType: "image/png", hasData: true, dataUrl: "data:image/png;base64,AAAA" }],
+        };
+
+        const merged = mergeAppendedMessagePreview(existing, incoming);
+        assert.equal(merged.images[0].dataUrl, "data:image/png;base64,AAAA");
     });
 });
 

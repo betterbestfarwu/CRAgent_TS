@@ -64,6 +64,9 @@ export function appendedMessagesNeedFullRender(allMessages, previousCount) {
         return true;
     }
     return appended.some((message) => {
+        if (message?.role === "user") {
+            return Boolean(message?.images?.length || message?.image_count);
+        }
         if (message?.role !== "assistant") {
             return false;
         }

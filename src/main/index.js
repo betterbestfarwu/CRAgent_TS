@@ -33,6 +33,10 @@ import { normalizeAuthMode } from "@shared/authMode.js";
 import { listProjectDirectory } from "./projectBrowse.js";
 import { getFileIconsAsDataUrls } from "./fileIcons.js";
 import { legacySessionFile, metaFile, sessionDir } from "./sessionStorage.js";
+import {
+    registerSessionImageProtocol,
+    registerSessionImageScheme,
+} from "./sessionImageProtocol.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
 /** Packaged builds must always load bundled renderer, even if shell env has NODE_ENV=development. */
@@ -247,7 +251,13 @@ function registerIpc() {
         ),
     );
     ipcMain.handle(IPC_CHANNELS.getSessionImage, (_event, args = {}) =>
-        sessionStore.getMessageImage(args.sessionId, args.messageId, args.imageIndex),
+        sessionStore.getMessageImage(
+            args.sessionId,
+            args.messageId,
+            args.imageIndex,
+            args.imageFile,
+            args.mimeType,
+        ),
     );
     ipcMain.handle(IPC_CHANNELS.getSessionContextDetail, (_event, sessionId) =>
         runtime.getSessionContextDetail(sessionId),
@@ -564,9 +574,12 @@ function bootstrap() {
     registerIpc();
 }
 
+registerSessionImageScheme();
+
 app.whenReady().then(() => {
     applyAppIcon();
     bootstrap();
+    registerSessionImageProtocol((sessionId) => sessionStore.locateSessionStorage(sessionId));
     createWindow();
     buildMenu();
     app.on("activate", () => {
