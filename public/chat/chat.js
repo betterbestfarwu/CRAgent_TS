@@ -950,6 +950,7 @@
       bubble.appendChild(contentWrap);
       appendMessageImages(bubble, contentMsg);
       postProcessRenderedContent(bubble);
+      applyAssistantBubbleLayout(wrap, bubble);
     } else if (shouldShowPlanPreview(null, runId)) {
       prependPlanSection(bubble, null, { showPreview: true });
     }
@@ -1191,15 +1192,47 @@
     }
   }
 
+  function bubbleHasRenderedImages(bubble) {
+    return Boolean(
+      bubble &&
+        bubble.querySelector(
+          '.msg-images .msg-image, .msg-images .msg-image-frame, .msg-images .msg-image-placeholder, .assistant-turn-content img',
+        ),
+    );
+  }
+
+  function assistantBubbleHasText(bubble) {
+    if (!bubble) return false;
+    var content = bubble.querySelector('.assistant-turn-content');
+    if (content && String(content.textContent || '').trim()) {
+      return true;
+    }
+    return Boolean(
+      bubble.querySelector('.plan-file-banner, .plan-preview-card, .todo-inline-block, .thinking-block'),
+    );
+  }
+
+  function applyAssistantBubbleLayout(wrap, bubble) {
+    if (!wrap || !bubble) return;
+    bubble.classList.remove('bubble--image-only', 'bubble--text-image');
+    wrap.classList.remove('msg--content-sized');
+    var hasImages = bubbleHasRenderedImages(bubble);
+    if (!hasImages) return;
+
+    wrap.classList.add('msg--content-sized');
+    if (assistantBubbleHasText(bubble)) {
+      bubble.classList.add('bubble--text-image');
+    } else {
+      bubble.classList.add('bubble--image-only');
+    }
+  }
+
   function userBubbleHasText(bubble) {
     return Boolean(bubble && bubble.querySelector('.msg-text, .msg-user-body, .msg-system-hint'));
   }
 
   function userBubbleHasImages(bubble) {
-    return Boolean(
-      bubble &&
-        bubble.querySelector('.msg-images .msg-image, .msg-images .msg-image-frame, .msg-images .msg-image-placeholder'),
-    );
+    return bubbleHasRenderedImages(bubble);
   }
 
   function applyUserBubbleLayout(bubble) {
@@ -1279,10 +1312,12 @@
           showPreview: shouldShowPlanPreview(msg, msg.run_id || ''),
         });
         var body = document.createElement('div');
+        body.className = 'assistant-turn-content';
         body.innerHTML = window.MD.render(msg.content || '');
         bubble.appendChild(body);
         appendMessageImages(bubble, msg);
         postProcessRenderedContent(body);
+        applyAssistantBubbleLayout(wrap, bubble);
       } else if (msg.role === 'user' && msg.plan_rejection) {
         var rejectionBody = document.createElement('div');
         rejectionBody.className = 'plan-rejection-body';

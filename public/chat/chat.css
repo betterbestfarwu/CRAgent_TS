@@ -300,6 +300,60 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
   max-width: var(--user-image-max-size);
 }
 
+.msg.assistant.msg--content-sized {
+  width: fit-content;
+  max-width: min(82%, 100%);
+}
+
+.msg.assistant .bubble.bubble--image-only,
+.msg.assistant .bubble.bubble--text-image {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.msg.assistant .bubble.bubble--image-only {
+  padding: 4px;
+}
+
+.msg.assistant .bubble.bubble--text-image {
+  align-items: stretch;
+}
+
+.msg.assistant .bubble.bubble--image-only .assistant-turn-content:empty {
+  display: none;
+}
+
+.msg.assistant .bubble.bubble--image-only .assistant-turn-content {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.msg.assistant .bubble.bubble--text-image .assistant-turn-content {
+  width: max-content;
+  max-width: 100%;
+}
+
+.msg.assistant .bubble.bubble--text-image .assistant-turn-content > :first-child {
+  margin-top: 0;
+}
+
+.msg.assistant .bubble.bubble--text-image .assistant-turn-content > :last-child {
+  margin-bottom: 0;
+}
+
+.msg.assistant.msg--content-sized .msg-images {
+  align-self: flex-start;
+  flex: 0 0 auto;
+}
+
+.msg.assistant .msg-images:last-child {
+  margin-bottom: 0;
+}
+
 .msg.tool .bubble {
   background: var(--bubble-tool);
   color: var(--bubble-tool-fg);
