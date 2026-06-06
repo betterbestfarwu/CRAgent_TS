@@ -11,6 +11,7 @@ import {
   sessionHasActiveLlmContext,
 } from "@shared/chatMessages";
 import { stripSessionImagesForUi } from "@shared/sessionForUi.js";
+import { buildForkedSession } from "@shared/sessionFork.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeAuthMode } from "@shared/authMode.js";
 import { parseModelRef } from "@shared/modelRef.js";
@@ -371,6 +372,25 @@ export function installWebBridge() {
       const session = next.sessions.find((item) => item.meta.id === sessionId);
       emit(listeners.sessionChanged, session);
       return session;
+    },
+
+    async forkSession({ sessionId, messageId }) {
+      const state = ensureState();
+      const source = state.sessions.find((item) => item.meta.id === sessionId);
+      if (!source) {
+        throw new Error("未找到会话");
+      }
+      const forked = buildForkedSession(source, messageId, (options) =>
+        makeSession(state.config, options.projectId ?? null),
+      );
+      const next = updateState((current) => ({
+        ...current,
+        sessions: [forked, ...current.sessions],
+        currentSessionId: forked.meta.id,
+      }));
+      saveSessions(next.sessions);
+      emit(listeners.sessionChanged, forked);
+      return stripSessionImagesForUi(forked);
     },
 
     async sendChat({ sessionId, userInput, images = [] }) {

@@ -296,6 +296,10 @@ function registerIpc() {
         );
         return sessionForRenderer(session);
     });
+    ipcMain.handle(IPC_CHANNELS.forkSession, (_event, args) => {
+        const session = sessionStore.forkSession(args.sessionId, args.messageId);
+        return sessionForRenderer(session);
+    });
     ipcMain.handle(IPC_CHANNELS.sendChat, (_event, request) =>
         runtime.sendUserMessage(
             request.sessionId,

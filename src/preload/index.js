@@ -54,6 +54,7 @@ const api = {
     openSessionDirectory: (sessionId) =>
         ipcRenderer.invoke(IPC_CHANNELS.openSessionDirectory, sessionId),
     deleteMessages: (args) => invokeUiSession(IPC_CHANNELS.deleteMessages, args),
+    forkSession: (args) => invokeUiSession(IPC_CHANNELS.forkSession, args),
     sendChat: (request) => ipcRenderer.invoke(IPC_CHANNELS.sendChat, request),
     exitPlanMode: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.exitPlanMode, sessionId),
     openPlanFile: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.openPlanFile, sessionId),

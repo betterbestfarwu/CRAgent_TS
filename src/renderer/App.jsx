@@ -1722,6 +1722,28 @@ export function App() {
     }
   }
 
+  async function handleForkMessage(messageId) {
+    if (!currentSession || busy || !window.cragent?.forkSession) return;
+    try {
+      const session = await window.cragent.forkSession({
+        sessionId: currentSession.meta.id,
+        messageId,
+      });
+      setCurrentSession(session);
+      setFocusedProjectId(session?.meta?.projectId ?? null);
+      ensureProjectExpanded(session?.meta?.projectId);
+      setSessions((prev) => {
+        const has = prev.some((s) => s.id === session.meta.id);
+        if (has) return sortSessions(prev);
+        return sortSessions([session.meta, ...prev]);
+      });
+      setPage("chat");
+      if (compactLayout) setSidebarOpen(false);
+    } catch (err) {
+      showSessionError(err instanceof Error ? err.message : String(err), currentSession.meta.id);
+    }
+  }
+
   const chatWelcomeLayout = !active && !hasComposerDraft && !busy;
   const onSettingsPage = page === "settings";
 
@@ -1889,6 +1911,7 @@ export function App() {
                     verboseThinking={verboseThinking}
                     planContext={planContext}
                     onDelete={handleDeleteMessage}
+                    onFork={handleForkMessage}
                     onOpenImage={(image) => setViewerImage(image)}
                     onOpenPlanFile={(sessionId) => window.cragent.openPlanFile?.(sessionId)}
                   />

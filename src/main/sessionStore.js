@@ -42,6 +42,7 @@ import {
 } from "@shared/projectSessions.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeAuthMode } from "@shared/authMode.js";
+import { buildForkedSession } from "@shared/sessionFork.js";
 
 function nowIso() {
     return new Date().toISOString();
@@ -640,6 +641,13 @@ export class SessionStore {
         session.messages = session.messages.filter((message) => !idSet.has(message.id));
         this.save(session);
         return session;
+    }
+
+    forkSession(sourceSessionId, messageId) {
+        const source = this.get(sourceSessionId, { loadAllMessages: true, hydrateImages: true });
+        const session = buildForkedSession(source, messageId, (options) => this.newSession(options));
+        this.persist(session);
+        return this.get(session.meta.id, { loadAllMessages: true, hydrateImages: false });
     }
 
     updateModel(sessionId, providerKey, modelId) {

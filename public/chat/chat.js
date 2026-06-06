@@ -16,6 +16,7 @@
   var ICON_COPY = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
   var ICON_CHECK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
   var ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+  var ICON_FORK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><line x1="6" y1="9" x2="6" y2="21"></line><path d="M18 9a9 9 0 0 0-9 9"></path></svg>';
   var ICON_EXPAND = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
 
   var ICON_CHEVRON_UP = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>';
@@ -993,6 +994,26 @@
     );
   }
 
+  function buildCompletedAssistantActions(messageId) {
+    return (
+      '<button class="icon-btn" data-action="copy" data-id="' +
+      escapeAttr(messageId) +
+      '" title="复制" aria-label="复制">' +
+      ICON_COPY +
+      '</button>' +
+      '<button class="icon-btn" data-action="fork" data-id="' +
+      escapeAttr(messageId) +
+      '" title="分叉" aria-label="分叉">' +
+      ICON_FORK +
+      '</button>' +
+      '<button class="icon-btn" data-action="delete" data-id="' +
+      escapeAttr(messageId) +
+      '" title="删除" aria-label="删除">' +
+      ICON_TRASH +
+      '</button>'
+    );
+  }
+
   function buildAssistantTurn(options) {
     var thinking = options.thinking;
     if (!thinking) {
@@ -1054,16 +1075,7 @@
       time = formatTimeRange(startedAt, endedAt);
     }
     var copyAction = contentMsg
-      ? '<button class="icon-btn" data-action="copy" data-id="' +
-        escapeAttr(contentMsg.id) +
-        '" title="复制" aria-label="复制">' +
-        ICON_COPY +
-        '</button>' +
-        '<button class="icon-btn" data-action="delete" data-id="' +
-        escapeAttr(contentMsg.id) +
-        '" title="删除" aria-label="删除">' +
-        ICON_TRASH +
-        '</button>'
+      ? buildCompletedAssistantActions(contentMsg.id)
       : '<button class="icon-btn" data-action="copy-thinking" data-thinking-ids="' +
         escapeAttr(thinkingIds.join(',')) +
         '" title="复制" aria-label="复制">' +
@@ -1334,10 +1346,9 @@
     try { time = new Date(msg.created_at).toLocaleTimeString(); } catch (_) {}
     meta.innerHTML = '<span>' + roleLabel(msg.role, msg) + (time ? ' · ' + time : '') + '</span>' +
                      '<span class="actions">' +
-                       '<button class="icon-btn" data-action="copy" data-id="' + escapeAttr(msg.id) + '" title="复制" aria-label="复制">' + ICON_COPY + '</button>' +
                        (msg.role === 'assistant'
-                         ? '<button class="icon-btn" data-action="delete" data-id="' + escapeAttr(msg.id) + '" title="删除" aria-label="删除">' + ICON_TRASH + '</button>'
-                         : '') +
+                         ? buildCompletedAssistantActions(msg.id)
+                         : '<button class="icon-btn" data-action="copy" data-id="' + escapeAttr(msg.id) + '" title="复制" aria-label="复制">' + ICON_COPY + '</button>') +
                      '</span>';
     wrap.appendChild(meta);
     return wrap;
@@ -1742,6 +1753,11 @@
     if (action === 'copy' && msgEl) {
       copyToClipboard(getCopyableTextFromBubble(msgEl));
       flashCopied(btn, 3000);
+      return;
+    }
+    if (action === 'fork' && id) {
+      notifyHost({ action: 'fork', id: id });
+      return;
     }
     if (id) notifyHost({ action: action, id: id });
   });

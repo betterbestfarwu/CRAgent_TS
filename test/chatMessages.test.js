@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
     appendedMessagesNeedFullRender,
+    collectMessagesUpToTurn,
     CONTEXT_COMPACT_DIVIDER_LABEL,
     CONTEXT_DIVIDER_LABEL,
     CONTEXT_DIVIDER_ROLE,
@@ -102,4 +103,17 @@ test("appendedMessagesNeedFullRender for standalone assistant notice without run
         { id: "a2", role: "assistant", content: "当前上下文过短，暂无需压缩。" },
     ];
     assert.equal(appendedMessagesNeedFullRender(messages, 2), true);
+});
+
+test("collectMessagesUpToTurn keeps only prefix through selected turn", () => {
+    const messages = [
+        { id: "u1", role: "user", content: "one", runId: "run-1" },
+        { id: "a1", role: "assistant", content: "two", runId: "run-1" },
+        { id: "u2", role: "user", content: "three", runId: "run-2" },
+        { id: "a2", role: "assistant", content: "four", runId: "run-2" },
+    ];
+    assert.deepEqual(
+        collectMessagesUpToTurn(messages, "a1").map((message) => message.id),
+        ["u1", "a1"],
+    );
 });

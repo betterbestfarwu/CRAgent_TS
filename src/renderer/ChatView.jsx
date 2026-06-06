@@ -143,6 +143,7 @@ export function ChatView({
   verboseThinking,
   planContext,
   onDelete,
+  onFork,
   onOpenImage,
   onOpenPlanFile,
 }) {
@@ -304,6 +305,10 @@ export function ChatView({
         void onDelete?.(data.id);
       }
 
+      if (data.action === "fork" && data.id) {
+        void onFork?.(data.id);
+      }
+
       if (data.action === "openImage" && data.dataUrl) {
         onOpenImage?.({
           dataUrl: data.dataUrl,
@@ -318,7 +323,7 @@ export function ChatView({
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [busy, onDelete, onOpenImage, onOpenPlanFile, postToChat, syncIframeLayout, syncMessages]);
+  }, [busy, onDelete, onFork, onOpenImage, onOpenPlanFile, postToChat, syncIframeLayout, syncMessages]);
 
   useEffect(() => {
     if (!readyRef.current) return;

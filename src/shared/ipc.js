@@ -16,6 +16,7 @@ export const IPC_CHANNELS = {
     deleteSession: "session:delete",
     openSessionDirectory: "session:openDirectory",
     deleteMessages: "session:deleteMessages",
+    forkSession: "session:forkSession",
     sendChat: "chat:send",
     exitPlanMode: "chat:exitPlanMode",
     openPlanFile: "plan:openFile",

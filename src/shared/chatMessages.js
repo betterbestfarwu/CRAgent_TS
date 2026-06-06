@@ -95,6 +95,35 @@ function isProcessMessage(message) {
     return message.role === "assistant" && Boolean(message.toolCalls?.length);
 }
 
+/** Last message index (inclusive) for the turn containing messageId. */
+export function findTurnEndIndex(messages, messageId) {
+    const index = messages.findIndex((message) => message.id === messageId);
+    if (index < 0) return -1;
+
+    const target = messages[index];
+    const runId = getMessageRunId(target);
+    if (runId) {
+        let endIndex = index;
+        for (let i = 0; i < messages.length; i += 1) {
+            if (getMessageRunId(messages[i]) === runId) {
+                endIndex = i;
+            }
+        }
+        return endIndex;
+    }
+
+    return index;
+}
+
+/** Messages from the start through the turn containing messageId (for session fork). */
+export function collectMessagesUpToTurn(messages, messageId) {
+    const endIndex = findTurnEndIndex(messages, messageId);
+    if (endIndex < 0) {
+        return [];
+    }
+    return messages.slice(0, endIndex + 1);
+}
+
 /** IDs to remove when deleting one message (same run, or legacy thinking chain). */
 export function collectMessageIdsForDeletion(messages, messageId) {
     const index = messages.findIndex((message) => message.id === messageId);
