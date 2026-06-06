@@ -117,7 +117,7 @@ function CursorOutlineIcon({ name, size = 14 }) {
   );
 }
 
-function ProjectNodeMenu({ project, onRemove, onOpenChange }) {
+function ProjectNodeMenu({ project, onRemove, onOpenChange, onMenuAction }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
@@ -161,6 +161,7 @@ function ProjectNodeMenu({ project, onRemove, onOpenChange }) {
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
+              onMenuAction?.();
               void window.cragent?.openProjectDirectory?.(project.id);
             }}
           >
@@ -174,6 +175,7 @@ function ProjectNodeMenu({ project, onRemove, onOpenChange }) {
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
+              onMenuAction?.();
               onRemove?.(project);
             }}
           >
@@ -190,6 +192,12 @@ function ProjectNodeHead({ project, expanded, forceActionButtons, onSelect, onNe
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const showActions = hovered || forceActionButtons || menuOpen;
+
+  useEffect(() => {
+    const resetHover = () => setHovered(false);
+    window.addEventListener("blur", resetHover);
+    return () => window.removeEventListener("blur", resetHover);
+  }, []);
 
   return (
     <div
@@ -219,6 +227,7 @@ function ProjectNodeHead({ project, expanded, forceActionButtons, onSelect, onNe
               project={project}
               onRemove={onRemove}
               onOpenChange={setMenuOpen}
+              onMenuAction={() => setHovered(false)}
             />
             <button
               type="button"
@@ -266,6 +275,12 @@ function SessionRow({ meta, active, busy, unread, forceActionButtons, onSelect, 
     }
   }, [active, meta.id]);
 
+  useEffect(() => {
+    const resetHover = () => setHovered(false);
+    window.addEventListener("blur", resetHover);
+    return () => window.removeEventListener("blur", resetHover);
+  }, []);
+
   return (
     <div
       ref={rowRef}
@@ -289,6 +304,7 @@ function SessionRow({ meta, active, busy, unread, forceActionButtons, onSelect, 
               aria-label="在 Finder 中显示会话"
               onClick={(e) => {
                 e.stopPropagation();
+                setHovered(false);
                 void window.cragent?.openSessionDirectory?.(meta.id);
               }}
             >
