@@ -30,7 +30,7 @@ describe("sessionImageStorage", () => {
         assert.equal(sessionHasInlineImages(externalized), false);
         assert.match(externalized.messages[0].images[0].imageFile || "", /^msg-1-0\.png$/);
         assert.equal(
-            fs.existsSync(path.join(sessionDir(dir, "session-1"), "_Images", "msg-1-0.png")),
+            fs.existsSync(path.join(sessionDir(dir, "session-1"), "_images", "msg-1-0.png")),
             true,
         );
 
@@ -66,6 +66,27 @@ describe("sessionImageStorage", () => {
         fs.writeFileSync(path.join(legacyDir, "msg-1-0.png"), Buffer.from("ABC"));
         const session = {
             meta: { id: "session-legacy" },
+            messages: [
+                {
+                    id: "msg-1",
+                    role: "user",
+                    content: "pic",
+                    images: [{ mimeType: "image/png", imageFile: "msg-1-0.png" }],
+                },
+            ],
+        };
+
+        const hydrated = hydrateSessionImages(session, dir);
+        assert.equal(hydrated.messages[0].images[0].dataUrl, "data:image/png;base64,QUJD");
+    });
+
+    it("hydrates images from legacy split _Images storage", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-img-split-legacy-"));
+        const legacyDir = path.join(sessionDir(dir, "session-split-legacy"), "_Images");
+        fs.mkdirSync(legacyDir, { recursive: true });
+        fs.writeFileSync(path.join(legacyDir, "msg-1-0.png"), Buffer.from("ABC"));
+        const session = {
+            meta: { id: "session-split-legacy" },
             messages: [
                 {
                     id: "msg-1",

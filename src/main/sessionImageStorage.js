@@ -7,20 +7,28 @@ import {
 import { sessionDir } from "./sessionStorage.js";
 
 function imagesDir(sessionsDir, sessionId) {
+    return path.join(sessionDir(sessionsDir, sessionId), "_images");
+}
+
+function legacySplitImagesDir(sessionsDir, sessionId) {
     return path.join(sessionDir(sessionsDir, sessionId), "_Images");
 }
 
-function legacyImagesDir(sessionsDir, sessionId) {
+function legacyGlobalImagesDir(sessionsDir, sessionId) {
     return path.join(sessionsDir, "_images", sessionId);
 }
 
 function resolveImagesDir(sessionsDir, sessionId) {
-    const next = imagesDir(sessionsDir, sessionId);
-    if (fs.existsSync(next)) {
-        return next;
+    for (const dir of [
+        imagesDir(sessionsDir, sessionId),
+        legacySplitImagesDir(sessionsDir, sessionId),
+        legacyGlobalImagesDir(sessionsDir, sessionId),
+    ]) {
+        if (fs.existsSync(dir)) {
+            return dir;
+        }
     }
-    const legacy = legacyImagesDir(sessionsDir, sessionId);
-    return fs.existsSync(legacy) ? legacy : next;
+    return imagesDir(sessionsDir, sessionId);
 }
 
 function extForMime(mimeType) {
@@ -144,7 +152,11 @@ export function deleteSessionImages(sessionId, sessionsDir) {
     if (!sessionId || !sessionsDir) {
         return;
     }
-    for (const dir of [imagesDir(sessionsDir, sessionId), legacyImagesDir(sessionsDir, sessionId)]) {
+    for (const dir of [
+        imagesDir(sessionsDir, sessionId),
+        legacySplitImagesDir(sessionsDir, sessionId),
+        legacyGlobalImagesDir(sessionsDir, sessionId),
+    ]) {
         if (fs.existsSync(dir)) {
             fs.rmSync(dir, { recursive: true, force: true });
         }

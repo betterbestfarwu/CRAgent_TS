@@ -306,7 +306,7 @@ export function moveSessionStorage(fromDir, toDir, sessionId) {
         fs.renameSync(fromLegacy, toLegacy);
     }
     const fromSplitImages = path.join(fromSplit, "_Images");
-    const toSplitImages = path.join(toSplit, "_Images");
+    const toSplitImages = path.join(toSplit, "_images");
     if (fs.existsSync(fromSplitImages)) {
         if (fs.existsSync(toSplitImages)) {
             fs.rmSync(toSplitImages, { recursive: true, force: true });

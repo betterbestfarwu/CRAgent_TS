@@ -11,7 +11,9 @@ import {
     messagesFile,
     metaFile,
     migrateLegacySessionIfNeeded,
+    moveSessionStorage,
     readMessages,
+    sessionDir,
     writeSplitSession,
 } from "../src/main/sessionStorage.js";
 
@@ -102,6 +104,24 @@ describe("sessionStorage", () => {
             ["m110", "m111", "m112", "m113", "m114", "m115", "m116", "m117", "m118", "m119"],
         );
         assert.equal(tail.hasMoreBefore, true);
+    });
+
+    it("moves legacy global images into the split _images directory", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-move-images-"));
+        const fromDir = path.join(dir, "from");
+        const toDir = path.join(dir, "to");
+        const sessionId = "move-img";
+        const legacyImages = path.join(fromDir, "_images", sessionId);
+        fs.mkdirSync(legacyImages, { recursive: true });
+        fs.writeFileSync(path.join(legacyImages, "m1-0.png"), Buffer.from("ABC"));
+
+        moveSessionStorage(fromDir, toDir, sessionId);
+
+        assert.equal(
+            fs.existsSync(path.join(sessionDir(toDir, sessionId), "_images", "m1-0.png")),
+            true,
+        );
+        assert.equal(fs.existsSync(legacyImages), false);
     });
 });
 
