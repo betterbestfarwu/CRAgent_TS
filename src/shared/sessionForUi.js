@@ -1,11 +1,12 @@
 import { stripInlineImagePayloads } from "./imagePayloads.js";
 
 /** Strip heavy image payloads before sending sessions to the renderer. */
-export function stripMessageImagesForUi(message) {
+export function stripMessageImagesForUi(message, options = {}) {
     if (!message) {
         return message;
     }
 
+    const preserveDataUrl = options.preserveDataUrl === true;
     let changed = false;
     const next = { ...message };
 
@@ -44,6 +45,7 @@ export function stripMessageImagesForUi(message) {
             index,
             mimeType: image.mimeType,
             hasData: Boolean(image.dataUrl || image.imageFile),
+            ...(preserveDataUrl && image.dataUrl ? { dataUrl: image.dataUrl } : {}),
         }));
         changed = true;
     }

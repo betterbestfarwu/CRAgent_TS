@@ -19,7 +19,9 @@ function subscribe(channel, callback) {
         if (channel === IPC_CHANNELS.onMessageAppended && payload?.message) {
             callback({
                 ...payload,
-                message: stripMessageImagesForUi(payload.message),
+                message: stripMessageImagesForUi(payload.message, {
+                    preserveDataUrl: true,
+                }),
             });
             return;
         }

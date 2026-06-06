@@ -12,7 +12,9 @@ export function ipcPayloadForRenderer(channel, payload) {
     if (channel === IPC_CHANNELS.onMessageAppended && payload?.message) {
         return {
             ...payload,
-            message: stripMessageImagesForUi(payload.message),
+            message: stripMessageImagesForUi(payload.message, {
+                preserveDataUrl: true,
+            }),
         };
     }
     return payload;

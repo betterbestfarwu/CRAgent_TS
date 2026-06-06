@@ -63,6 +63,18 @@ describe("stripMessageImagesForUi", () => {
         assert.equal(stripped.images[0].hasData, true);
         assert.equal(stripped.images[0].imageFile, undefined);
     });
+
+    it("can preserve inline image data for immediate preview events", () => {
+        const message = {
+            id: "m1",
+            role: "assistant",
+            content: "",
+            images: [{ mimeType: "image/png", dataUrl: "data:image/png;base64,BBBB" }],
+        };
+        const stripped = stripMessageImagesForUi(message, { preserveDataUrl: true });
+        assert.equal(stripped.images[0].hasData, true);
+        assert.equal(stripped.images[0].dataUrl, "data:image/png;base64,BBBB");
+    });
 });
 
 describe("ipcPayloadForRenderer", () => {
@@ -91,7 +103,7 @@ describe("ipcPayloadForRenderer", () => {
             },
         };
         const stripped = ipcPayloadForRenderer(IPC_CHANNELS.onMessageAppended, payload);
-        assert.equal(stripped.message.images[0].dataUrl, undefined);
+        assert.equal(stripped.message.images[0].dataUrl, "data:image/png;base64,DDDD");
     });
 });
 

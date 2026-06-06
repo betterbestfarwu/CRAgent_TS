@@ -15,6 +15,42 @@ function imageKey(sessionId, messageId, index) {
   return `${sessionId || ""}:${messageId || ""}:${index}`;
 }
 
+function wireMessageRunId(message) {
+  return message?.run_id || "";
+}
+
+function findLastActiveRunUserIndex(messages) {
+  for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user" && wireMessageRunId(message)) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function canPatchActiveRunUpdate(messages, previousMessages) {
+  if (!messages?.length || !previousMessages?.length || messages.length !== previousMessages.length) {
+    return false;
+  }
+  const userIndex = findLastActiveRunUserIndex(messages);
+  if (userIndex < 0) return false;
+
+  const runId = wireMessageRunId(messages[userIndex]);
+  let nextIndex = userIndex + 1;
+  while (nextIndex < messages.length && wireMessageRunId(messages[nextIndex]) === runId) {
+    nextIndex += 1;
+  }
+  if (nextIndex !== messages.length) return false;
+
+  for (let index = 0; index <= userIndex; index += 1) {
+    if (JSON.stringify(messages[index]) !== JSON.stringify(previousMessages[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function toWireMessage(message, planContext, sessionId, imageDataByKey) {
   const toolCalls = message.toolCalls?.map((call) => ({
     ...(call.id ? { id: call.id } : {}),
@@ -42,11 +78,14 @@ function toWireMessage(message, planContext, sessionId, imageDataByKey) {
     ? message.images.map((image, index) => {
         const actualIndex = image.index ?? index;
         const loaded = imageDataByKey[imageKey(sessionId, message.id, actualIndex)];
+        const inlineDataUrl = image.dataUrl || null;
         return {
           index: actualIndex,
           mime_type: loaded?.mimeType || image.mimeType || "",
-          has_data: Boolean(image.hasData || loaded?.dataUrl),
-          ...(loaded?.dataUrl ? { data_url: loaded.dataUrl } : {}),
+          has_data: Boolean(image.hasData || loaded?.dataUrl || inlineDataUrl),
+          ...((loaded?.dataUrl || inlineDataUrl)
+            ? { data_url: loaded?.dataUrl || inlineDataUrl }
+            : {}),
         };
       })
     : null;
@@ -112,7 +151,7 @@ export function ChatView({
   const pendingRef = useRef([]);
   const messagesRef = useRef(messages);
   const todoRunsRef = useRef(todoRuns);
-  const wireSnapshotRef = useRef({ ids: [], todoJson: "", wireJson: "" });
+  const wireSnapshotRef = useRef({ ids: [], todoJson: "", wireJson: "", wireMessages: [] });
   const verboseThinkingRef = useRef(verboseThinking);
   const planContextRef = useRef(planContext);
   const imageDataRef = useRef({});
@@ -153,13 +192,22 @@ export function ChatView({
       prev.ids.length > 0 &&
       ids.length >= prev.ids.length &&
       prev.ids.every((id, index) => id === ids[index]);
-    const todosOnly = idsSame && todoJson !== prev.todoJson;
+    const todosOnly = idsSame && todoJson !== prev.todoJson && wireJson === prev.wireJson;
     const needsFullRender =
       idsAppended && appendedMessagesNeedFullRender(wireMessages, prev.ids.length);
+    const activeRunUpdated =
+      idsSame &&
+      wireJson !== prev.wireJson &&
+      canPatchActiveRunUpdate(wireMessages, prev.wireMessages);
 
     if (todosOnly) {
       postToChat("updateTodoRuns", todoRunsRef.current || {});
     } else if (idsAppended && ids.length > prev.ids.length && !needsFullRender) {
+      postToChat("patchActiveRun", {
+        messages: wireMessages,
+        todoRuns: todoRunsRef.current || {},
+      });
+    } else if (activeRunUpdated) {
       postToChat("patchActiveRun", {
         messages: wireMessages,
         todoRuns: todoRunsRef.current || {},
@@ -171,7 +219,7 @@ export function ChatView({
       });
     }
 
-    wireSnapshotRef.current = { ids, todoJson, wireJson };
+    wireSnapshotRef.current = { ids, todoJson, wireJson, wireMessages };
   }, [postToChat, sessionId]);
 
   useEffect(() => {
@@ -282,7 +330,7 @@ export function ChatView({
   }, [sessionModelId, postToChat]);
 
   useEffect(() => {
-    wireSnapshotRef.current = { ids: [], todoJson: "", wireJson: "" };
+    wireSnapshotRef.current = { ids: [], todoJson: "", wireJson: "", wireMessages: [] };
   }, [sessionId]);
 
   useEffect(() => {

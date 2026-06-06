@@ -1081,6 +1081,37 @@
     return wrap;
   }
 
+  function patchAssistantTurnNode(turn, nextTurn) {
+    var currentBubble = turn && turn.querySelector('.bubble');
+    var currentMeta = turn && turn.querySelector('.meta');
+    var nextBubble = nextTurn && nextTurn.querySelector('.bubble');
+    var nextMeta = nextTurn && nextTurn.querySelector('.meta');
+    if (!turn || !currentBubble || !currentMeta || !nextBubble || !nextMeta) {
+      if (turn && nextTurn) turn.replaceWith(nextTurn);
+      return nextTurn;
+    }
+
+    if (nextTurn.dataset.runId) {
+      turn.dataset.runId = nextTurn.dataset.runId;
+    } else {
+      delete turn.dataset.runId;
+    }
+    if (nextTurn.dataset.id) {
+      turn.dataset.id = nextTurn.dataset.id;
+    } else {
+      delete turn.dataset.id;
+    }
+    if (nextTurn.dataset.thinkingIds) {
+      turn.dataset.thinkingIds = nextTurn.dataset.thinkingIds;
+    } else {
+      delete turn.dataset.thinkingIds;
+    }
+
+    currentBubble.replaceWith(nextBubble);
+    currentMeta.replaceWith(nextMeta);
+    return turn;
+  }
+
   function messageModelId(msg) {
     return (msg && (msg.model_id || msg.modelId)) || '';
   }
@@ -1457,8 +1488,8 @@
         endedAt: split.finalReply.created_at,
         runId: collected.runId,
       });
-      turn.replaceWith(nextTurn);
-      applyThinkingOpenState(nextTurn);
+      var patchedTurn = patchAssistantTurnNode(turn, nextTurn);
+      applyThinkingOpenState(patchedTurn);
     } else {
       patchInProgressRunTurn(turn, collected.runId, collected.runMessages);
     }
