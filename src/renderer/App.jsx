@@ -50,6 +50,7 @@ import { PlanApprovalDialog } from "./PlanApprovalDialog.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { TitleBar } from "./TitleBar.jsx";
 import { shouldAutoSwitchToChatPage } from "./appNavigation.js";
+import { sessionShowsLoadOlder } from "./sessionUi.js";
 import { displayTitle } from "./sidebarUtils.js";
 import {
   isDefaultSessionTitle,
@@ -296,15 +297,16 @@ export function App() {
     if (!currentSession?.messages?.length || loadingOlderMessages) {
       return;
     }
+    const sessionId = currentSession.meta.id;
     const oldestId = currentSession.messages[0].id;
     setLoadingOlderMessages(true);
     try {
-      const chunk = await window.cragent.getSession(currentSession.meta.id, {
+      const chunk = await window.cragent.getSession(sessionId, {
         beforeMessageId: oldestId,
         messageLimit: DEFAULT_UI_MESSAGE_PAGE,
       });
       setCurrentSession((prev) => {
-        if (!prev || prev.meta.id !== chunk.meta.id) {
+        if (!prev || prev.meta.id !== sessionId || prev.meta.id !== chunk.meta.id) {
           return prev;
         }
         return {
@@ -336,6 +338,7 @@ export function App() {
 
   useEffect(() => {
     sessionIdRef.current = currentSession?.meta.id ?? null;
+    setLoadingOlderMessages(false);
   }, [currentSession?.meta.id]);
 
   useLayoutEffect(() => {
@@ -528,16 +531,36 @@ export function App() {
         ensureProjectExpanded(session?.meta?.projectId);
         setFocusedProjectId(session?.meta?.projectId ?? null);
         setCurrentSession((prev) => {
+          const mergedMessages = mergePreservedMessageImages(prev?.messages, session.messages);
           if (
             prev?.meta.id === session.meta.id &&
-            sessionMessagesEqual(prev.messages, session.messages) &&
+            sessionMessagesEqual(prev.messages, mergedMessages) &&
             prev.meta.updatedAt === session.meta.updatedAt
           ) {
-            return prev;
+            const messageCount =
+              session.meta.messageCount ?? prev.meta.messageCount ?? mergedMessages.length;
+            const hasMoreMessages = messageCount > mergedMessages.length;
+            if (
+              prev.meta.hasMoreMessages === hasMoreMessages &&
+              prev.meta.messageCount === messageCount
+            ) {
+              return prev;
+            }
+            return {
+              ...prev,
+              meta: { ...prev.meta, hasMoreMessages, messageCount },
+            };
           }
+          const messageCount =
+            session.meta.messageCount ?? mergedMessages.length;
           return {
             ...session,
-            messages: mergePreservedMessageImages(prev?.messages, session.messages),
+            messages: mergedMessages,
+            meta: {
+              ...session.meta,
+              messageCount,
+              hasMoreMessages: messageCount > mergedMessages.length,
+            },
           };
         });
         // Keep Settings open when the current session refreshes in the background.
@@ -1545,6 +1568,8 @@ export function App() {
 
   async function handleSwitchSession(sessionId) {
     clearSessionError();
+    sessionIdRef.current = sessionId;
+    setLoadingOlderMessages(false);
     setUnreadBySession((prev) => {
       if (!prev[sessionId]) return prev;
       const next = { ...prev };
@@ -1896,7 +1921,7 @@ export function App() {
                 </div>
               ) : (
                 <>
-                  {currentSession.meta.hasMoreMessages ? (
+                  {sessionShowsLoadOlder(currentSession) ? (
                     <div className="chat-load-older">
                       <button
                         type="button"
