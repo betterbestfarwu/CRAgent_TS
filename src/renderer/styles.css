@@ -2745,6 +2745,7 @@ body.app-sidebar-resizing {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .composer-context-popup-row {
@@ -2783,6 +2784,8 @@ body.app-sidebar-resizing {
 .composer-context-popup-preview {
   margin: 0;
   padding: 8px 10px;
+  max-width: 100%;
+  min-width: 0;
   max-height: 220px;
   overflow: auto;
   border-radius: 8px;
@@ -2792,6 +2795,7 @@ body.app-sidebar-resizing {
   font-size: 11px;
   line-height: 1.45;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   color: var(--sidebar-muted);
 }
@@ -4246,88 +4250,87 @@ body.app-sidebar-resizing {
 .confirm-dialog {
   display: flex;
   flex-direction: column;
-  width: min(100%, 320px);
-  max-height: min(92vh, 480px);
-  padding: 22px 20px 18px;
-  border-radius: 12px;
-  border: 1px solid var(--cursor-border-strong);
-  background: var(--cursor-bg-editor);
-  box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.18),
-    0 0 0 1px rgba(0, 0, 0, 0.04);
-  text-align: center;
+  width: min(100%, 420px);
+  min-width: 0;
+  max-height: min(92vh, 520px);
+  padding: 28px;
+  border-radius: 22px;
+  border: none;
+  background: #f7f7f7;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  text-align: left;
   overflow: hidden;
 }
 
-.confirm-dialog-icon {
-  display: block;
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 14px;
-  border-radius: 14px;
-  object-fit: contain;
+.confirm-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 14px;
+}
+
+.confirm-dialog-info-icon {
+  flex-shrink: 0;
+  color: #141414;
 }
 
 .confirm-dialog-title {
-  margin-bottom: 6px;
-  font-size: var(--cursor-font-size-sm);
-  font-weight: 600;
-  color: var(--cursor-fg-muted);
+  margin: 0;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #141414;
+  overflow-wrap: anywhere;
 }
 
 .confirm-dialog-body {
   flex: 0 1 auto;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
-  max-height: calc(1.4em * 10);
-  margin: 0 0 18px;
+  max-height: calc(1.55em * 12);
+  margin: 0 0 24px;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  text-align: left;
-}
-
-.confirm-dialog-message {
-  margin: 0 0 6px;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--cursor-fg);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.confirm-dialog-message:last-child {
-  margin-bottom: 0;
 }
 
 .confirm-dialog-detail {
   margin: 0;
-  font-size: var(--cursor-font-size-sm);
-  line-height: 1.4;
-  color: var(--cursor-fg-muted);
+  max-width: 100%;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #666666;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .confirm-dialog-actions {
   flex-shrink: 0;
   display: flex;
-  justify-content: center;
-  gap: 10px;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
 .confirm-dialog-btn {
-  min-width: 88px;
-  padding: 7px 16px;
-  border-radius: 999px;
-  border: 1px solid var(--cursor-border-strong);
-  background: var(--cursor-bg-sidebar);
-  color: var(--cursor-fg);
-  font-size: var(--cursor-font-size);
+  min-width: 72px;
+  padding: 8px 20px;
+  border-radius: 9px;
+  border: 1px solid #e0e0e0;
+  background: #ffffff;
+  color: #141414;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
   cursor: pointer;
 }
 
 .confirm-dialog-btn:hover {
-  background: var(--cursor-hover);
+  background: #f5f5f5;
 }
 
 .plan-approval-dialog {
@@ -4345,7 +4348,11 @@ body.app-sidebar-resizing {
 }
 
 .plan-approval-title {
-  padding-right: 32px;
+  padding-right: 0;
+}
+
+.plan-approval-header {
+  padding-right: 28px;
 }
 
 .plan-approval-close {
@@ -4497,32 +4504,94 @@ body.app-sidebar-resizing {
 }
 
 .confirm-dialog-btn-primary {
-  border-color: transparent;
-  background: var(--cursor-accent);
-  color: var(--cursor-on-accent);
+  border-color: #141414;
+  background: #141414;
+  color: #ffffff;
 }
 
 .confirm-dialog-btn-primary:hover {
-  background: var(--cursor-accent-hover);
+  background: #2a2a2a;
+  border-color: #2a2a2a;
 }
 
 .confirm-dialog-btn-primary.destructive {
-  background: var(--cursor-error-fg);
+  background: #141414;
+  border-color: #141414;
   color: #ffffff;
 }
 
 .confirm-dialog-btn-primary.destructive:hover {
-  filter: brightness(1.08);
+  background: #2a2a2a;
+  border-color: #2a2a2a;
+}
+
+.confirm-dialog-btn-accent {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--cursor-on-accent);
+}
+
+.confirm-dialog-btn-accent:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+@media (prefers-color-scheme: dark) {
+  .confirm-dialog {
+    background: #2a2a2a;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .confirm-dialog-info-icon,
+  .confirm-dialog-title {
+    color: #e4e4e4;
+  }
+
+  .confirm-dialog-detail {
+    color: rgba(228, 228, 228, 0.65);
+  }
+
+  .confirm-dialog-btn {
+    border-color: #444444;
+    background: #1e1e1e;
+    color: #e4e4e4;
+  }
+
+  .confirm-dialog-btn:hover {
+    background: #333333;
+  }
+
+  .confirm-dialog-btn-primary,
+  .confirm-dialog-btn-primary.destructive {
+    border-color: #e4e4e4;
+    background: #e4e4e4;
+    color: #141414;
+  }
+
+  .confirm-dialog-btn-primary.confirm-dialog-btn-accent {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--cursor-on-accent);
+  }
+
+  .confirm-dialog-btn-primary:hover,
+  .confirm-dialog-btn-primary.destructive:hover {
+    background: #ffffff;
+    border-color: #ffffff;
+  }
+
+  .confirm-dialog-btn-primary.confirm-dialog-btn-accent:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
 }
 
 .provider-name-dialog {
   text-align: left;
 }
 
-.provider-name-dialog .confirm-dialog-title {
-  margin-bottom: 14px;
-  text-align: center;
-  font-size: 13px;
+.provider-name-dialog .confirm-dialog-header {
+  margin-bottom: 16px;
 }
 
 .provider-name-input {
@@ -4545,7 +4614,6 @@ body.app-sidebar-resizing {
 
 .provider-name-dialog .confirm-dialog-actions {
   margin-top: 2px;
-  justify-content: center;
 }
 
 .sidebar-toggle {

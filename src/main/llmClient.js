@@ -407,7 +407,10 @@ export class LlmClient {
         };
 
         const url = buildLlmRequestUrl(provider);
-        logOutgoingMessages("complete", model, body.messages, { url });
+        logOutgoingMessages("complete", model, body.messages, {
+            url,
+            temperature: body.temperature,
+        });
 
         const response = await fetchLlmResponse(provider, body, {
             signal,
@@ -500,6 +503,7 @@ export class LlmClient {
         logOutgoingMessages("chat", model, body.messages, {
             url,
             toolCount: tools.length,
+            temperature: body.temperature,
         });
 
         const response = await fetchLlmResponse(provider, body, {

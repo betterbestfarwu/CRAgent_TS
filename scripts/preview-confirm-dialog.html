@@ -23,22 +23,27 @@
         class="confirm-dialog"
         role="alertdialog"
         aria-modal="true"
-        aria-labelledby="confirm-dialog-message"
-        aria-describedby="confirm-dialog-detail"
+        aria-labelledby="confirm-dialog-title"
+        aria-describedby="confirm-dialog-body"
       >
-        <img
-          class="confirm-dialog-icon"
-          src="../public/icon.png"
-          alt=""
-          width="64"
-          height="64"
-        />
-        <div class="confirm-dialog-title">CRAgent</div>
+        <div class="confirm-dialog-header">
+          <svg
+            class="confirm-dialog-info-icon"
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 18 18"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle cx="9" cy="9" r="7.25" stroke="currentColor" stroke-width="1.25" />
+            <path d="M9 8.25V12.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
+            <circle cx="9" cy="5.75" r="0.75" fill="currentColor" />
+          </svg>
+          <h2 id="confirm-dialog-title" class="confirm-dialog-title">允许执行工具 Shell?</h2>
+        </div>
         <div class="confirm-dialog-body">
-          <p id="confirm-dialog-message" class="confirm-dialog-message">
-            允许执行工具 Shell?
-          </p>
-          <p id="confirm-dialog-detail" class="confirm-dialog-detail"></p>
+          <p id="confirm-dialog-body" class="confirm-dialog-detail"></p>
         </div>
         <div class="confirm-dialog-actions">
           <button type="button" class="confirm-dialog-btn">拒绝</button>
@@ -47,7 +52,7 @@
       </div>
     </div>
     <script>
-      const detail = document.getElementById("confirm-dialog-detail");
+      const detail = document.getElementById("confirm-dialog-body");
       detail.textContent = Array.from({ length: 24 }, (_, i) => `${i + 1}. npm run test -- --grep hookRunner`).join(
         "\n",
       );

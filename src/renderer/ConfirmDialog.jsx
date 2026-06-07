@@ -1,6 +1,22 @@
 import { useEffect } from "react";
 
-const APP_ICON_SRC = `${import.meta.env.BASE_URL}icon.png`;
+export function ConfirmDialogInfoIcon() {
+  return (
+    <svg
+      className="confirm-dialog-info-icon"
+      xmlns="http://www.w3.org/2000/svg"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle cx="9" cy="9" r="7.25" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M9 8.25V12.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+      <circle cx="9" cy="5.75" r="0.75" fill="currentColor" />
+    </svg>
+  );
+}
 
 export function ConfirmDialog({
   title = "CRAgent",
@@ -11,6 +27,9 @@ export function ConfirmDialog({
   destructive = false,
   onClose,
 }) {
+  const headerTitle = message || (title !== "CRAgent" ? title : "");
+  const bodyText = detail || (message ? null : title !== "CRAgent" ? title : null);
+
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
@@ -27,22 +46,25 @@ export function ConfirmDialog({
         className="confirm-dialog"
         role="alertdialog"
         aria-modal="true"
-        aria-labelledby="confirm-dialog-message"
-        aria-describedby={detail ? "confirm-dialog-detail" : undefined}
+        aria-labelledby="confirm-dialog-title"
+        aria-describedby={bodyText ? "confirm-dialog-body" : undefined}
         onClick={(event) => event.stopPropagation()}
       >
-        <img className="confirm-dialog-icon" src={APP_ICON_SRC} alt="" width={64} height={64} />
-        {title ? <div className="confirm-dialog-title">{title}</div> : null}
-        <div className="confirm-dialog-body">
-          <p id="confirm-dialog-message" className="confirm-dialog-message">
-            {message}
-          </p>
-          {detail ? (
-            <p id="confirm-dialog-detail" className="confirm-dialog-detail">
-              {detail}
+        {headerTitle ? (
+          <div className="confirm-dialog-header">
+            <ConfirmDialogInfoIcon />
+            <h2 id="confirm-dialog-title" className="confirm-dialog-title">
+              {headerTitle}
+            </h2>
+          </div>
+        ) : null}
+        {bodyText ? (
+          <div className="confirm-dialog-body">
+            <p id="confirm-dialog-body" className="confirm-dialog-detail">
+              {bodyText}
             </p>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
         <div className="confirm-dialog-actions">
           <button type="button" className="confirm-dialog-btn" onClick={() => onClose(false)}>
             {cancelLabel}

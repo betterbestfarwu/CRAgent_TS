@@ -3,7 +3,7 @@ import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfi
 import { ensureMcpConfigShape } from "@shared/mcpConfig.js";
 import { DEFAULT_UI_CONFIG, mergeUiConfig } from "@shared/uiConfig.js";
 import { validateProviderConnectionFields } from "@shared/providerConnection.js";
-import { ConfirmDialog } from "./ConfirmDialog.jsx";
+import { ConfirmDialog, ConfirmDialogInfoIcon } from "./ConfirmDialog.jsx";
 import { withConfigFileLinks } from "./ConfigFileLink.jsx";
 import { SingleDotIcon } from "./DotGridAnimator.jsx";
 import { McpSettingsTab } from "./McpSettingsTab.jsx";
@@ -184,8 +184,11 @@ function ProviderNameDialog({ title, initialName = "", onClose, onConfirm }) {
         onClick={(event) => event.stopPropagation()}
         onSubmit={handleSubmit}
       >
-        <div id="provider-name-dialog-title" className="confirm-dialog-title">
-          {title}
+        <div className="confirm-dialog-header">
+          <ConfirmDialogInfoIcon />
+          <h2 id="provider-name-dialog-title" className="confirm-dialog-title">
+            {title}
+          </h2>
         </div>
         <input
           ref={inputRef}
@@ -199,7 +202,7 @@ function ProviderNameDialog({ title, initialName = "", onClose, onConfirm }) {
           <button type="button" className="confirm-dialog-btn" onClick={onClose}>
             取消
           </button>
-          <button type="submit" className="confirm-dialog-btn confirm-dialog-btn-primary">
+          <button type="submit" className="confirm-dialog-btn confirm-dialog-btn-primary confirm-dialog-btn-accent">
             保存
           </button>
         </div>

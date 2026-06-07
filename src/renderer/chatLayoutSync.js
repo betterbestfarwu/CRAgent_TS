@@ -1,7 +1,6 @@
 const LAYOUT_VARS = [
   "--chat-gutter-x",
   "--chat-inner-x",
-  "--chat-bg",
 ];
 
 /** Copy shell chat layout tokens from the renderer into the chat iframe document. */
@@ -17,8 +16,8 @@ export function injectChatLayout(iframeDoc) {
     }
   }
 
-  const chatBg = parentStyle.getPropertyValue("--chat-bg").trim();
-  if (chatBg) {
-    target.style.setProperty("--bg", chatBg);
-  }
+  // Theme tokens must come from cursor-theme.css media queries; injecting computed
+  // colors as inline custom properties freezes them when the OS theme changes.
+  target.style.removeProperty("--bg");
+  target.style.removeProperty("--chat-bg");
 }
