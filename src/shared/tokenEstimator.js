@@ -1,4 +1,4 @@
-import { isContextDividerMessage } from "./chatMessages.js";
+import { getActiveLlmContextStartIndex, isContextDividerMessage } from "./chatMessages.js";
 import { stripInlineImagePayloads } from "./imagePayloads.js";
 
 const IMAGE_TOKEN_ESTIMATE = 2000;
@@ -77,7 +77,7 @@ export function calculateAutoCompactThreshold(model, options = {}) {
 
 export function estimateSessionContextUsage(session, model, options = {}) {
     const bootstrapOverhead = options.bootstrapOverhead ?? DEFAULT_BOOTSTRAP_OVERHEAD;
-    const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+    const fromIndex = getActiveLlmContextStartIndex(session);
     const active = session.messages
         .slice(fromIndex)
         .filter((message) => !isContextDividerMessage(message));
@@ -231,7 +231,7 @@ export function reconcileContextBreakdownCategories(categories, targetTotal) {
 
 export function estimateSessionContextBreakdown(session, model, options = {}) {
     const usage = estimateSessionContextUsage(session, model, options);
-    const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+    const fromIndex = getActiveLlmContextStartIndex(session);
     const active = session.messages
         .slice(fromIndex)
         .filter((message) => !isContextDividerMessage(message));

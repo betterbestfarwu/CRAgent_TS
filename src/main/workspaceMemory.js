@@ -28,9 +28,9 @@ const DEFAULT_AGENTS = `# AGENTS.md
 - Use \`memory_get\` / \`memory_search\` to read; never invent memory updates on your own.
 
 ## Tools
-- Use \`bash\`, \`read_file\`, \`write_file\`, \`list_dir\` for code and files.
-- **Skills** live in \`~/.CRAgent/skills/\` — catalog is in the system prompt; use \`load_skill\` for full instructions.
-- Use \`download_skill\` / \`delete_skill\` to install or remove skills from a URL.
+- Use the smallest tool that can answer the task.
+- Use \`read_file\` and \`list_dir\` to inspect files and directories, \`write_file\` to create or overwrite text files, and \`bash\` only for shell commands that file tools cannot express.
+- **Skills** live in \`~/.CRAgent/skills/\` — use \`load_skill\` only when a named skill matches the task; use \`download_skill\` to install a skill from a URL and \`delete_skill\` to remove an installed skill.
 - Workspace root: \`~/.CRAgent\` (configurable via agents.default.workspace).
 
 ## Safety
@@ -136,6 +136,7 @@ export class WorkspaceMemory {
         let out = `<workspace_bootstrap workspace="${root}">
 You are a fresh instance each session; continuity lives in these workspace files.
 Follow AGENTS.md procedures. Match SOUL.md tone. Personalize using USER.md.
+Use the smallest correct tool. Prefer read-only tools first, and write only when the task requires it.
 Do not write to MEMORY.md or memory/*.md unless the user explicitly asks you to remember something. Never log shell commands or casual chat there.
 
 `;

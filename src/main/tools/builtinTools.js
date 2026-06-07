@@ -107,14 +107,24 @@ export function createBuiltinTools({
             name: "read_file",
             requiresConfirmation: false,
             enabled: () => getAgentTools().enable_file_tools !== false,
-            schema: fnSchema("read_file", "Read a UTF-8 text file inside the agent workspace.", {
+            schema: fnSchema(
+                "read_file",
+                "Read a UTF-8 text file in the agent workspace. Returns the file contents, optionally truncated to max_bytes.",
+                {
                 type: "object",
                 properties: {
-                    path: { type: "string", description: "Path relative to workspace or absolute under workspace" },
-                    max_bytes: { type: "integer", description: "Optional cap; defaults to 200000" },
+                    path: {
+                        type: "string",
+                        description: "Workspace-relative path, or an absolute path contained in the workspace",
+                    },
+                    max_bytes: {
+                        type: "integer",
+                        description: "Optional byte cap for the returned text; defaults to 200000",
+                    },
                 },
                 required: ["path"],
-            }),
+                },
+            ),
             async execute(args, context) {
                 const workspace = getAgentWorkspace(context?.sessionId);
                 const filePath = resolveToolFilePath(workspace, args.path, context);
@@ -137,12 +147,19 @@ export function createBuiltinTools({
             enabled: () => getAgentTools().enable_file_tools !== false,
             schema: fnSchema(
                 "write_file",
-                "Create or overwrite a UTF-8 text file. Project code stays in the workspace; paths like plan.md or .cragent/... are stored under the session data directory (Projects/<projectId>/sessions/<sessionId>/).",
+                "Create or overwrite a UTF-8 text file. Use it for text-only files; plan.md and .cragent/... paths are redirected to the session storage directory (Projects/<projectId>/sessions/<sessionId>/).",
                 {
                 type: "object",
                 properties: {
-                    path: { type: "string" },
-                    content: { type: "string" },
+                    path: {
+                        type: "string",
+                        description:
+                            "Workspace-relative path, or a session file path such as plan.md or .cragent/...",
+                    },
+                    content: {
+                        type: "string",
+                        description: "Full file contents to write",
+                    },
                 },
                 required: ["path", "content"],
                 },
@@ -160,10 +177,13 @@ export function createBuiltinTools({
             name: "list_dir",
             requiresConfirmation: false,
             enabled: () => getAgentTools().enable_file_tools !== false,
-            schema: fnSchema("list_dir", "List files in a workspace directory.", {
+            schema: fnSchema("list_dir", "List entries in a workspace directory and return one name per line.", {
                 type: "object",
                 properties: {
-                    path: { type: "string", description: "Directory relative to workspace; defaults to workspace root" },
+                    path: {
+                        type: "string",
+                        description: "Directory relative to the workspace root; defaults to the workspace root",
+                    },
                 },
             }),
             async execute(args, context) {
@@ -189,13 +209,19 @@ export function createBuiltinTools({
             schema: fnSchema(
                 "bash",
                 shellRuntime
-                    ? `Run a shell command via ${describeShellInvocation(shellRuntime)}. Defaults to the agent workspace (~/.CRAgent).`
-                    : "Run a shell command in the agent workspace (~/.CRAgent).",
+                    ? `Run one shell command via ${describeShellInvocation(shellRuntime)}. Use for shell-only tasks that file tools cannot express. Defaults to the agent workspace (~/.CRAgent).`
+                    : "Run one shell command in the agent workspace (~/.CRAgent). Use for shell-only tasks that file tools cannot express.",
                 {
                     type: "object",
                     properties: {
-                        command: { type: "string", description: "Shell command line" },
-                        cwd: { type: "string", description: "Working directory (defaults to workspace)" },
+                        command: {
+                            type: "string",
+                            description: "Single shell command line to run",
+                        },
+                        cwd: {
+                            type: "string",
+                            description: "Working directory for the command; defaults to the workspace root",
+                        },
                     },
                     required: ["command"],
                 },
@@ -239,9 +265,14 @@ export function createBuiltinTools({
             name: "web_fetch",
             requiresConfirmation: false,
             enabled: () => getAgentTools().enable_tools !== false,
-            schema: fnSchema("web_fetch", "Fetch webpage content by URL", {
+            schema: fnSchema("web_fetch", "Fetch the raw text/HTML content of an HTTP(S) URL.", {
                 type: "object",
-                properties: { url: { type: "string" } },
+                properties: {
+                    url: {
+                        type: "string",
+                        description: "HTTP(S) URL to fetch",
+                    },
+                },
                 required: ["url"],
             }),
             async execute(args, context) {
@@ -266,13 +297,13 @@ export function createBuiltinTools({
             enabled: () => getAgentTools().enable_tools !== false,
             schema: fnSchema(
                 "memory_get",
-                "Read a workspace memory file (SOUL.md, AGENTS.md, USER.md, MEMORY.md, or memory/YYYY-MM-DD.md).",
+                "Read one workspace memory file: SOUL.md, AGENTS.md, USER.md, MEMORY.md, memory.md, or memory/YYYY-MM-DD.md.",
                 {
                     type: "object",
                     properties: {
                         path: {
                             type: "string",
-                            description: "e.g. MEMORY.md, SOUL.md, memory/2026-05-27.md",
+                            description: "Examples: MEMORY.md, SOUL.md, memory/2026-05-27.md",
                         },
                     },
                     required: ["path"],
@@ -293,12 +324,12 @@ export function createBuiltinTools({
             enabled: () => getAgentTools().enable_tools !== false,
             schema: fnSchema(
                 "memory_search",
-                "Search MEMORY.md and memory/*.md for a regex pattern.",
+                "Search MEMORY.md and memory/*.md with a JavaScript regular expression.",
                 {
                     type: "object",
                     properties: {
-                        pattern: { type: "string", description: "Regex pattern" },
-                        case_insensitive: { type: "boolean", description: "Default false" },
+                        pattern: { type: "string", description: "JavaScript RegExp pattern" },
+                        case_insensitive: { type: "boolean", description: "If true, add the i flag" },
                     },
                     required: ["pattern"],
                 },
@@ -347,12 +378,15 @@ export function createBuiltinTools({
             enabled: () => getAgentTools().enable_skills !== false,
             schema: fnSchema(
                 "load_skill",
-                "Load the full body of a named skill. See system prompt for the skill catalog.",
+                "Load the full body of an installed skill by exact name. Use it when the task clearly matches a known skill.",
                 {
                     type: "object",
                     properties: {
-                        name: { type: "string", description: "Skill name to load" },
-                        url: { type: "string", description: "Optional; used to derive name if name is omitted" },
+                        name: { type: "string", description: "Exact skill name to load" },
+                        url: {
+                            type: "string",
+                            description: "Optional source URL used to derive the skill name if name is omitted",
+                        },
                     },
                 },
             ),
@@ -367,11 +401,11 @@ export function createBuiltinTools({
             enabled: () => getAgentTools().enable_skills !== false,
             schema: fnSchema(
                 "download_skill",
-                "Download and install a skill from a URL into ~/.CRAgent/skills/<name>/SKILL.md",
+                "Download and install a skill from a URL into ~/.CRAgent/skills/<name>/SKILL.md.",
                 {
                     type: "object",
                     properties: {
-                        url: { type: "string", description: "Skill source URL" },
+                        url: { type: "string", description: "HTTP(S) URL of the skill source" },
                         name: { type: "string", description: "Optional local skill name" },
                     },
                     required: ["url"],
@@ -387,12 +421,15 @@ export function createBuiltinTools({
             enabled: () => getAgentTools().enable_skills !== false,
             schema: fnSchema(
                 "delete_skill",
-                "Delete an installed skill directory from ~/.CRAgent/skills/",
+                "Delete an installed skill directory from ~/.CRAgent/skills/.",
                 {
                     type: "object",
                     properties: {
-                        name: { type: "string", description: "Installed skill name" },
-                        url: { type: "string", description: "Optional; used to derive name if name is omitted" },
+                        name: { type: "string", description: "Exact installed skill name" },
+                        url: {
+                            type: "string",
+                            description: "Optional source URL used to derive the skill name if name is omitted",
+                        },
                     },
                 },
             ),

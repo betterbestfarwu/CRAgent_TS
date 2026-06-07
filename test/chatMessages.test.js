@@ -7,13 +7,17 @@ import {
     CONTEXT_DIVIDER_LABEL,
     CONTEXT_DIVIDER_ROLE,
     dedupeConsecutiveContextDividers,
+    reconcileLlmContextAfterMessageRemoval,
+    removeAdjacentDuplicateContextDividers,
+    normalizeLlmContextMeta,
+    getActiveLlmContextStartIndex,
     sessionHasActiveLlmContext,
     stableUserWireMessage,
     userImagesWireFingerprint,
 } from "../src/shared/chatMessages.js";
 
-function divider(content) {
-    return { id: `d-${content}`, role: CONTEXT_DIVIDER_ROLE, content };
+function divider(content, id = `d-${content}`) {
+    return { id, role: CONTEXT_DIVIDER_ROLE, content };
 }
 
 test("dedupeConsecutiveContextDividers collapses adjacent same-label dividers", () => {
@@ -48,11 +52,12 @@ test("dedupeConsecutiveContextDividers keeps separated same-label dividers", () 
 });
 
 test("sessionHasActiveLlmContext false when context already cleared", () => {
+    const dividerMessage = divider(CONTEXT_DIVIDER_LABEL, "d1");
     const session = {
-        meta: { llmContextFromIndex: 2 },
+        meta: { llmContextDividerId: "d1" },
         messages: [
             { id: "u1", role: "user", content: "old" },
-            divider(CONTEXT_DIVIDER_LABEL),
+            dividerMessage,
         ],
     };
     assert.equal(sessionHasActiveLlmContext(session), false);
@@ -62,11 +67,12 @@ test("sessionHasActiveLlmContext false for empty session", () => {
     assert.equal(sessionHasActiveLlmContext({ meta: {}, messages: [] }), false);
 });
 
-test("sessionHasActiveLlmContext true when messages follow divider index", () => {
+test("sessionHasActiveLlmContext true when messages follow divider", () => {
+    const dividerMessage = divider(CONTEXT_DIVIDER_LABEL, "d1");
     const session = {
-        meta: { llmContextFromIndex: 1 },
+        meta: { llmContextDividerId: "d1" },
         messages: [
-            divider(CONTEXT_DIVIDER_LABEL),
+            dividerMessage,
             { id: "u1", role: "user", content: "active", runId: "run-1" },
         ],
     };
@@ -174,4 +180,188 @@ test("collectMessagesUpToTurn keeps only prefix through selected turn", () => {
         collectMessagesUpToTurn(messages, "a1").map((message) => message.id),
         ["u1", "a1"],
     );
+});
+
+test("reconcileLlmContextAfterMessageRemoval keeps llmContextDividerId when deleting before divider", () => {
+    const dividerMessage = {
+        id: "d1",
+        role: CONTEXT_DIVIDER_ROLE,
+        content: CONTEXT_DIVIDER_LABEL,
+    };
+    const session = {
+        meta: { llmContextDividerId: "d1" },
+        messages: [
+            { id: "u1", role: "user", content: "old" },
+            dividerMessage,
+            { id: "u2", role: "user", content: "new", runId: "run-1" },
+        ],
+    };
+    session.messages = session.messages.filter((message) => message.id !== "u1");
+    reconcileLlmContextAfterMessageRemoval(session);
+    assert.equal(session.meta.llmContextDividerId, "d1");
+    assert.equal(getActiveLlmContextStartIndex(session), 1);
+    assert.equal(dividerMessage.llmContextFromIndex, undefined);
+});
+
+test("reconcileLlmContextAfterMessageRemoval clears meta when dividers removed", () => {
+    const session = {
+        meta: {
+            llmContextDividerId: "d-old",
+            contextSummary: "old summary",
+            postCompactContext: "restored",
+        },
+        messages: [{ id: "u1", role: "user", content: "only message" }],
+    };
+    reconcileLlmContextAfterMessageRemoval(session);
+    assert.equal(session.meta.llmContextDividerId, undefined);
+    assert.equal(session.meta.contextSummary, undefined);
+    assert.equal(session.meta.postCompactContext, undefined);
+});
+
+test("reconcileLlmContextAfterMessageRemoval keeps compact divider metadata", () => {
+    const dividerMessage = {
+        id: "d1",
+        role: CONTEXT_DIVIDER_ROLE,
+        content: CONTEXT_COMPACT_DIVIDER_LABEL,
+        contextSummary: "compressed summary",
+        postCompactContext: "file context",
+    };
+    const session = {
+        meta: { llmContextDividerId: "d1" },
+        messages: [
+            { id: "u1", role: "user", content: "old" },
+            dividerMessage,
+            { id: "u2", role: "user", content: "new" },
+        ],
+    };
+    reconcileLlmContextAfterMessageRemoval(session);
+    assert.equal(session.meta.llmContextDividerId, "d1");
+    assert.equal(session.meta.contextSummary, "compressed summary");
+    assert.equal(session.meta.postCompactContext, "file context");
+});
+
+test("reconcileLlmContextAfterMessageRemoval removes orphan dividers", () => {
+    const session = {
+        meta: {
+            llmContextFromIndex: 2,
+            contextSummary: "summary",
+            postCompactContext: "restored",
+            sessionMemory: "memory",
+            sessionMemoryUpToIndex: 1,
+            recentFiles: ["a.js"],
+            compactFailures: 2,
+        },
+        messages: [
+            {
+                id: "d1",
+                role: CONTEXT_DIVIDER_ROLE,
+                content: CONTEXT_DIVIDER_LABEL,
+                llmContextFromIndex: 5,
+            },
+            {
+                id: "d2",
+                role: CONTEXT_DIVIDER_ROLE,
+                content: CONTEXT_COMPACT_DIVIDER_LABEL,
+                llmContextFromIndex: 6,
+                contextSummary: "summary",
+            },
+        ],
+    };
+    reconcileLlmContextAfterMessageRemoval(session);
+    assert.deepEqual(session.messages, []);
+    assert.equal(session.meta.llmContextDividerId, undefined);
+    assert.equal(session.meta.contextSummary, undefined);
+    assert.equal(session.meta.postCompactContext, undefined);
+    assert.equal(session.meta.sessionMemory, undefined);
+    assert.equal(session.meta.recentFiles, undefined);
+    assert.equal(session.meta.compactFailures, 0);
+});
+
+test("removeAdjacentDuplicateContextDividers drops later adjacent divider", () => {
+    const messages = [
+        {
+            id: "d1",
+            role: CONTEXT_DIVIDER_ROLE,
+            content: CONTEXT_DIVIDER_LABEL,
+        },
+        {
+            id: "d2",
+            role: CONTEXT_DIVIDER_ROLE,
+            content: CONTEXT_COMPACT_DIVIDER_LABEL,
+            contextSummary: "summary",
+        },
+        { id: "u1", role: "user", content: "after" },
+    ];
+    const deduped = removeAdjacentDuplicateContextDividers(messages);
+    assert.deepEqual(
+        deduped.map((message) => message.id),
+        ["d1", "u1"],
+    );
+});
+
+test("removeAdjacentDuplicateContextDividers collapses three adjacent dividers", () => {
+    const messages = [
+        { id: "d1", role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
+        { id: "d2", role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_COMPACT_DIVIDER_LABEL },
+        { id: "d3", role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
+        { id: "u1", role: "user", content: "after" },
+    ];
+    const deduped = removeAdjacentDuplicateContextDividers(messages);
+    assert.deepEqual(
+        deduped.map((message) => message.id),
+        ["d1", "u1"],
+    );
+});
+
+test("reconcileLlmContextAfterMessageRemoval dedupes adjacent dividers and updates meta", () => {
+    const session = {
+        meta: {
+            llmContextDividerId: "d2",
+            contextSummary: "summary",
+            postCompactContext: "restored",
+        },
+        messages: [
+            { id: "u1", role: "user", content: "old" },
+            {
+                id: "d1",
+                role: CONTEXT_DIVIDER_ROLE,
+                content: CONTEXT_DIVIDER_LABEL,
+            },
+            {
+                id: "d2",
+                role: CONTEXT_DIVIDER_ROLE,
+                content: CONTEXT_COMPACT_DIVIDER_LABEL,
+                contextSummary: "summary",
+                postCompactContext: "restored",
+            },
+            { id: "u2", role: "user", content: "new" },
+        ],
+    };
+    reconcileLlmContextAfterMessageRemoval(session);
+    assert.deepEqual(
+        session.messages.map((message) => message.id),
+        ["u1", "d1", "u2"],
+    );
+    assert.equal(session.meta.llmContextDividerId, "d1");
+    assert.equal(session.meta.contextSummary, undefined);
+    assert.equal(session.meta.postCompactContext, undefined);
+});
+
+test("normalizeLlmContextMeta migrates legacy llmContextFromIndex to divider id", () => {
+    const dividerMessage = {
+        id: "d1",
+        role: CONTEXT_DIVIDER_ROLE,
+        content: CONTEXT_DIVIDER_LABEL,
+        llmContextFromIndex: 2,
+    };
+    const meta = { llmContextFromIndex: 2 };
+    const messages = [
+        { id: "u1", role: "user", content: "old" },
+        dividerMessage,
+        { id: "u2", role: "user", content: "new" },
+    ];
+    normalizeLlmContextMeta(meta, messages);
+    assert.equal(meta.llmContextDividerId, "d1");
+    assert.equal(meta.llmContextFromIndex, undefined);
+    assert.equal(dividerMessage.llmContextFromIndex, undefined);
 });

@@ -20,54 +20,252 @@ export function isContextCompactDivider(message) {
 }
 
 /**
- * Derive LLM context window for a forked message slice from context dividers.
- * Uses divider position in the forked array (not parent session meta).
- * Compact summaries are read from the divider when present, with source meta as fallback.
+ * Derive LLM context anchor for a forked message slice from the last context divider.
  */
 export function resolveForkLlmContext(messages, sourceMeta = {}) {
-    let llmContextFromIndex = 0;
+    const lastDivider = getLastContextDividerMessage(messages);
     let contextSummary;
     let postCompactContext;
-    let lastCompactDividerIndex = -1;
 
-    for (let index = 0; index < messages.length; index += 1) {
-        const message = messages[index];
-        if (!isContextDividerMessage(message)) {
-            continue;
-        }
-        llmContextFromIndex = index + 1;
-        if (isContextCompactDivider(message)) {
-            lastCompactDividerIndex = index;
-            contextSummary = message.contextSummary;
-            postCompactContext = message.postCompactContext;
-        } else {
-            contextSummary = undefined;
-            postCompactContext = undefined;
-        }
+    if (lastDivider && isContextCompactDivider(lastDivider)) {
+        contextSummary = lastDivider.contextSummary;
+        postCompactContext = lastDivider.postCompactContext;
+    } else if (lastDivider) {
+        contextSummary = undefined;
+        postCompactContext = undefined;
     }
 
     if (
-        lastCompactDividerIndex >= 0 &&
+        lastDivider &&
+        isContextCompactDivider(lastDivider) &&
         !contextSummary &&
         sourceMeta.contextSummary &&
-        (sourceMeta.llmContextFromIndex ?? 0) === lastCompactDividerIndex + 1
+        sourceMeta.llmContextDividerId === lastDivider.id
     ) {
         contextSummary = sourceMeta.contextSummary;
         postCompactContext = sourceMeta.postCompactContext;
     }
 
-    llmContextFromIndex = Math.min(llmContextFromIndex, messages.length);
     return {
-        llmContextFromIndex: llmContextFromIndex > 0 ? llmContextFromIndex : undefined,
+        llmContextDividerId: lastDivider?.id,
         contextSummary,
         postCompactContext,
     };
 }
 
+export function getLastContextDividerMessage(messages) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (isContextDividerMessage(message)) {
+            return message;
+        }
+    }
+    return null;
+}
+
+function findContextDividerIndex(messages, dividerId) {
+    if (!dividerId) {
+        return -1;
+    }
+    return messages.findIndex((message) => message.id === dividerId);
+}
+
+/** Array index where active LLM context begins (first message after the anchored divider). */
+export function getActiveLlmContextStartIndex(session) {
+    const messages = session?.messages || [];
+    const meta = session?.meta || {};
+
+    if (meta.llmContextDividerId) {
+        const dividerIndex = findContextDividerIndex(messages, meta.llmContextDividerId);
+        if (dividerIndex >= 0) {
+            return dividerIndex + 1;
+        }
+        const lastDivider = getLastContextDividerMessage(messages);
+        return lastDivider ? findContextDividerIndex(messages, lastDivider.id) + 1 : 0;
+    }
+
+    if (meta.llmContextFromIndex != null) {
+        return Math.max(0, Math.min(meta.llmContextFromIndex, messages.length));
+    }
+
+    return 0;
+}
+
+function syncCompactMetaFromDivider(meta, divider) {
+    if (isContextCompactDivider(divider)) {
+        let contextSummary = divider.contextSummary;
+        let postCompactContext = divider.postCompactContext;
+        if (!contextSummary && meta.contextSummary) {
+            contextSummary = meta.contextSummary;
+            postCompactContext = meta.postCompactContext;
+        }
+        if (contextSummary) {
+            meta.contextSummary = contextSummary;
+        } else {
+            delete meta.contextSummary;
+        }
+        if (postCompactContext) {
+            meta.postCompactContext = postCompactContext;
+        } else {
+            delete meta.postCompactContext;
+        }
+        return;
+    }
+    delete meta.contextSummary;
+    delete meta.postCompactContext;
+}
+
+function stripLegacyDividerIndices(messages) {
+    for (const message of messages) {
+        if (isContextDividerMessage(message) && message.llmContextFromIndex != null) {
+            delete message.llmContextFromIndex;
+        }
+    }
+}
+
+/** Migrate legacy llmContextFromIndex and repair stale divider ids after load. */
+export function normalizeLlmContextMeta(meta, messages) {
+    if (!meta) {
+        return;
+    }
+
+    if (meta.llmContextDividerId) {
+        if (findContextDividerIndex(messages, meta.llmContextDividerId) < 0) {
+            const lastDivider = getLastContextDividerMessage(messages);
+            if (lastDivider) {
+                meta.llmContextDividerId = lastDivider.id;
+            } else {
+                delete meta.llmContextDividerId;
+            }
+        }
+        delete meta.llmContextFromIndex;
+        const divider = messages.find((message) => message.id === meta.llmContextDividerId);
+        if (divider) {
+            syncCompactMetaFromDivider(meta, divider);
+        }
+        stripLegacyDividerIndices(messages);
+        return;
+    }
+
+    if (meta.llmContextFromIndex == null) {
+        stripLegacyDividerIndices(messages);
+        return;
+    }
+
+    const legacyStart = meta.llmContextFromIndex;
+    if (legacyStart > 0 && legacyStart <= messages.length) {
+        const candidate = messages[legacyStart - 1];
+        if (isContextDividerMessage(candidate)) {
+            meta.llmContextDividerId = candidate.id;
+        }
+    }
+    if (!meta.llmContextDividerId && legacyStart < messages.length) {
+        const lastDivider = getLastContextDividerMessage(messages);
+        if (lastDivider) {
+            meta.llmContextDividerId = lastDivider.id;
+        }
+    }
+    delete meta.llmContextFromIndex;
+    stripLegacyDividerIndices(messages);
+    if (meta.llmContextDividerId) {
+        const divider = messages.find((message) => message.id === meta.llmContextDividerId);
+        if (divider) {
+            syncCompactMetaFromDivider(meta, divider);
+        }
+    }
+}
+
+function hasConversationMessages(messages) {
+    return (messages || []).some((message) => !isContextDividerMessage(message));
+}
+
+function clearLlmContextMeta(meta) {
+    delete meta.llmContextDividerId;
+    delete meta.llmContextFromIndex;
+    delete meta.contextSummary;
+    delete meta.postCompactContext;
+    delete meta.recentFiles;
+    delete meta.recentSkills;
+    delete meta.sessionMemory;
+    delete meta.sessionMemoryUpToIndex;
+    delete meta.sessionMemoryUpdatedAt;
+    delete meta.sessionMemoryRefreshBusy;
+    meta.compactFailures = 0;
+}
+
+/** Drop the later of two adjacent context dividers. */
+export function removeAdjacentDuplicateContextDividers(messages) {
+    if (!messages?.length) {
+        return messages || [];
+    }
+    let result = messages;
+    let changed = true;
+    while (changed) {
+        changed = false;
+        const next = [];
+        for (const message of result) {
+            if (
+                isContextDividerMessage(message) &&
+                next.length > 0 &&
+                isContextDividerMessage(next[next.length - 1])
+            ) {
+                changed = true;
+                continue;
+            }
+            next.push(message);
+        }
+        result = next;
+    }
+    return result;
+}
+
+function syncLlmContextDividerMeta(meta, messages) {
+    delete meta.llmContextFromIndex;
+    stripLegacyDividerIndices(messages);
+    const lastDivider = getLastContextDividerMessage(messages);
+    if (lastDivider) {
+        meta.llmContextDividerId = lastDivider.id;
+        syncCompactMetaFromDivider(meta, lastDivider);
+        return;
+    }
+    delete meta.llmContextDividerId;
+    delete meta.contextSummary;
+    delete meta.postCompactContext;
+}
+
+/**
+ * After messages are removed, repair divider anchor and meta.
+ * Deleting messages before the anchored divider does not require meta updates.
+ */
+export function reconcileLlmContextAfterMessageRemoval(session) {
+    let messages = session?.messages || [];
+    const meta = session.meta || (session.meta = {});
+
+    if (!hasConversationMessages(messages)) {
+        messages = [];
+        session.messages = messages;
+        clearLlmContextMeta(meta);
+        return session;
+    }
+
+    messages = removeAdjacentDuplicateContextDividers(messages);
+    session.messages = messages;
+
+    if (
+        meta.llmContextDividerId &&
+        findContextDividerIndex(messages, meta.llmContextDividerId) < 0
+    ) {
+        delete meta.llmContextDividerId;
+    }
+
+    syncLlmContextDividerMeta(meta, messages);
+    return session;
+}
+
 /** Messages currently sent to the LLM (after the last context reset, excluding dividers). */
 export function getActiveLlmContextEntries(session) {
     const messages = session?.messages || [];
-    const fromIndex = Math.max(0, session?.meta?.llmContextFromIndex ?? 0);
+    const fromIndex = getActiveLlmContextStartIndex(session);
     const entries = [];
     for (let index = fromIndex; index < messages.length; index += 1) {
         const message = messages[index];

@@ -78,7 +78,7 @@ export function createPlanModeTools({ sessionStore, resolveWorkspaceForSession }
             },
             schema: fnSchema(
                 "enter_plan_mode",
-                "Switch to Plan mode only when the user's latest message explicitly asks to enter Plan Mode. Do not use for ordinary questions, explanations, summaries, translations, or implementation requests.",
+                "Switch to Plan mode only when the user's latest message explicitly requests Plan Mode. Do not use for ordinary questions, explanations, summaries, translations, or implementation requests.",
                 { type: "object", properties: {}, additionalProperties: false },
             ),
             async execute(_args, context) {

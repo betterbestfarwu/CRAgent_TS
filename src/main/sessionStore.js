@@ -44,6 +44,7 @@ import {
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeAuthMode } from "@shared/authMode.js";
 import { buildForkedSession } from "@shared/sessionFork.js";
+import { reconcileLlmContextAfterMessageRemoval, normalizeLlmContextMeta } from "@shared/chatMessages.js";
 
 function nowIso() {
     return new Date().toISOString();
@@ -565,6 +566,10 @@ export class SessionStore {
             messages = session.messages;
         }
 
+        if (normalized.loadAllMessages) {
+            normalizeLlmContextMeta(meta, messages);
+        }
+
         meta = {
             ...session.meta,
             messageCount: totalCount,
@@ -675,6 +680,7 @@ export class SessionStore {
         const idSet = new Set(messageIds);
         const session = this.get(sessionId, { loadAllMessages: true, hydrateImages: false });
         session.messages = session.messages.filter((message) => !idSet.has(message.id));
+        reconcileLlmContextAfterMessageRemoval(session);
         this.save(session);
         return session;
     }
@@ -771,6 +777,7 @@ export class SessionStore {
         this.ensureMigrated(session.meta.id);
         const sessionsDir = this.locateSessionStorage(session.meta.id);
         const payload = externalizeSessionImages(session, sessionsDir);
+        normalizeLlmContextMeta(payload.meta, payload.messages);
         const meta = enrichMeta(
             { ...payload.meta, updatedAt: payload.meta.updatedAt || nowIso() },
             payload.messages,

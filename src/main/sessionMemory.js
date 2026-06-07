@@ -1,4 +1,4 @@
-import { isContextDividerMessage } from "@shared/chatMessages";
+import { getActiveLlmContextStartIndex, isContextDividerMessage } from "@shared/chatMessages";
 import { estimateMessagesTokens, estimateTextTokens } from "@shared/tokenEstimator";
 import { groupMessagesByApiRound } from "./contextGrouping.js";
 import { formatMessagesForSummary } from "./contextCompression.js";
@@ -33,7 +33,7 @@ export function formatSessionMemory(raw) {
 }
 
 export function getPendingMemoryMessages(session) {
-    const contextFrom = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+    const contextFrom = getActiveLlmContextStartIndex(session);
     const memoryFrom = Math.max(contextFrom, (session.meta.sessionMemoryUpToIndex ?? contextFrom - 1) + 1);
     return session.messages
         .slice(memoryFrom)

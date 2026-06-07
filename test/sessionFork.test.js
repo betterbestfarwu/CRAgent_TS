@@ -10,6 +10,7 @@ import {
     remapTodoRunsForFork,
 } from "../src/shared/sessionFork.js";
 import { SessionStore } from "../src/main/sessionStore.js";
+import { messagesFile, metaFile } from "../src/main/sessionStorage.js";
 
 describe("collectMessagesUpToTurn", () => {
     it("includes earlier turns and the selected completed run", () => {
@@ -121,6 +122,195 @@ describe("SessionStore.forkSession", () => {
     });
 });
 
+describe("SessionStore.removeMessages", () => {
+    it("keeps llmContextDividerId when deleting messages before divider", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-remove-msg-"));
+        const store = new SessionStore(dir, { providerKey: "openai", modelId: "gpt-4o-mini" });
+        const source = store.newSession();
+        store.appendMessage(source.meta.id, {
+            id: "u0",
+            role: "user",
+            content: "before divider",
+            runId: "run-0",
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "d1",
+            role: CONTEXT_DIVIDER_ROLE,
+            content: CONTEXT_DIVIDER_LABEL,
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "u1",
+            role: "user",
+            content: "after divider",
+            runId: "run-1",
+            createdAt: new Date().toISOString(),
+        });
+        store.save({
+            meta: { ...store.get(source.meta.id).meta, llmContextDividerId: "d1" },
+            messages: store.get(source.meta.id, { loadAllMessages: true }).messages,
+        });
+
+        const updated = store.removeMessages(source.meta.id, ["u0"]);
+        assert.equal(updated.messages.length, 2);
+        assert.equal(updated.messages[0].id, "d1");
+        assert.equal(updated.meta.llmContextDividerId, "d1");
+        assert.equal(updated.meta.llmContextFromIndex, undefined);
+
+        const lines = fs
+            .readFileSync(messagesFile(dir, source.meta.id), "utf-8")
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
+        assert.equal(lines[0].llmContextFromIndex, undefined);
+    });
+
+    it("persists meta.llmContextDividerId to meta.json after deletion", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-meta-sync-"));
+        const store = new SessionStore(dir, { providerKey: "openai", modelId: "gpt-4o-mini" });
+        const source = store.newSession();
+        store.appendMessage(source.meta.id, {
+            id: "u0",
+            role: "user",
+            content: "before",
+            runId: "run-0",
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "u1",
+            role: "user",
+            content: "also before",
+            runId: "run-1",
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "d1",
+            role: CONTEXT_DIVIDER_ROLE,
+            content: CONTEXT_DIVIDER_LABEL,
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "u2",
+            role: "user",
+            content: "after",
+            runId: "run-2",
+            createdAt: new Date().toISOString(),
+        });
+        store.save({
+            meta: { ...store.get(source.meta.id).meta, llmContextDividerId: "d1" },
+            messages: store.get(source.meta.id, { loadAllMessages: true }).messages,
+        });
+
+        const updated = store.removeMessages(source.meta.id, ["u0", "u1"]);
+        assert.equal(updated.messages[0].id, "d1");
+        assert.equal(updated.meta.llmContextDividerId, "d1");
+
+        const metaOnDisk = JSON.parse(fs.readFileSync(metaFile(dir, source.meta.id), "utf-8"));
+        assert.equal(metaOnDisk.llmContextDividerId, "d1");
+        assert.equal(metaOnDisk.llmContextFromIndex, undefined);
+    });
+
+    it("removes orphan dividers when last conversation message is deleted", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-remove-divider-"));
+        const store = new SessionStore(dir, { providerKey: "openai", modelId: "gpt-4o-mini" });
+        const source = store.newSession();
+        store.appendMessage(source.meta.id, {
+            id: "d1",
+            role: CONTEXT_DIVIDER_ROLE,
+            content: CONTEXT_DIVIDER_LABEL,
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "u1",
+            role: "user",
+            content: "last message",
+            runId: "run-1",
+            createdAt: new Date().toISOString(),
+        });
+        store.save({
+            meta: {
+                ...store.get(source.meta.id).meta,
+                llmContextDividerId: "d1",
+                contextSummary: "old summary",
+            },
+            messages: store.get(source.meta.id, { loadAllMessages: true }).messages,
+        });
+
+        const updated = store.removeMessages(source.meta.id, ["u1"]);
+        assert.deepEqual(updated.messages, []);
+        assert.equal(updated.meta.llmContextDividerId, undefined);
+        assert.equal(updated.meta.contextSummary, undefined);
+        assert.equal(fs.existsSync(messagesFile(dir, source.meta.id)), false);
+    });
+
+    it("removes adjacent divider after deletion between dividers", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-adj-divider-"));
+        const store = new SessionStore(dir, { providerKey: "openai", modelId: "gpt-4o-mini" });
+        const source = store.newSession();
+        store.appendMessage(source.meta.id, {
+            id: "u1",
+            role: "user",
+            content: "old",
+            runId: "run-1",
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "d1",
+            role: CONTEXT_DIVIDER_ROLE,
+            content: CONTEXT_DIVIDER_LABEL,
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "d2",
+            role: CONTEXT_DIVIDER_ROLE,
+            content: CONTEXT_COMPACT_DIVIDER_LABEL,
+            contextSummary: "summary",
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "u2",
+            role: "user",
+            content: "between",
+            runId: "run-2",
+            createdAt: new Date().toISOString(),
+        });
+        store.appendMessage(source.meta.id, {
+            id: "u3",
+            role: "user",
+            content: "new",
+            runId: "run-3",
+            createdAt: new Date().toISOString(),
+        });
+        store.save({
+            meta: {
+                ...store.get(source.meta.id).meta,
+                llmContextDividerId: "d2",
+                contextSummary: "summary",
+            },
+            messages: store.get(source.meta.id, { loadAllMessages: true }).messages,
+        });
+
+        const updated = store.removeMessages(source.meta.id, ["u2"]);
+        assert.deepEqual(
+            updated.messages.map((message) => message.id),
+            ["u1", "d1", "u3"],
+        );
+        assert.equal(updated.meta.llmContextDividerId, "d1");
+        assert.equal(updated.meta.contextSummary, undefined);
+
+        const lines = fs
+            .readFileSync(messagesFile(dir, source.meta.id), "utf-8")
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
+        assert.deepEqual(
+            lines.map((message) => message.id),
+            ["u1", "d1", "u3"],
+        );
+    });
+});
+
 describe("buildForkedSession", () => {
     it("preserves model and execution settings from the source session", () => {
         const source = {
@@ -191,7 +381,7 @@ describe("buildForkedSession", () => {
             meta: {
                 id: "s1",
                 title: "Cleared",
-                llmContextFromIndex: 4,
+                llmContextDividerId: "d1",
             },
             messages: [
                 { id: "u1", role: "user", content: "old", runId: "run-1" },
@@ -200,7 +390,6 @@ describe("buildForkedSession", () => {
                     id: "d1",
                     role: CONTEXT_DIVIDER_ROLE,
                     content: CONTEXT_DIVIDER_LABEL,
-                    llmContextFromIndex: 3,
                 },
                 { id: "u2", role: "user", content: "new", runId: "run-2" },
                 { id: "a2", role: "assistant", content: "new reply", runId: "run-2" },
@@ -211,7 +400,8 @@ describe("buildForkedSession", () => {
             messages: [],
         }));
 
-        assert.equal(forked.meta.llmContextFromIndex, 3);
+        assert.ok(forked.meta.llmContextDividerId);
+        assert.notEqual(forked.meta.llmContextDividerId, "d1");
         assert.equal(forked.meta.contextSummary, undefined);
         assert.equal(forked.messages.length, 5);
     });
@@ -221,7 +411,7 @@ describe("buildForkedSession", () => {
             meta: {
                 id: "s1",
                 title: "Compacted",
-                llmContextFromIndex: 3,
+                llmContextDividerId: "d1",
                 contextSummary: "meta summary",
                 postCompactContext: "meta restored",
             },
@@ -232,7 +422,6 @@ describe("buildForkedSession", () => {
                     id: "d1",
                     role: CONTEXT_DIVIDER_ROLE,
                     content: CONTEXT_COMPACT_DIVIDER_LABEL,
-                    llmContextFromIndex: 3,
                     contextSummary: "divider summary",
                     postCompactContext: "divider restored",
                 },
@@ -245,7 +434,7 @@ describe("buildForkedSession", () => {
             messages: [],
         }));
 
-        assert.equal(forked.meta.llmContextFromIndex, 3);
+        assert.ok(forked.meta.llmContextDividerId);
         assert.equal(forked.meta.contextSummary, "divider summary");
         assert.equal(forked.meta.postCompactContext, "divider restored");
     });
@@ -254,22 +443,22 @@ describe("buildForkedSession", () => {
 describe("resolveForkLlmContext", () => {
     it("uses the last divider in the slice", () => {
         const messages = [
-            { role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
+            { id: "d1", role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
             { role: "user", content: "between" },
-            { role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
+            { id: "d2", role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
             { role: "user", content: "after" },
         ];
         const resolved = resolveForkLlmContext(messages);
-        assert.equal(resolved.llmContextFromIndex, 3);
+        assert.equal(resolved.llmContextDividerId, "d2");
     });
 
-    it("derives index from legacy dividers without stored metadata", () => {
+    it("derives divider id from legacy dividers without stored meta", () => {
         const messages = [
             { role: "user", content: "old" },
-            { role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
+            { id: "d1", role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
             { role: "user", content: "new" },
         ];
         const resolved = resolveForkLlmContext(messages);
-        assert.equal(resolved.llmContextFromIndex, 2);
+        assert.equal(resolved.llmContextDividerId, "d1");
     });
 });

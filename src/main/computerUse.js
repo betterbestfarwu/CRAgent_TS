@@ -33,10 +33,11 @@ export function isComputerUseSupported(platform = process.platform) {
 export function computerUseSystemPromptSection() {
     return [
         "<computer_use>",
-        "You can control the user's desktop with computer_* tools. Use a vision-capable model.",
-        "Workflow: computer_displays or computer_screenshot → inspect image → computer_move / computer_click / computer_type / computer_key / computer_scroll.",
-        "Coordinates use the global virtual desktop in DIP/logical pixels (Electron display.bounds).",
-        "Call computer_displays to list each monitor's index and bounds before clicking on multi-monitor setups.",
+        "Use computer_* tools only when the task requires desktop interaction. Use a vision-capable model.",
+        "Workflow: computer_displays or computer_screenshot → inspect the result → computer_move / computer_click / computer_type / computer_key / computer_scroll.",
+        "Use global virtual-desktop coordinates in DIP/logical pixels from Electron display.bounds.",
+        "On multi-monitor setups, call computer_displays before any coordinate-based action.",
+        "Prefer computer_key for shortcuts when possible; use computer_type for literal text entry.",
         "On macOS, grant Accessibility permission to CRAgent if input tools fail.",
         "</computer_use>",
     ].join("\n");

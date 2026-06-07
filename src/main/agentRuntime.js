@@ -5,6 +5,7 @@ import {
     CONTEXT_DIVIDER_LABEL,
     CONTEXT_DIVIDER_ROLE,
     getActiveLlmContextEntries,
+    getActiveLlmContextStartIndex,
     isContextDividerMessage,
     sessionHasActiveLlmContext,
     withAssistantModel,
@@ -364,7 +365,7 @@ export class AgentRuntime {
             });
             return messages;
         }
-        const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+        const fromIndex = getActiveLlmContextStartIndex(session);
         if (session.meta.contextSummary) {
             messages.push({
                 id: randomUUID(),
@@ -1052,18 +1053,19 @@ export class AgentRuntime {
     clearLlmContext(sessionId) {
         let session = this.sessionStore.get(sessionId);
         if (sessionHasActiveLlmContext(session)) {
-            const llmContextFromIndex = session.messages.length + 1;
             const dividerMessage = {
                 id: randomUUID(),
                 role: CONTEXT_DIVIDER_ROLE,
                 content: CONTEXT_DIVIDER_LABEL,
-                llmContextFromIndex,
                 createdAt: new Date().toISOString(),
             };
             session = this.sessionStore.appendMessage(sessionId, dividerMessage);
             this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: dividerMessage });
+            session.meta.llmContextDividerId = dividerMessage.id;
+        } else {
+            delete session.meta.llmContextDividerId;
         }
-        session.meta.llmContextFromIndex = session.messages.length;
+        delete session.meta.llmContextFromIndex;
         delete session.meta.contextSummary;
         delete session.meta.postCompactContext;
         delete session.meta.recentFiles;
@@ -1085,7 +1087,7 @@ export class AgentRuntime {
 
     applyMicroCompact(session) {
         const contextConfig = getContextConfig(this.configStore);
-        const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+        const fromIndex = getActiveLlmContextStartIndex(session);
         const active = session.messages.slice(fromIndex);
         const { cleared } = microCompactMessages(active, contextConfig);
         if (cleared) {
@@ -1356,7 +1358,7 @@ export class AgentRuntime {
             }
             session.meta.sessionMemory = memory;
             session.meta.sessionMemoryUpToIndex = Math.max(
-                session.meta.llmContextFromIndex ?? 0,
+                getActiveLlmContextStartIndex(session),
                 lastIndex,
             );
             session.meta.sessionMemoryUpdatedAt = new Date().toISOString();
@@ -1479,13 +1481,13 @@ export class AgentRuntime {
                 id: randomUUID(),
                 role: CONTEXT_DIVIDER_ROLE,
                 content: CONTEXT_COMPACT_DIVIDER_LABEL,
-                llmContextFromIndex: sessionKeepIndex + 1,
                 contextSummary: summary,
                 ...(postCompactContext ? { postCompactContext } : {}),
                 createdAt: new Date().toISOString(),
             };
             session.messages.splice(sessionKeepIndex, 0, dividerMessage);
-            session.meta.llmContextFromIndex = sessionKeepIndex + 1;
+            session.meta.llmContextDividerId = dividerMessage.id;
+            delete session.meta.llmContextFromIndex;
             session.meta.contextSummary = summary;
             session.meta.postCompactContext = postCompactContext;
             if (!session.meta.postCompactContext) {

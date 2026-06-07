@@ -13,13 +13,13 @@ export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
       enabled: () => getAgentTools().enable_tools !== false,
       schema: fnSchema(
         "TodoWrite",
-        "Create and manage a structured todo list for the current session. Each call replaces the entire list unless merge=true.",
+        "Create or update the session todo list. Pass the full desired list; merge=true merges by id, and merge=false replaces the list.",
         {
           type: "object",
           properties: {
             todos: {
               type: "array",
-              description: "Todo items to create or update.",
+              description: "Full todo list to write.",
               items: {
                 type: "object",
                 properties: {
@@ -40,7 +40,7 @@ export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
             },
             merge: {
               type: "boolean",
-              description: "If true, merge todos by id. If false, replace the entire list.",
+              description: "If true, merge items by id. If false, replace the entire list.",
             },
           },
           required: ["todos", "merge"],
@@ -57,7 +57,7 @@ export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
         }
         const next = updateTodos(sessionId, todos, Boolean(args.merge), context?.runId);
         const autoRunHint =
-          "\n\n请立即开始执行上述 todos：将第一个 pending 项标记为 in_progress（建议提供 activeForm 进行时文案），逐步完成并在每项状态变化时调用 TodoWrite(merge=true) 更新。";
+          "\n\n请立即开始执行上述 todos：先将第一个 pending 项标记为 in_progress（建议提供清晰的 activeForm 进行时文案），然后在每次状态变化后调用 TodoWrite(merge=true) 持续更新，直到全部完成。";
         const summary = next.length
           ? next.map((item) => `[${item.status}] ${item.content}`).join("\n")
           : "(empty)";
@@ -70,26 +70,26 @@ export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
       enabled: () => getAgentTools().allow_sub_agents === true,
       schema: fnSchema(
         "Task",
-        "Launch a specialized sub-agent to handle a complex task autonomously. Sub-agents cannot spawn further sub-agents.",
+        "Launch one isolated sub-agent for a delegated task. Use it for work that benefits from a separate prompt; sub-agents cannot spawn further sub-agents.",
         {
           type: "object",
           properties: {
             description: {
               type: "string",
-              description: "Short 3-5 word summary of the task",
+              description: "Short 3-5 word task label",
             },
             prompt: {
               type: "string",
-              description: "Detailed task description for the sub-agent",
+              description: "Full instructions, constraints, and expected output for the sub-agent",
             },
             subagent_type: {
               type: "string",
               enum: ["generalPurpose", "explore"],
-              description: "Specialized agent type. Defaults to generalPurpose.",
+              description: "Sub-agent type; defaults to generalPurpose",
             },
             model: {
               type: "string",
-              description: "Optional model override as provider/modelId",
+              description: "Optional model override in provider/modelId form",
             },
           },
           required: ["description", "prompt"],

@@ -90,8 +90,8 @@ export function buildForkedSession(sourceSession, messageId, createSession) {
             title: sourceSession.meta.title,
             executionMode: sourceSession.meta.executionMode,
             authMode: sourceSession.meta.authMode,
-            ...(llmContext.llmContextFromIndex != null
-                ? { llmContextFromIndex: llmContext.llmContextFromIndex }
+            ...(llmContext.llmContextDividerId
+                ? { llmContextDividerId: llmContext.llmContextDividerId }
                 : {}),
             ...(llmContext.contextSummary ? { contextSummary: llmContext.contextSummary } : {}),
             ...(llmContext.postCompactContext

@@ -845,7 +845,7 @@ export function App() {
     currentSession?.messages?.length,
     currentSession?.meta?.updatedAt,
     currentSession?.meta?.todos,
-    currentSession?.meta?.llmContextFromIndex,
+    currentSession?.meta?.llmContextDividerId,
     currentSession?.meta?.contextSummary,
     currentSession?.meta?.postCompactContext,
     currentSession?.meta?.sessionMemory,

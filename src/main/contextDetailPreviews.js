@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { isContextDividerMessage } from "@shared/chatMessages.js";
+import { getActiveLlmContextStartIndex, isContextDividerMessage } from "@shared/chatMessages.js";
 import { getEnabledMcpServers, parseMcpToolRegistryName } from "@shared/mcpConfig.js";
 import { stripInlineImagePayloads } from "@shared/imagePayloads.js";
 import { SUB_AGENT_TYPES, subAgentSystemPrompt } from "./subAgentTypes.js";
@@ -117,7 +117,7 @@ function formatMessagePreview(message) {
 
 export function buildConversationPreview(session) {
     const parts = [];
-    const fromIndex = Math.max(0, session.meta.llmContextFromIndex ?? 0);
+    const fromIndex = getActiveLlmContextStartIndex(session);
 
     if (session.meta.contextSummary) {
         parts.push(

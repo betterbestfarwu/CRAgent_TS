@@ -33,16 +33,16 @@ function toolSearchSchema() {
         function: {
             name: "tool_search",
             description:
-                "Search the deferred tool catalog (MCP and other tools not sent in the initial list). " +
-                "Matched tools are enabled for the rest of this agent run. " +
-                "Call this before using a tool that is not already available.",
+                "Search deferred tools that are not in the visible tool list, usually MCP tools. " +
+                "Matched tools stay enabled for the rest of this run. " +
+                "Call this before using a hidden tool.",
             parameters: {
                 type: "object",
                 properties: {
                     query: {
                         type: "string",
                         description:
-                            "Keywords describing the capability you need (tool name, server, or task)",
+                            "Keywords for the capability, tool name, or server id you need",
                     },
                     limit: {
                         type: "integer",

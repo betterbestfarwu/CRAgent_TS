@@ -8,6 +8,7 @@ import { formatHelpText, matchChatCommand } from "@shared/chatCommands";
 import {
   CONTEXT_DIVIDER_LABEL,
   CONTEXT_DIVIDER_ROLE,
+  reconcileLlmContextAfterMessageRemoval,
   sessionHasActiveLlmContext,
 } from "@shared/chatMessages";
 import { stripSessionImagesForUi } from "@shared/sessionForUi.js";
@@ -399,11 +400,12 @@ export function installWebBridge() {
       const next = updateState((state) => {
         const sessions = state.sessions.map((item) => {
           if (item.meta.id !== sessionId) return item;
-          return {
+          const session = {
             ...item,
             meta: { ...item.meta, updatedAt: nowIso() },
             messages: item.messages.filter((message) => !idSet.has(message.id)),
           };
+          return reconcileLlmContextAfterMessageRemoval(session);
         });
         return { ...state, sessions };
       });
@@ -469,14 +471,10 @@ export function installWebBridge() {
           updateState((state) => {
             const sessions = state.sessions.map((item) => {
               if (item.meta.id !== sessionId) return item;
-              return {
-                ...item,
-                meta: {
-                  ...item.meta,
-                  updatedAt: touchedAt,
-                  llmContextFromIndex: item.messages.length,
-                },
-              };
+              const nextMeta = { ...item.meta, updatedAt: touchedAt };
+              delete nextMeta.llmContextDividerId;
+              delete nextMeta.llmContextFromIndex;
+              return { ...item, meta: nextMeta };
             });
             return { ...state, sessions };
           });
@@ -488,7 +486,6 @@ export function installWebBridge() {
           id: randomId(),
           role: CONTEXT_DIVIDER_ROLE,
           content: CONTEXT_DIVIDER_LABEL,
-          llmContextFromIndex: current.messages.length + 1,
           createdAt: nowIso(),
         };
         updateState((state) => {
@@ -500,7 +497,7 @@ export function installWebBridge() {
               meta: {
                 ...item.meta,
                 updatedAt: dividerMessage.createdAt,
-                llmContextFromIndex: messages.length,
+                llmContextDividerId: dividerMessage.id,
               },
               messages,
             };

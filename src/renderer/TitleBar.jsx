@@ -37,9 +37,17 @@ const ICON_LAPTOP = (
 );
 
 const ICON_MOON = (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    width="15"
+    height="15"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.45"
+    aria-hidden="true"
+  >
     <path
-      d="M21 14.5A8.5 8.5 0 0 1 9.5 3 7 7 0 1 0 21 14.5Z"
+      d="M20.4 14.2A8.1 8.1 0 0 1 9.8 3.6a8.75 8.75 0 1 0 10.6 10.6Z"
       strokeLinecap="round"
       strokeLinejoin="round"
     />
@@ -47,9 +55,19 @@ const ICON_MOON = (
 );
 
 const ICON_SUN = (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" strokeLinecap="round" />
+  <svg
+    viewBox="0 0 24 24"
+    width="15"
+    height="15"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.45"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <circle cx="12" cy="12" r="3.4" />
+    <path d="M12 3.1v1.8M12 19.1v1.8M4.9 4.9l1.27 1.27M17.83 17.83l1.27 1.27M3.1 12h1.8M19.1 12h1.8M4.9 19.1l1.27-1.27M17.83 6.17l1.27-1.27" />
   </svg>
 );
 
