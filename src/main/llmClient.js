@@ -6,7 +6,9 @@ import {
 } from "@shared/imagePayloads.js";
 import {
     DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_LLM_TEMPERATURE,
     resolveLlmRequestTimeoutMs,
+    resolveLlmTemperature,
 } from "@shared/uiConfig.js";
 
 export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS * 1000;
@@ -359,8 +361,10 @@ export class LlmClient {
         this.resolveProvider = resolveProvider;
         this.onTokenUsage = options.onTokenUsage;
         this.resolveRequestTimeoutMs = options.resolveRequestTimeoutMs;
+        this.resolveTemperature = options.resolveTemperature;
         this.requestTimeoutMs =
             options.requestTimeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
+        this.temperature = options.temperature ?? DEFAULT_LLM_TEMPERATURE;
     }
 
     getRequestTimeoutMs() {
@@ -369,6 +373,14 @@ export class LlmClient {
             return resolved;
         }
         return this.requestTimeoutMs;
+    }
+
+    getTemperature() {
+        const resolved = this.resolveTemperature?.();
+        if (Number.isFinite(resolved)) {
+            return resolved;
+        }
+        return this.temperature;
     }
 
     reportTokenUsage(model, usage) {
@@ -391,6 +403,7 @@ export class LlmClient {
         const body = {
             model: model.modelId,
             messages: messagesToApiPayloads(messages),
+            temperature: this.getTemperature(),
         };
 
         const url = buildLlmRequestUrl(provider);
@@ -476,6 +489,7 @@ export class LlmClient {
         const body = {
             model: model.modelId,
             messages: messagesToApiPayloads(messages),
+            temperature: this.getTemperature(),
         };
         if (tools.length) {
             body.tools = tools;

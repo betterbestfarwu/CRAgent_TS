@@ -440,6 +440,17 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
     updateUi({ [key]: Number.isFinite(max) ? Math.min(max, value) : value });
   }
 
+  function updateUiFloat(key, rawValue, { min = 0, max = 1, fallback = 0.7, precision = 1 } = {}) {
+    const parsed = Number.parseFloat(String(rawValue));
+    if (!Number.isFinite(parsed)) {
+      updateUi({ [key]: fallback });
+      return;
+    }
+    const clamped = Math.min(max, Math.max(min, parsed));
+    const factor = 10 ** precision;
+    updateUi({ [key]: Math.round(clamped * factor) / factor });
+  }
+
   function updateContext(patch) {
     setDraftConfig((prev) => ({
       ...prev,
@@ -1168,6 +1179,21 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
             </p>
 
             <SettingsGroup label="LLM">
+              <SettingsNumberRow
+                title="Temperature"
+                description="控制模型输出的随机性。较低更稳定、可复现；较高更有创意。范围 0–1。"
+                value={uiDraft.llm_temperature}
+                min={0}
+                max={1}
+                step={0.1}
+                onChange={(raw) =>
+                  updateUiFloat("llm_temperature", raw, {
+                    min: 0,
+                    max: 1,
+                    fallback: DEFAULT_UI_CONFIG.llm_temperature,
+                  })
+                }
+              />
               <SettingsNumberRow
                 title="LLM 请求超时"
                 description="单次大模型 API 请求的最长等待时间（秒）。慢模型或带 tools 的 agent 请求可适当调大。"

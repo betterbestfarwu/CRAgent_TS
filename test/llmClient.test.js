@@ -200,4 +200,36 @@ describe("LlmClient", () => {
         );
         assert.equal(client.getRequestTimeoutMs(), 90_000);
     });
+
+    it("sends temperature in chat request body", async () => {
+        const originalFetch = globalThis.fetch;
+        let capturedBody = null;
+        globalThis.fetch = async (_url, init) => {
+            capturedBody = JSON.parse(init.body);
+            return new Response(
+                JSON.stringify({
+                    choices: [{ message: { role: "assistant", content: "ok" } }],
+                }),
+                { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+        };
+
+        try {
+            const client = new LlmClient(
+                () => ({
+                    baseUrl: "https://api.example.com/v1",
+                    apiKey: "sk-test",
+                    api: "chat/completions",
+                }),
+                { resolveTemperature: () => 0.3 },
+            );
+            await client.chat({
+                model: { providerKey: "openai", modelId: "gpt-4" },
+                messages: [{ role: "user", content: "hello" }],
+            });
+            assert.equal(capturedBody.temperature, 0.3);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
 });
