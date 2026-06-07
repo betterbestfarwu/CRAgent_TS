@@ -3,7 +3,7 @@ import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfi
 import { ensureMcpConfigShape } from "@shared/mcpConfig.js";
 import { DEFAULT_UI_CONFIG, mergeUiConfig } from "@shared/uiConfig.js";
 import { validateProviderConnectionFields } from "@shared/providerConnection.js";
-import { ConfirmDialog, ConfirmDialogInfoIcon } from "./ConfirmDialog.jsx";
+import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { withConfigFileLinks } from "./ConfigFileLink.jsx";
 import { SingleDotIcon } from "./DotGridAnimator.jsx";
 import { McpSettingsTab } from "./McpSettingsTab.jsx";
@@ -185,7 +185,6 @@ function ProviderNameDialog({ title, initialName = "", onClose, onConfirm }) {
         onSubmit={handleSubmit}
       >
         <div className="confirm-dialog-header">
-          <ConfirmDialogInfoIcon />
           <h2 id="provider-name-dialog-title" className="confirm-dialog-title">
             {title}
           </h2>

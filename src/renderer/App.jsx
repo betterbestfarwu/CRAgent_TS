@@ -1568,10 +1568,9 @@ export function App() {
   }
 
   async function handleDeleteSession(meta) {
-    const title = meta.title || "新会话";
     const confirmed = await askConfirm({
-      message: `删除「${title}」？`,
-      detail: "此操作无法撤销。",
+      message: "删除此会话吗？",
+      detail: "删除后，这条对话记录将无法找回，其中包含的文件也将一并被删除。确定删除此对话？",
       confirmLabel: "删除",
       cancelLabel: "取消",
       destructive: true,

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { ConfirmDialogInfoIcon } from "./ConfirmDialog.jsx";
 
 function renderPlanMarkdown(content) {
   if (typeof window !== "undefined" && window.MD?.render) {
@@ -71,7 +70,6 @@ export function PlanApprovalDialog({
           ×
         </button>
         <div className="confirm-dialog-header plan-approval-header">
-          <ConfirmDialogInfoIcon />
           <h2 id="plan-approval-title" className="confirm-dialog-title plan-approval-title">
             审阅计划
           </h2>

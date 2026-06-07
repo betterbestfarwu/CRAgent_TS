@@ -50,19 +50,21 @@ export function ConfirmDialog({
         aria-describedby={bodyText ? "confirm-dialog-body" : undefined}
         onClick={(event) => event.stopPropagation()}
       >
-        {headerTitle ? (
-          <div className="confirm-dialog-header">
-            <ConfirmDialogInfoIcon />
-            <h2 id="confirm-dialog-title" className="confirm-dialog-title">
-              {headerTitle}
-            </h2>
-          </div>
-        ) : null}
-        {bodyText ? (
-          <div className="confirm-dialog-body">
-            <p id="confirm-dialog-body" className="confirm-dialog-detail">
-              {bodyText}
-            </p>
+        {(headerTitle || bodyText) ? (
+          <div className="confirm-dialog-main">
+            {headerTitle ? <ConfirmDialogInfoIcon /> : null}
+            <div className="confirm-dialog-copy">
+              {headerTitle ? (
+                <h2 id="confirm-dialog-title" className="confirm-dialog-title">
+                  {headerTitle}
+                </h2>
+              ) : null}
+              {bodyText ? (
+                <p id="confirm-dialog-body" className="confirm-dialog-detail">
+                  {bodyText}
+                </p>
+              ) : null}
+            </div>
           </div>
         ) : null}
         <div className="confirm-dialog-actions">

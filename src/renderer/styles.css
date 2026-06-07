@@ -2677,6 +2677,9 @@ body.app-sidebar-resizing {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
   padding: 12px 14px 10px;
   z-index: 30;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .composer-context-popup-header {
@@ -2739,6 +2742,8 @@ body.app-sidebar-resizing {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 
 .composer-context-popup-item {
@@ -2782,12 +2787,16 @@ body.app-sidebar-resizing {
 }
 
 .composer-context-popup-preview {
+  display: block;
   margin: 0;
   padding: 8px 10px;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
+  box-sizing: border-box;
   max-height: 220px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-radius: 8px;
   background: var(--sidebar-hover);
   border: 1px solid var(--sidebar-border);
@@ -4199,6 +4208,7 @@ body.app-sidebar-resizing {
   justify-content: center;
   padding: 24px;
   background: rgba(0, 0, 0, 0.28);
+  box-sizing: border-box;
 }
 
 .image-viewer-overlay {
@@ -4250,7 +4260,8 @@ body.app-sidebar-resizing {
 .confirm-dialog {
   display: flex;
   flex-direction: column;
-  width: min(100%, 420px);
+  width: 100%;
+  max-width: 420px;
   min-width: 0;
   max-height: min(92vh, 520px);
   padding: 28px;
@@ -4260,6 +4271,7 @@ body.app-sidebar-resizing {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
   text-align: left;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .confirm-dialog-header {
@@ -4270,24 +4282,45 @@ body.app-sidebar-resizing {
   margin-bottom: 14px;
 }
 
+.confirm-dialog-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 24px;
+}
+
+.confirm-dialog-copy {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
 .confirm-dialog-info-icon {
   flex-shrink: 0;
   color: #141414;
 }
 
 .confirm-dialog-title {
-  margin: 0;
+  margin: 0 0 8px;
   min-width: 0;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.35;
   color: #141414;
+  text-align: left;
   overflow-wrap: anywhere;
+}
+
+.confirm-dialog-title:last-child {
+  margin-bottom: 0;
 }
 
 .confirm-dialog-body {
   flex: 0 1 auto;
+  align-self: stretch;
   width: 100%;
+  max-width: 100%;
   min-width: 0;
   min-height: 0;
   max-height: calc(1.55em * 12);
@@ -4295,16 +4328,25 @@ body.app-sidebar-resizing {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  box-sizing: border-box;
 }
 
 .confirm-dialog-detail {
+  display: block;
   margin: 0;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
+  max-height: calc(1.55em * 12);
+  box-sizing: border-box;
   font-size: 13px;
   line-height: 1.55;
   color: #666666;
+  text-align: left;
   white-space: pre-wrap;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
