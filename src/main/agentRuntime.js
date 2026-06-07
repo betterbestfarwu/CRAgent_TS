@@ -1052,10 +1052,12 @@ export class AgentRuntime {
     clearLlmContext(sessionId) {
         let session = this.sessionStore.get(sessionId);
         if (sessionHasActiveLlmContext(session)) {
+            const llmContextFromIndex = session.messages.length + 1;
             const dividerMessage = {
                 id: randomUUID(),
                 role: CONTEXT_DIVIDER_ROLE,
                 content: CONTEXT_DIVIDER_LABEL,
+                llmContextFromIndex,
                 createdAt: new Date().toISOString(),
             };
             session = this.sessionStore.appendMessage(sessionId, dividerMessage);
@@ -1469,19 +1471,23 @@ export class AgentRuntime {
                 return;
             }
 
+            session = this.sessionStore.get(sessionId);
+            const sessionKeepIndex = entries[keepStartIndex]?.index ?? entries[0]?.index ?? 0;
+            const postCompactContext =
+                buildPostCompactContext(session, contextConfig) || undefined;
             const dividerMessage = {
                 id: randomUUID(),
                 role: CONTEXT_DIVIDER_ROLE,
                 content: CONTEXT_COMPACT_DIVIDER_LABEL,
+                llmContextFromIndex: sessionKeepIndex + 1,
+                contextSummary: summary,
+                ...(postCompactContext ? { postCompactContext } : {}),
                 createdAt: new Date().toISOString(),
             };
-            session = this.sessionStore.get(sessionId);
-            const sessionKeepIndex = entries[keepStartIndex]?.index ?? entries[0]?.index ?? 0;
             session.messages.splice(sessionKeepIndex, 0, dividerMessage);
             session.meta.llmContextFromIndex = sessionKeepIndex + 1;
             session.meta.contextSummary = summary;
-            session.meta.postCompactContext =
-                buildPostCompactContext(session, contextConfig) || undefined;
+            session.meta.postCompactContext = postCompactContext;
             if (!session.meta.postCompactContext) {
                 delete session.meta.postCompactContext;
             }

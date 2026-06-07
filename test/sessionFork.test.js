@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { collectMessagesUpToTurn, findTurnEndIndex } from "../src/shared/chatMessages.js";
+import { collectMessagesUpToTurn, findTurnEndIndex, CONTEXT_DIVIDER_LABEL, CONTEXT_DIVIDER_ROLE, CONTEXT_COMPACT_DIVIDER_LABEL, resolveForkLlmContext } from "../src/shared/chatMessages.js";
 import {
     buildForkedSession,
     cloneMessagesForFork,
@@ -155,5 +155,121 @@ describe("buildForkedSession", () => {
         assert.equal(forked.meta.executionMode, "plan");
         assert.equal(forked.meta.authMode, "api_key");
         assert.equal(forked.meta.title, "Branch me");
+    });
+
+    it("sends all forked messages when parent compression is outside the slice", () => {
+        const source = {
+            meta: {
+                id: "s1",
+                title: "Compressed",
+                providerKey: "openai",
+                modelId: "gpt-4o",
+                llmContextFromIndex: 4,
+                contextSummary: "summary of earlier turns",
+                postCompactContext: "restored file context",
+            },
+            messages: [
+                { id: "u1", role: "user", content: "first", runId: "run-1" },
+                { id: "a1", role: "assistant", content: "reply 1", runId: "run-1" },
+                { id: "u2", role: "user", content: "second", runId: "run-2" },
+                { id: "a2", role: "assistant", content: "reply 2", runId: "run-2" },
+            ],
+        };
+        const forked = buildForkedSession(source, "a2", () => ({
+            meta: { id: "s2", title: "新会话", createdAt: "t", updatedAt: "t" },
+            messages: [],
+        }));
+
+        assert.equal(forked.meta.llmContextFromIndex, undefined);
+        assert.equal(forked.meta.contextSummary, undefined);
+        assert.equal(forked.meta.postCompactContext, undefined);
+        assert.equal(forked.messages.length, 4);
+    });
+
+    it("respects /clear divider inside the forked slice", () => {
+        const source = {
+            meta: {
+                id: "s1",
+                title: "Cleared",
+                llmContextFromIndex: 4,
+            },
+            messages: [
+                { id: "u1", role: "user", content: "old", runId: "run-1" },
+                { id: "a1", role: "assistant", content: "old reply", runId: "run-1" },
+                {
+                    id: "d1",
+                    role: CONTEXT_DIVIDER_ROLE,
+                    content: CONTEXT_DIVIDER_LABEL,
+                    llmContextFromIndex: 3,
+                },
+                { id: "u2", role: "user", content: "new", runId: "run-2" },
+                { id: "a2", role: "assistant", content: "new reply", runId: "run-2" },
+            ],
+        };
+        const forked = buildForkedSession(source, "a2", () => ({
+            meta: { id: "s2", title: "新会话", createdAt: "t", updatedAt: "t" },
+            messages: [],
+        }));
+
+        assert.equal(forked.meta.llmContextFromIndex, 3);
+        assert.equal(forked.meta.contextSummary, undefined);
+        assert.equal(forked.messages.length, 5);
+    });
+
+    it("respects /compact divider and summary inside the forked slice", () => {
+        const source = {
+            meta: {
+                id: "s1",
+                title: "Compacted",
+                llmContextFromIndex: 3,
+                contextSummary: "meta summary",
+                postCompactContext: "meta restored",
+            },
+            messages: [
+                { id: "u1", role: "user", content: "old", runId: "run-1" },
+                { id: "a1", role: "assistant", content: "old reply", runId: "run-1" },
+                {
+                    id: "d1",
+                    role: CONTEXT_DIVIDER_ROLE,
+                    content: CONTEXT_COMPACT_DIVIDER_LABEL,
+                    llmContextFromIndex: 3,
+                    contextSummary: "divider summary",
+                    postCompactContext: "divider restored",
+                },
+                { id: "u2", role: "user", content: "new", runId: "run-2" },
+                { id: "a2", role: "assistant", content: "new reply", runId: "run-2" },
+            ],
+        };
+        const forked = buildForkedSession(source, "a2", () => ({
+            meta: { id: "s2", title: "新会话", createdAt: "t", updatedAt: "t" },
+            messages: [],
+        }));
+
+        assert.equal(forked.meta.llmContextFromIndex, 3);
+        assert.equal(forked.meta.contextSummary, "divider summary");
+        assert.equal(forked.meta.postCompactContext, "divider restored");
+    });
+});
+
+describe("resolveForkLlmContext", () => {
+    it("uses the last divider in the slice", () => {
+        const messages = [
+            { role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
+            { role: "user", content: "between" },
+            { role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
+            { role: "user", content: "after" },
+        ];
+        const resolved = resolveForkLlmContext(messages);
+        assert.equal(resolved.llmContextFromIndex, 3);
+    });
+
+    it("derives index from legacy dividers without stored metadata", () => {
+        const messages = [
+            { role: "user", content: "old" },
+            { role: CONTEXT_DIVIDER_ROLE, content: CONTEXT_DIVIDER_LABEL },
+            { role: "user", content: "new" },
+        ];
+        const resolved = resolveForkLlmContext(messages);
+        assert.equal(resolved.llmContextFromIndex, 2);
     });
 });

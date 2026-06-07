@@ -488,6 +488,7 @@ export function installWebBridge() {
           id: randomId(),
           role: CONTEXT_DIVIDER_ROLE,
           content: CONTEXT_DIVIDER_LABEL,
+          llmContextFromIndex: current.messages.length + 1,
           createdAt: nowIso(),
         };
         updateState((state) => {

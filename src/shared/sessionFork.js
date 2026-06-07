@@ -1,4 +1,4 @@
-import { getMessageRunId, collectMessagesUpToTurn } from "./chatMessages.js";
+import { getMessageRunId, collectMessagesUpToTurn, resolveForkLlmContext } from "./chatMessages.js";
 
 function defaultCreateId() {
     if (globalThis.crypto?.randomUUID) {
@@ -79,11 +79,8 @@ export function buildForkedSession(sourceSession, messageId, createSession) {
         authMode: sourceSession.meta.authMode,
     });
 
-    const llmContextFromIndex = Math.min(
-        sourceSession.meta.llmContextFromIndex ?? 0,
-        messages.length,
-    );
     const todoRuns = remapTodoRunsForFork(sourceSession.meta.todoRuns, runIdMap);
+    const llmContext = resolveForkLlmContext(messages, sourceSession.meta);
 
     return {
         meta: {
@@ -93,7 +90,13 @@ export function buildForkedSession(sourceSession, messageId, createSession) {
             title: sourceSession.meta.title,
             executionMode: sourceSession.meta.executionMode,
             authMode: sourceSession.meta.authMode,
-            ...(llmContextFromIndex > 0 ? { llmContextFromIndex } : {}),
+            ...(llmContext.llmContextFromIndex != null
+                ? { llmContextFromIndex: llmContext.llmContextFromIndex }
+                : {}),
+            ...(llmContext.contextSummary ? { contextSummary: llmContext.contextSummary } : {}),
+            ...(llmContext.postCompactContext
+                ? { postCompactContext: llmContext.postCompactContext }
+                : {}),
             ...(todoRuns ? { todoRuns } : {}),
         },
         messages,

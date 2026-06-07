@@ -11,6 +11,59 @@ export function isContextDividerMessage(message) {
     return message?.role === CONTEXT_DIVIDER_ROLE;
 }
 
+export function isContextClearDivider(message) {
+    return isContextDividerMessage(message) && message.content === CONTEXT_DIVIDER_LABEL;
+}
+
+export function isContextCompactDivider(message) {
+    return isContextDividerMessage(message) && message.content === CONTEXT_COMPACT_DIVIDER_LABEL;
+}
+
+/**
+ * Derive LLM context window for a forked message slice from context dividers.
+ * Uses divider position in the forked array (not parent session meta).
+ * Compact summaries are read from the divider when present, with source meta as fallback.
+ */
+export function resolveForkLlmContext(messages, sourceMeta = {}) {
+    let llmContextFromIndex = 0;
+    let contextSummary;
+    let postCompactContext;
+    let lastCompactDividerIndex = -1;
+
+    for (let index = 0; index < messages.length; index += 1) {
+        const message = messages[index];
+        if (!isContextDividerMessage(message)) {
+            continue;
+        }
+        llmContextFromIndex = index + 1;
+        if (isContextCompactDivider(message)) {
+            lastCompactDividerIndex = index;
+            contextSummary = message.contextSummary;
+            postCompactContext = message.postCompactContext;
+        } else {
+            contextSummary = undefined;
+            postCompactContext = undefined;
+        }
+    }
+
+    if (
+        lastCompactDividerIndex >= 0 &&
+        !contextSummary &&
+        sourceMeta.contextSummary &&
+        (sourceMeta.llmContextFromIndex ?? 0) === lastCompactDividerIndex + 1
+    ) {
+        contextSummary = sourceMeta.contextSummary;
+        postCompactContext = sourceMeta.postCompactContext;
+    }
+
+    llmContextFromIndex = Math.min(llmContextFromIndex, messages.length);
+    return {
+        llmContextFromIndex: llmContextFromIndex > 0 ? llmContextFromIndex : undefined,
+        contextSummary,
+        postCompactContext,
+    };
+}
+
 /** Messages currently sent to the LLM (after the last context reset, excluding dividers). */
 export function getActiveLlmContextEntries(session) {
     const messages = session?.messages || [];
