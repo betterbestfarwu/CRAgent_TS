@@ -1021,6 +1021,12 @@ body.app-sidebar-resizing {
   box-sizing: border-box;
 }
 
+.chat-history:not(.chat-history--active) > .chat-frame {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+}
+
 .chat-load-older {
   flex: 0 0 auto;
   display: flex;
@@ -1097,6 +1103,14 @@ body.app-sidebar-resizing {
   gap: 14px;
   padding-inline: var(--chat-gutter-x);
   box-sizing: border-box;
+}
+
+.empty-state--overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--chat-bg);
+  pointer-events: none;
 }
 
 .todo-panel {

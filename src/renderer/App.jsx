@@ -1775,7 +1775,7 @@ export function App() {
     }
   }
 
-  const chatWelcomeLayout = !active && !hasComposerDraft && !busy;
+  const chatWelcomeLayout = !active && !hasComposerDraft;
   const onSettingsPage = page === "settings";
 
   const titleBarLabel = useMemo(() => {
@@ -1914,40 +1914,45 @@ export function App() {
             <div
               className={`chat-content-column${chatWelcomeLayout ? " chat-content-column--welcome" : ""}`}
             >
-            <div className="chat-history">
-              {!active ? (
-                <div className="empty-state">
-                  <h1>有什么我能帮你的吗？</h1>
+            <div className={`chat-history${active ? " chat-history--active" : ""}`}>
+              {active && sessionShowsLoadOlder(currentSession) ? (
+                <div className="chat-load-older">
+                  <button
+                    type="button"
+                    className="chat-load-older-btn"
+                    disabled={loadingOlderMessages}
+                    onClick={() => void loadOlderMessages()}
+                  >
+                    {loadingOlderMessages ? "加载中…" : "加载更早的消息"}
+                  </button>
                 </div>
-              ) : (
-                <>
-                  {sessionShowsLoadOlder(currentSession) ? (
-                    <div className="chat-load-older">
-                      <button
-                        type="button"
-                        className="chat-load-older-btn"
-                        disabled={loadingOlderMessages}
-                        onClick={() => void loadOlderMessages()}
-                      >
-                        {loadingOlderMessages ? "加载中…" : "加载更早的消息"}
-                      </button>
-                    </div>
-                  ) : null}
-                  <ChatView
-                    sessionId={currentSession.meta.id}
-                    sessionModelId={currentSession.meta.modelId}
-                    messages={currentSession.messages}
-                    todoRuns={visibleTodoRuns}
-                    busy={busy}
-                    verboseThinking={verboseThinking}
-                    planContext={planContext}
-                    onDelete={handleDeleteMessage}
-                    onFork={handleForkMessage}
-                    onOpenImage={(image) => setViewerImage(image)}
-                    onOpenPlanFile={(sessionId) => window.cragent.openPlanFile?.(sessionId)}
-                  />
-                </>
-              )}
+              ) : null}
+              {currentSession ? (
+                <ChatView
+                  sessionId={currentSession.meta.id}
+                  sessionModelId={currentSession.meta.modelId}
+                  messages={currentSession.messages}
+                  todoRuns={visibleTodoRuns}
+                  busy={busy}
+                  verboseThinking={verboseThinking}
+                  planContext={planContext}
+                  onDelete={handleDeleteMessage}
+                  onFork={handleForkMessage}
+                  onOpenImage={(image) => setViewerImage(image)}
+                  onOpenPlanFile={(sessionId) => window.cragent.openPlanFile?.(sessionId)}
+                />
+              ) : null}
+              {!active ? (
+                chatWelcomeLayout ? (
+                  <div className="empty-state">
+                    <h1>有什么我能帮你的吗？</h1>
+                  </div>
+                ) : (
+                  <div className="empty-state empty-state--overlay" aria-hidden="true">
+                    <h1>有什么我能帮你的吗？</h1>
+                  </div>
+                )
+              ) : null}
               {visibleSessionError ? (
                 <div
                   className="chat-error-toast"
