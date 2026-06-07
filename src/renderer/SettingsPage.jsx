@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfig";
 import { ensureMcpConfigShape } from "@shared/mcpConfig.js";
-import { mergeUiConfig } from "@shared/uiConfig.js";
+import { DEFAULT_UI_CONFIG, mergeUiConfig } from "@shared/uiConfig.js";
 import { validateProviderConnectionFields } from "@shared/providerConnection.js";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { withConfigFileLinks } from "./ConfigFileLink.jsx";
@@ -432,6 +432,12 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
       ...prev,
       ui: mergeUiConfig({ ...prev.ui, ...patch }),
     }));
+  }
+
+  function updateUiNumber(key, rawValue, { min = 0, max = Infinity, fallback = 0 } = {}) {
+    const parsed = Number.parseInt(String(rawValue), 10);
+    const value = Number.isFinite(parsed) ? Math.max(min, parsed) : fallback;
+    updateUi({ [key]: Number.isFinite(max) ? Math.min(max, value) : value });
   }
 
   function updateContext(patch) {
@@ -1158,8 +1164,26 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
           <div className="settings-general-scroll">
             <h2 className="settings-general-title">Chat</h2>
             <p className="settings-general-lead">
-              控制对话区里 agent 过程（Thinking）的展示方式。
+              控制对话区展示方式，以及单次大模型请求的超时时间。
             </p>
+
+            <SettingsGroup label="LLM">
+              <SettingsNumberRow
+                title="LLM 请求超时"
+                description="单次大模型 API 请求的最长等待时间（秒）。慢模型或带 tools 的 agent 请求可适当调大。"
+                value={uiDraft.llm_request_timeout_seconds}
+                min={30}
+                max={1800}
+                step={30}
+                onChange={(raw) =>
+                  updateUiNumber("llm_request_timeout_seconds", raw, {
+                    min: 30,
+                    max: 1800,
+                    fallback: DEFAULT_UI_CONFIG.llm_request_timeout_seconds,
+                  })
+                }
+              />
+            </SettingsGroup>
 
             <SettingsGroup label="Thinking">
               <SettingsToggleRow

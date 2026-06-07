@@ -107,6 +107,9 @@ function toWireMessage(message, planContext, sessionId) {
     ...(getMessageModelId(message) ? { model_id: getMessageModelId(message) } : {}),
     ...(message.runId ? { run_id: message.runId } : {}),
     ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
+    ...(message.reasoningContent
+      ? { reasoning_content: message.reasoningContent }
+      : {}),
     ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
     ...(message.name ? { name: message.name } : {}),
     ...(images?.length ? { image_count: images.length, images } : {}),

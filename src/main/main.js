@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, ipcMain } from "electron";
 import path from "node:path";
 import { IPC_CHANNELS } from "@shared/ipc";
+import { resolveLlmRequestTimeoutMs } from "@shared/uiConfig.js";
 import { getAppPaths } from "./appPaths";
 import { ConfigStore } from "./configStore";
 import { SessionStore } from "./sessionStore";
@@ -131,6 +132,8 @@ function bootstrap() {
     const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey], {
         onTokenUsage: (model, usage) =>
             configStore.recordModelTokenUsage(model.providerKey, model.modelId, usage),
+        resolveRequestTimeoutMs: () =>
+            resolveLlmRequestTimeoutMs(configStore.get().ui),
     });
     const toolRegistry = new ToolRegistry(appPaths.memoryFile);
     runtime = new AgentRuntime(sessionStore, configStore, llmClient, toolRegistry, () => mainWindow);

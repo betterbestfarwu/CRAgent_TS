@@ -3,6 +3,7 @@ import path from "node:path";
 import { applyAppIcon } from "./appIcon.js";
 import { IPC_CHANNELS } from "@shared/ipc";
 import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
+import { resolveLlmRequestTimeoutMs } from "@shared/uiConfig.js";
 import { getAppPaths } from "./appPaths";
 import { ConfigStore } from "./configStore";
 import { SessionStore } from "./sessionStore";
@@ -561,6 +562,8 @@ function bootstrap() {
     const llmClient = new LlmClient((providerKey) => configStore.get().models[providerKey], {
         onTokenUsage: (model, usage) =>
             configStore.recordModelTokenUsage(model.providerKey, model.modelId, usage),
+        resolveRequestTimeoutMs: () =>
+            resolveLlmRequestTimeoutMs(configStore.get().ui),
     });
     runtime = new AgentRuntime(
         sessionStore,

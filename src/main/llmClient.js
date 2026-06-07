@@ -4,11 +4,94 @@ import {
     extractInlineImagePayloads,
     stripInlineImagePayloads,
 } from "@shared/imagePayloads.js";
+import {
+    DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS,
+    resolveLlmRequestTimeoutMs,
+} from "@shared/uiConfig.js";
+
+export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS * 1000;
 
 function createLlmHttpError(status, bodyText) {
     const error = new Error(`模型请求失败: ${status} ${bodyText.slice(0, 200)}`);
     error.status = status;
     return error;
+}
+
+export function createLlmRequestSignal(externalSignal, timeoutMs = DEFAULT_LLM_REQUEST_TIMEOUT_MS) {
+    const controller = new AbortController();
+    let timeoutId = null;
+    let timedOut = false;
+
+    const abort = (reason) => {
+        if (!controller.signal.aborted) {
+            controller.abort(reason);
+        }
+    };
+
+    if (timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+            timedOut = true;
+            abort(
+                new Error(`模型请求超时（${Math.round(timeoutMs / 1000)}秒）`),
+            );
+        }, timeoutMs);
+    }
+
+    if (externalSignal) {
+        if (externalSignal.aborted) {
+            abort(externalSignal.reason);
+        } else {
+            externalSignal.addEventListener(
+                "abort",
+                () => abort(externalSignal.reason),
+                { once: true },
+            );
+        }
+    }
+
+    return {
+        signal: controller.signal,
+        didTimeout: () => timedOut,
+        cleanup: () => {
+            if (timeoutId !== null) {
+                clearTimeout(timeoutId);
+            }
+        },
+    };
+}
+
+export function buildLlmRequestUrl(provider) {
+    const baseUrl = String(provider?.baseUrl || "").replace(/\/+$/, "");
+    const api = String(provider?.api || "chat/completions").replace(/^\/+/, "");
+    return `${baseUrl}/${api}`;
+}
+
+async function fetchLlmResponse(provider, body, { signal, timeoutMs }) {
+    const url = buildLlmRequestUrl(provider);
+    console.log(`[CRAgent][LLM] request url: ${url}`);
+    const { signal: requestSignal, didTimeout, cleanup } = createLlmRequestSignal(
+        signal,
+        timeoutMs,
+    );
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${provider.apiKey}`,
+            },
+            body: JSON.stringify(body),
+            signal: requestSignal,
+        });
+        return response;
+    } catch (error) {
+        if (error?.name === "AbortError" && didTimeout() && !signal?.aborted) {
+            throw new Error(`模型请求超时（${Math.round(timeoutMs / 1000)}秒）`);
+        }
+        throw error;
+    } finally {
+        cleanup();
+    }
 }
 
 export function messagesToApiPayloads(messages) {
@@ -147,6 +230,35 @@ export function parseAssistantContent(content) {
     };
 }
 
+export function parseAssistantChoice(choice) {
+    if (!choice || typeof choice !== "object") {
+        return {
+            content: "",
+            reasoningContent: undefined,
+            images: undefined,
+            useReasoningAsContent: false,
+        };
+    }
+
+    const contentParsed = parseAssistantContent(choice.content);
+    const reasoningParsed = parseAssistantContent(
+        choice.reasoning_content ?? choice.reasoningContent,
+    );
+    const content = contentParsed.content;
+    const reasoningContent = reasoningParsed.content || undefined;
+    const hasToolCalls = Boolean(choice.tool_calls?.length);
+    const images = contentParsed.images?.length
+        ? contentParsed.images
+        : reasoningParsed.images;
+
+    return {
+        content,
+        reasoningContent,
+        images,
+        useReasoningAsContent: !content && Boolean(reasoningContent) && !hasToolCalls,
+    };
+}
+
 function messageToApiPayload(message) {
     const payload = { role: message.role };
     if (message.role === "assistant") {
@@ -246,6 +358,17 @@ export class LlmClient {
     constructor(resolveProvider, options = {}) {
         this.resolveProvider = resolveProvider;
         this.onTokenUsage = options.onTokenUsage;
+        this.resolveRequestTimeoutMs = options.resolveRequestTimeoutMs;
+        this.requestTimeoutMs =
+            options.requestTimeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
+    }
+
+    getRequestTimeoutMs() {
+        const resolved = this.resolveRequestTimeoutMs?.();
+        if (Number.isFinite(resolved) && resolved > 0) {
+            return resolved;
+        }
+        return this.requestTimeoutMs;
     }
 
     reportTokenUsage(model, usage) {
@@ -270,16 +393,12 @@ export class LlmClient {
             messages: messagesToApiPayloads(messages),
         };
 
-        logOutgoingMessages("complete", model, body.messages);
+        const url = buildLlmRequestUrl(provider);
+        logOutgoingMessages("complete", model, body.messages, { url });
 
-        const response = await fetch(`${provider.baseUrl}/${provider.api}`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${provider.apiKey}`,
-            },
-            body: JSON.stringify(body),
-            ...(signal ? { signal } : {}),
+        const response = await fetchLlmResponse(provider, body, {
+            signal,
+            timeoutMs: this.getRequestTimeoutMs(),
         });
 
         if (!response.ok) {
@@ -289,15 +408,16 @@ export class LlmClient {
 
         const data = await response.json();
         const choice = data.choices?.[0]?.message;
-        const parsed = parseAssistantContent(choice?.content);
+        const parsed = parseAssistantChoice(choice);
         const usage = extractTokenUsage(data);
         this.reportTokenUsage(model, usage);
         return {
             message: this.assistantMessage(
-                parsed.content,
+                parsed.useReasoningAsContent ? parsed.reasoningContent : parsed.content,
                 undefined,
                 model.modelId,
                 parsed.images,
+                parsed.useReasoningAsContent ? undefined : parsed.reasoningContent,
             ),
             usage,
         };
@@ -362,18 +482,15 @@ export class LlmClient {
             body.tool_choice = "auto";
         }
 
+        const url = buildLlmRequestUrl(provider);
         logOutgoingMessages("chat", model, body.messages, {
+            url,
             toolCount: tools.length,
         });
 
-        const response = await fetch(`${provider.baseUrl}/${provider.api}`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${provider.apiKey}`,
-            },
-            body: JSON.stringify(body),
-            ...(signal ? { signal } : {}),
+        const response = await fetchLlmResponse(provider, body, {
+            signal,
+            timeoutMs: this.getRequestTimeoutMs(),
         });
 
         if (!response.ok) {
@@ -383,7 +500,7 @@ export class LlmClient {
 
         const data = await response.json();
         const choice = data.choices?.[0]?.message;
-        const parsed = parseAssistantContent(choice?.content);
+        const parsed = parseAssistantChoice(choice);
         const toolCalls = choice?.tool_calls?.map((call) => ({
             id: call.id,
             type: call.type || "function",
@@ -397,10 +514,11 @@ export class LlmClient {
 
         return {
             message: this.assistantMessage(
-                parsed.content,
+                parsed.useReasoningAsContent ? parsed.reasoningContent : parsed.content,
                 toolCalls,
                 model.modelId,
                 parsed.images,
+                parsed.useReasoningAsContent ? undefined : parsed.reasoningContent,
             ),
             usage,
         };
@@ -452,7 +570,7 @@ export class LlmClient {
         };
     }
 
-    assistantMessage(content, toolCalls, modelId, images) {
+    assistantMessage(content, toolCalls, modelId, images, reasoningContent) {
         return {
             id: randomUUID(),
             role: "assistant",
@@ -461,6 +579,7 @@ export class LlmClient {
             ...(modelId ? { modelId } : {}),
             ...(toolCalls?.length ? { toolCalls } : {}),
             ...(images?.length ? { images } : {}),
+            ...(reasoningContent ? { reasoningContent } : {}),
         };
     }
 }

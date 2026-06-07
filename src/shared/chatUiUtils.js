@@ -76,8 +76,15 @@ function isProcessAssistantWithTools(msg) {
     return msg?.role === "assistant" && Boolean(msg.tool_calls?.length);
 }
 
+function assistantVisibleText(msg) {
+    return (
+        String(msg?.content || "").trim() ||
+        String(msg?.reasoningContent || msg?.reasoning_content || "").trim()
+    );
+}
+
 function hasVisibleAssistantContent(msg) {
-    return msg?.role === "assistant" && String(msg.content || "").trim().length > 0;
+    return msg?.role === "assistant" && Boolean(assistantVisibleText(msg));
 }
 
 function recordToolCallStats(call, stats) {
@@ -311,7 +318,11 @@ export function buildThinkingSummary(thinkingMessages, options = {}) {
             stats.assistantText += 1;
             items.push({
                 kind: "assistant-text",
-                content: msg.content || "",
+                content:
+                    msg.content ||
+                    msg.reasoningContent ||
+                    msg.reasoning_content ||
+                    "",
             });
         }
 

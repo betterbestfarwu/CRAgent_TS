@@ -863,6 +863,19 @@
     }
   }
 
+  function renderReasoningBlockHtml(msg) {
+    if (!msg) return '';
+    var reasoning = String(msg.reasoning_content || msg.reasoningContent || '').trim();
+    var content = String(msg.content || '').trim();
+    if (!reasoning || !content) return '';
+    return (
+      '<details class="thinking reasoning-block">' +
+        '<summary>推理过程</summary>' +
+        '<div class="thinking-assistant-text">' + window.MD.render(reasoning) + '</div>' +
+      '</details>'
+    );
+  }
+
   function renderThinkingBlockHtml(thinking, scopeId) {
     var items = thinking && thinking.items ? thinking.items : thinking;
     if (!items || !items.length) return '';
@@ -944,6 +957,10 @@
       prependPlanSection(bubble, contentMsg, {
         showPreview: shouldShowPlanPreview(contentMsg, runId),
       });
+      var reasoningHtml = renderReasoningBlockHtml(contentMsg);
+      if (reasoningHtml) {
+        bubble.insertAdjacentHTML('beforeend', reasoningHtml);
+      }
       var contentWrap = document.createElement('div');
       contentWrap.className = 'assistant-turn-content';
       contentWrap.innerHTML = window.MD.render(contentMsg.content || '');
