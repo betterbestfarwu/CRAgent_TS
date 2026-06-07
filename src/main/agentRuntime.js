@@ -7,6 +7,7 @@ import {
     getActiveLlmContextEntries,
     getActiveLlmContextStartIndex,
     isContextDividerMessage,
+    normalizeMessagesForLlm,
     sessionHasActiveLlmContext,
     withAssistantModel,
 } from "@shared/chatMessages";
@@ -383,11 +384,10 @@ export class AgentRuntime {
             });
         }
         if (includeSessionHistory) {
-            messages.push(
-                ...session.messages
-                    .slice(fromIndex)
-                    .filter((message) => !isContextDividerMessage(message)),
-            );
+            const history = session.messages
+                .slice(fromIndex)
+                .filter((message) => !isContextDividerMessage(message));
+            messages.push(...normalizeMessagesForLlm(history));
         }
         return messages;
     }

@@ -7,6 +7,10 @@ import {
     CONTEXT_DIVIDER_LABEL,
     CONTEXT_DIVIDER_ROLE,
     dedupeConsecutiveContextDividers,
+    excludeUnpairedAssistantAndToolMessages,
+    mergeAdjacentSameContentUserMessages,
+    normalizeMessagesForLlm,
+    padMissingAssistantsBetweenUsers,
     reconcileLlmContextAfterMessageRemoval,
     removeAdjacentDuplicateContextDividers,
     normalizeLlmContextMeta,
@@ -364,4 +368,81 @@ test("normalizeLlmContextMeta migrates legacy llmContextFromIndex to divider id"
     assert.equal(meta.llmContextDividerId, "d1");
     assert.equal(meta.llmContextFromIndex, undefined);
     assert.equal(dividerMessage.llmContextFromIndex, undefined);
+});
+
+test("mergeAdjacentSameContentUserMessages collapses duplicate adjacent users", () => {
+    const messages = [
+        { id: "u1", role: "user", content: "hello", runId: "run-a" },
+        { id: "u2", role: "user", content: "hello", runId: "run-b" },
+        { id: "u3", role: "user", content: "next" },
+    ];
+    const merged = mergeAdjacentSameContentUserMessages(messages);
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0].id, "u1");
+    assert.equal(merged[1].id, "u3");
+});
+
+test("mergeAdjacentSameContentUserMessages keeps different adjacent users", () => {
+    const messages = [
+        { id: "u1", role: "user", content: "one" },
+        { id: "u2", role: "user", content: "two" },
+    ];
+    assert.equal(mergeAdjacentSameContentUserMessages(messages).length, 2);
+});
+
+test("padMissingAssistantsBetweenUsers inserts empty assistant between users", () => {
+    const padded = padMissingAssistantsBetweenUsers([
+        { id: "u1", role: "user", content: "one", runId: "run-1" },
+        { id: "u2", role: "user", content: "two", runId: "run-2" },
+    ]);
+    assert.deepEqual(
+        padded.map((message) => [message.role, message.content]),
+        [
+            ["user", "one"],
+            ["assistant", ""],
+            ["user", "two"],
+        ],
+    );
+});
+
+test("padMissingAssistantsBetweenUsers does not pad after trailing user", () => {
+    const padded = padMissingAssistantsBetweenUsers([
+        { id: "u1", role: "user", content: "one", runId: "run-1" },
+        { id: "a1", role: "assistant", content: "ok", runId: "run-1" },
+        { id: "u2", role: "user", content: "two", runId: "run-2" },
+    ]);
+    assert.equal(padded.length, 3);
+    assert.equal(padded[padded.length - 1].role, "user");
+});
+
+test("excludeUnpairedAssistantAndToolMessages drops orphan assistant and tool", () => {
+    const filtered = excludeUnpairedAssistantAndToolMessages([
+        { id: "a1", role: "assistant", content: "blocked by hook", runId: "run-b" },
+        { id: "a2", role: "assistant", content: "compact notice" },
+        { id: "t1", role: "tool", name: "read_file", toolCallId: "call-1", content: "x", runId: "run-c" },
+        { id: "u1", role: "user", content: "hi", runId: "run-1" },
+        { id: "a3", role: "assistant", content: "ok", runId: "run-1" },
+        { id: "t2", role: "tool", name: "read_file", toolCallId: "call-2", content: "y", runId: "run-1" },
+    ]);
+    assert.deepEqual(
+        filtered.map((message) => message.id),
+        ["u1", "a3", "t2"],
+    );
+});
+
+test("normalizeMessagesForLlm applies exclude, merge, and pad in order", () => {
+    const normalized = normalizeMessagesForLlm([
+        { id: "u1", role: "user", content: "same", runId: "run-1" },
+        { id: "u2", role: "user", content: "same", runId: "run-2" },
+        { id: "a1", role: "assistant", content: "blocked", runId: "run-3" },
+        { id: "u3", role: "user", content: "next", runId: "run-4" },
+    ]);
+    assert.deepEqual(
+        normalized.map((message) => [message.role, message.content]),
+        [
+            ["user", "same"],
+            ["assistant", ""],
+            ["user", "next"],
+        ],
+    );
 });

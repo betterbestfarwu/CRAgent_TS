@@ -302,6 +302,90 @@ export function getMessageRunId(message) {
     return message?.runId ?? message?.run_id ?? null;
 }
 
+function collectUserRunIds(messages) {
+    const runIds = new Set();
+    for (const message of messages || []) {
+        if (message?.role !== "user") {
+            continue;
+        }
+        const runId = getMessageRunId(message);
+        if (runId) {
+            runIds.add(runId);
+        }
+    }
+    return runIds;
+}
+
+function hasPairedUserRun(message, userRunIds) {
+    const runId = getMessageRunId(message);
+    return Boolean(runId && userRunIds.has(runId));
+}
+
+/** Drop assistant/tool rows with no user message sharing the same runId. */
+export function excludeUnpairedAssistantAndToolMessages(messages) {
+    const userRunIds = collectUserRunIds(messages);
+    return (messages || []).filter((message) => {
+        if (message?.role === "assistant" || message?.role === "tool") {
+            return hasPairedUserRun(message, userRunIds);
+        }
+        return true;
+    });
+}
+
+function userMessageContentKey(message) {
+    return String(message?.content ?? "").trim();
+}
+
+/** Collapse back-to-back user messages when trimmed content is identical. */
+export function mergeAdjacentSameContentUserMessages(messages) {
+    const result = [];
+    for (const message of messages || []) {
+        if (message?.role === "user" && result.length > 0) {
+            const previous = result[result.length - 1];
+            if (
+                previous.role === "user" &&
+                userMessageContentKey(previous) === userMessageContentKey(message)
+            ) {
+                continue;
+            }
+        }
+        result.push(message);
+    }
+    return result;
+}
+
+function createPaddedAssistant() {
+    return {
+        role: "assistant",
+        content: "",
+    };
+}
+
+/** Insert empty assistant turns between consecutive user messages. */
+export function padMissingAssistantsBetweenUsers(messages) {
+    const result = [];
+    for (const message of messages || []) {
+        if (message?.role === "user" && result.length > 0) {
+            const previous = result[result.length - 1];
+            if (previous.role === "user") {
+                result.push(createPaddedAssistant());
+            }
+        }
+        result.push(message);
+    }
+    return result;
+}
+
+/**
+ * Normalize session history before sending to the LLM:
+ * exclude orphan assistant/tool, merge duplicate adjacent users, pad missing assistants.
+ */
+export function normalizeMessagesForLlm(messages) {
+    const filtered = excludeUnpairedAssistantAndToolMessages(messages);
+    const merged = mergeAdjacentSameContentUserMessages(filtered);
+    return padMissingAssistantsBetweenUsers(merged);
+}
+
 /** Stable wire fingerprint for user image metadata (ignores data_url vs image_src churn). */
 export function userImagesWireFingerprint(messages) {
     return JSON.stringify(
