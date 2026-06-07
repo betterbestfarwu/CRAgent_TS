@@ -3677,13 +3677,21 @@ body.app-sidebar-resizing {
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --slash-menu-bg: #1e1e1e;
   }
 
-  .settings-model-filter {
+  :root:not([data-theme="light"]) .settings-model-filter {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1.5 5 5 9 1.5' stroke='%23e4e4e4' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
+}
+
+:root[data-theme="dark"] {
+  --slash-menu-bg: #1e1e1e;
+}
+
+:root[data-theme="dark"] .settings-model-filter {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1.5 5 5 9 1.5' stroke='%23e4e4e4' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .settings-model-list-shell {
@@ -4593,53 +4601,101 @@ body.app-sidebar-resizing {
 }
 
 @media (prefers-color-scheme: dark) {
-  .confirm-dialog {
+  :root:not([data-theme="light"]) .confirm-dialog {
     background: #2a2a2a;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   }
 
-  .confirm-dialog-info-icon,
-  .confirm-dialog-title {
+  :root:not([data-theme="light"]) .confirm-dialog-info-icon,
+  :root:not([data-theme="light"]) .confirm-dialog-title {
     color: #e4e4e4;
   }
 
-  .confirm-dialog-detail {
+  :root:not([data-theme="light"]) .confirm-dialog-detail {
     color: rgba(228, 228, 228, 0.65);
   }
 
-  .confirm-dialog-btn {
+  :root:not([data-theme="light"]) .confirm-dialog-btn {
     border-color: #444444;
     background: #1e1e1e;
     color: #e4e4e4;
   }
 
-  .confirm-dialog-btn:hover {
+  :root:not([data-theme="light"]) .confirm-dialog-btn:hover {
     background: #333333;
   }
 
-  .confirm-dialog-btn-primary,
-  .confirm-dialog-btn-primary.destructive {
+  :root:not([data-theme="light"]) .confirm-dialog-btn-primary,
+  :root:not([data-theme="light"]) .confirm-dialog-btn-primary.destructive {
     border-color: #e4e4e4;
     background: #e4e4e4;
     color: #141414;
   }
 
-  .confirm-dialog-btn-primary.confirm-dialog-btn-accent {
+  :root:not([data-theme="light"]) .confirm-dialog-btn-primary.confirm-dialog-btn-accent {
     border-color: var(--accent);
     background: var(--accent);
     color: var(--cursor-on-accent);
   }
 
-  .confirm-dialog-btn-primary:hover,
-  .confirm-dialog-btn-primary.destructive:hover {
+  :root:not([data-theme="light"]) .confirm-dialog-btn-primary:hover,
+  :root:not([data-theme="light"]) .confirm-dialog-btn-primary.destructive:hover {
     background: #ffffff;
     border-color: #ffffff;
   }
 
-  .confirm-dialog-btn-primary.confirm-dialog-btn-accent:hover {
+  :root:not([data-theme="light"]) .confirm-dialog-btn-primary.confirm-dialog-btn-accent:hover {
     background: var(--accent-hover);
     border-color: var(--accent-hover);
   }
+}
+
+:root[data-theme="dark"] .confirm-dialog {
+  background: #2a2a2a;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+:root[data-theme="dark"] .confirm-dialog-info-icon,
+:root[data-theme="dark"] .confirm-dialog-title {
+  color: #e4e4e4;
+}
+
+:root[data-theme="dark"] .confirm-dialog-detail {
+  color: rgba(228, 228, 228, 0.65);
+}
+
+:root[data-theme="dark"] .confirm-dialog-btn {
+  border-color: #444444;
+  background: #1e1e1e;
+  color: #e4e4e4;
+}
+
+:root[data-theme="dark"] .confirm-dialog-btn:hover {
+  background: #333333;
+}
+
+:root[data-theme="dark"] .confirm-dialog-btn-primary,
+:root[data-theme="dark"] .confirm-dialog-btn-primary.destructive {
+  border-color: #e4e4e4;
+  background: #e4e4e4;
+  color: #141414;
+}
+
+:root[data-theme="dark"] .confirm-dialog-btn-primary.confirm-dialog-btn-accent {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--cursor-on-accent);
+}
+
+:root[data-theme="dark"] .confirm-dialog-btn-primary:hover,
+:root[data-theme="dark"] .confirm-dialog-btn-primary.destructive:hover {
+  background: #ffffff;
+  border-color: #ffffff;
+}
+
+:root[data-theme="dark"] .confirm-dialog-btn-primary.confirm-dialog-btn-accent:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .provider-name-dialog {

@@ -36,11 +36,30 @@ const ICON_LAPTOP = (
   </svg>
 );
 
+const ICON_MOON = (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+    <path
+      d="M21 14.5A8.5 8.5 0 0 1 9.5 3 7 7 0 1 0 21 14.5Z"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const ICON_SUN = (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" strokeLinecap="round" />
+  </svg>
+);
+
 export function TitleBar({
   title,
+  colorScheme,
   settingsActive,
   onToggleSidebar,
   onFocusSearch,
+  onToggleColorScheme,
   onOpenSettings,
 }) {
   if (!window.cragent?.isDesktop) {
@@ -84,6 +103,15 @@ export function TitleBar({
         </div>
 
         <div className="titlebar-trailing">
+          <button
+            type="button"
+            className="titlebar-icon-btn"
+            title={colorScheme === "dark" ? "切换到浅色模式" : "切换到深色模式"}
+            aria-label={colorScheme === "dark" ? "切换到浅色模式" : "切换到深色模式"}
+            onClick={onToggleColorScheme}
+          >
+            {colorScheme === "dark" ? ICON_SUN : ICON_MOON}
+          </button>
           <button
             type="button"
             className={`titlebar-icon-btn${settingsActive ? " active" : ""}`}

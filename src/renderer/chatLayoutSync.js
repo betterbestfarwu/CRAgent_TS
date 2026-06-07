@@ -1,3 +1,5 @@
+import { applyColorSchemeToDocument, readStoredColorScheme } from "@shared/colorScheme.js";
+
 const LAYOUT_VARS = [
   "--chat-gutter-x",
   "--chat-inner-x",
@@ -16,8 +18,10 @@ export function injectChatLayout(iframeDoc) {
     }
   }
 
-  // Theme tokens must come from cursor-theme.css media queries; injecting computed
-  // colors as inline custom properties freezes them when the OS theme changes.
+  // Theme tokens must come from cursor-theme.css; injecting computed colors as inline
+  // custom properties freezes them when the color scheme changes.
   target.style.removeProperty("--bg");
   target.style.removeProperty("--chat-bg");
+
+  applyColorSchemeToDocument(iframeDoc, readStoredColorScheme());
 }

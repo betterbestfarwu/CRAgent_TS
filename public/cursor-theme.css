@@ -67,7 +67,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     /* cursor-dark */
     --cursor-bg-sidebar: #141414;
     --cursor-bg-editor: #181818;
@@ -105,4 +105,45 @@
       0 1px 2px rgba(0, 0, 0, 0.28),
       0 12px 28px rgba(0, 0, 0, 0.36);
   }
+}
+
+:root[data-theme="dark"] {
+  /* cursor-dark */
+  --cursor-bg-sidebar: #141414;
+  --cursor-bg-editor: #181818;
+  --cursor-bg-panel: #141414;
+  --cursor-bg-widget: #141414;
+  --cursor-bg-input: rgba(228, 228, 228, 0.04);
+  --cursor-bg-line-highlight: #262626;
+  --cursor-bg-selection: rgba(228, 228, 228, 0.12);
+
+  --cursor-fg: #e4e4e4;
+  --cursor-fg-muted: rgba(228, 228, 228, 0.55);
+  --cursor-fg-subtle: rgba(228, 228, 228, 0.37);
+
+  --cursor-border: rgba(228, 228, 228, 0.08);
+  --cursor-border-strong: rgba(228, 228, 228, 0.15);
+  --cursor-hover: rgba(228, 228, 228, 0.07);
+  --cursor-active: rgba(228, 228, 228, 0.12);
+
+  --cursor-accent: #81a1c1;
+  --cursor-accent-hover: #87a6c4;
+  --cursor-focus-ring: rgba(228, 228, 228, 0.15);
+
+  --cursor-scrollbar-thumb: rgba(228, 228, 228, 0.07);
+  --cursor-scrollbar-thumb-hover: rgba(228, 228, 228, 0.12);
+
+  --cursor-bubble-bg: #262626;
+  --cursor-code-bg: #262626;
+  --cursor-code-fg: #e4e4e4;
+
+  --cursor-error-fg: #e34671;
+  --cursor-success-fg: #3fa266;
+  --cursor-on-accent: #191c22;
+
+  --composer-elevated-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.28),
+    0 12px 28px rgba(0, 0, 0, 0.36);
+
+  color-scheme: dark;
 }

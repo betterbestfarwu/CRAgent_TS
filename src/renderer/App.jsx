@@ -76,6 +76,11 @@ import {
   mergePreservedMessageImages,
 } from "@shared/sessionForUi.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
+import {
+  getEffectiveColorScheme,
+  readStoredColorScheme,
+  toggleColorScheme,
+} from "@shared/colorScheme.js";
 
 const COMPOSER_LINE_HEIGHT = 24;
 const COMPOSER_MIN_HEIGHT = COMPOSER_LINE_HEIGHT;
@@ -112,6 +117,7 @@ function sessionMessagesEqual(left, right) {
 }
 
 export function App() {
+  const [colorScheme, setColorScheme] = useState(() => getEffectiveColorScheme());
   const [projects, setProjects] = useState([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState([]);
   const [focusedProjectId, setFocusedProjectId] = useState(null);
@@ -690,6 +696,14 @@ export function App() {
       offSettings();
       offHookLog?.();
     };
+  }, []);
+
+  useEffect(() => {
+    if (readStoredColorScheme()) return undefined;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => setColorScheme(getEffectiveColorScheme());
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
   }, []);
 
   useEffect(() => {
@@ -1812,6 +1826,10 @@ export function App() {
     if (compactLayout) setSidebarOpen(false);
   }
 
+  function handleTitlebarToggleColorScheme() {
+    setColorScheme(toggleColorScheme());
+  }
+
   const visibleSessionError = useMemo(() => {
     if (!sessionError?.message) return "";
     if (
@@ -1827,10 +1845,12 @@ export function App() {
     <div className="app-shell">
       <TitleBar
         title={titleBarLabel}
+        colorScheme={colorScheme}
         settingsActive={onSettingsPage}
         onToggleSidebar={handleTitlebarToggleSidebar}
         onFocusSearch={handleTitlebarFocusSearch}
         onNewChat={() => void handleNewChat()}
+        onToggleColorScheme={handleTitlebarToggleColorScheme}
         onOpenSettings={handleTitlebarToggleSettings}
       />
       <div

@@ -611,9 +611,13 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
 }
 
 @media (prefers-color-scheme: dark) {
-  .bubble mark {
+  html:not([data-theme="light"]) .bubble mark {
     background: rgba(255, 212, 0, 0.22);
   }
+}
+
+html[data-theme="dark"] .bubble mark {
+  background: rgba(255, 212, 0, 0.22);
 }
 
 .bubble .footnotes {
@@ -1004,13 +1008,21 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
 }
 
 @media (prefers-color-scheme: dark) {
-  .plan-preview-card {
+  html:not([data-theme="light"]) .plan-preview-card {
     background: rgba(255, 255, 255, 0.03);
   }
 
-  .plan-preview-body-wrap.is-truncated::after {
+  html:not([data-theme="light"]) .plan-preview-body-wrap.is-truncated::after {
     background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.05));
   }
+}
+
+html[data-theme="dark"] .plan-preview-card {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+html[data-theme="dark"] .plan-preview-body-wrap.is-truncated::after {
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.05));
 }
 
 .plan-preview-expand-btn {
@@ -1037,14 +1049,23 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
 }
 
 @media (prefers-color-scheme: dark) {
-  .plan-preview-expand-btn {
+  html:not([data-theme="light"]) .plan-preview-expand-btn {
     background: #e5e5e5;
     color: #111;
   }
 
-  .plan-preview-expand-btn:hover {
+  html:not([data-theme="light"]) .plan-preview-expand-btn:hover {
     background: #fff;
   }
+}
+
+html[data-theme="dark"] .plan-preview-expand-btn {
+  background: #e5e5e5;
+  color: #111;
+}
+
+html[data-theme="dark"] .plan-preview-expand-btn:hover {
+  background: #fff;
 }
 
 .msg.user .plan-rejection-body {
