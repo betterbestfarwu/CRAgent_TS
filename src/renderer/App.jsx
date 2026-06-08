@@ -105,7 +105,7 @@ function readStoredSidebarWidth() {
 }
 
 function sortSessions(sessions) {
-  return [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return [...sessions].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function sessionMessagesEqual(left, right) {

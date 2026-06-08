@@ -10,7 +10,7 @@ export function displayTitle(meta) {
 
 export function groupSessions(metas) {
   if (!metas.length) return [];
-  return [...metas].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return [...metas].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function filterSessions(metas, query) {

@@ -143,8 +143,8 @@ function makeSession(config, projectId = null) {
   };
 }
 
-function sortMetasByUpdatedAt(metas) {
-  return [...metas].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+function sortMetasByCreatedAt(metas) {
+  return [...metas].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function openNewSession(state) {
@@ -251,7 +251,7 @@ export function installWebBridge() {
       return {
         config,
         projects: [],
-        sessions: sortMetasByUpdatedAt(sessions.map((session) => session.meta)),
+        sessions: sortMetasByCreatedAt(sessions.map((session) => session.meta)),
         currentSessionId,
       };
     },
