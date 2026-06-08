@@ -85,5 +85,6 @@ const api = {
     onPlanApprovalRequest: (callback) => subscribe("ui:planApprovalRequest", callback),
     respondPlanApproval: (payload) => ipcRenderer.send("ui:planApprovalResponse", payload),
     onOpenSettings: (callback) => subscribe("ui:openSettings", callback),
+    syncColorScheme: (colorScheme) => ipcRenderer.invoke(IPC_CHANNELS.syncColorScheme, colorScheme),
 };
 contextBridge.exposeInMainWorld("cragent", api);

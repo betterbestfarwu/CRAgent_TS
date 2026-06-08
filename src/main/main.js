@@ -8,6 +8,7 @@ import { SessionStore } from "./sessionStore";
 import { LlmClient } from "./llmClient";
 import { ToolRegistry } from "./toolRegistry";
 import { AgentRuntime } from "./agentRuntime";
+import { resolveWindowChrome } from "@shared/windowChrome.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(devServerUrl) || process.env.NODE_ENV === "development";
@@ -28,14 +29,21 @@ function windowChromeOptions() {
     if (process.platform === "win32") {
         return {
             titleBarStyle: "hidden",
-            titleBarOverlay: {
-                color: "#f3f3f3",
-                symbolColor: "#141414",
-                height: 40,
-            },
+            titleBarOverlay: resolveWindowChrome("light").titleBarOverlay,
         };
     }
     return {};
+}
+
+function applyWindowChrome(win, colorScheme) {
+    if (!win || win.isDestroyed()) {
+        return;
+    }
+    const chrome = resolveWindowChrome(colorScheme);
+    win.setBackgroundColor(chrome.backgroundColor);
+    if (process.platform === "win32") {
+        win.setTitleBarOverlay(chrome.titleBarOverlay);
+    }
 }
 
 function createWindow() {

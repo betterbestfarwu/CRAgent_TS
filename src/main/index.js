@@ -31,6 +31,7 @@ import { createPlanModeTools } from "./tools/planModeTools.js";
 import { createComputerUseTools } from "./tools/computerUseTools.js";
 import fs from "node:fs";
 import { normalizeAuthMode } from "@shared/authMode.js";
+import { resolveWindowChrome } from "@shared/windowChrome.js";
 import { listProjectDirectory } from "./projectBrowse.js";
 import { getFileIconsAsDataUrls } from "./fileIcons.js";
 import { legacySessionFile, metaFile, sessionDir } from "./sessionStorage.js";
@@ -62,14 +63,21 @@ function windowChromeOptions() {
     if (process.platform === "win32") {
         return {
             titleBarStyle: "hidden",
-            titleBarOverlay: {
-                color: "#f3f3f3",
-                symbolColor: "#141414",
-                height: 40,
-            },
+            titleBarOverlay: resolveWindowChrome("light").titleBarOverlay,
         };
     }
     return {};
+}
+
+function applyWindowChrome(win, colorScheme) {
+    if (!win || win.isDestroyed()) {
+        return;
+    }
+    const chrome = resolveWindowChrome(colorScheme);
+    win.setBackgroundColor(chrome.backgroundColor);
+    if (process.platform === "win32") {
+        win.setTitleBarOverlay(chrome.titleBarOverlay);
+    }
 }
 
 function attachEditableContextMenu(webContents) {
@@ -440,6 +448,10 @@ function registerIpc() {
         } finally {
             await probeManager.closeAll();
         }
+    });
+    ipcMain.handle(IPC_CHANNELS.syncColorScheme, (_event, colorScheme) => {
+        applyWindowChrome(mainWindow, colorScheme === "dark" ? "dark" : "light");
+        return { ok: true };
     });
     ipcMain.handle(IPC_CHANNELS.syncProviderModels, async (_event, args) => {
         const providerKey = args?.providerKey;

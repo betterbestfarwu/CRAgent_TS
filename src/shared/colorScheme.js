@@ -40,9 +40,14 @@ export function applyColorSchemeToDocument(doc, storedScheme) {
   syncHighlightStylesheets(doc, effective);
 }
 
+function syncColorSchemeToWindowChrome(storedScheme) {
+  window.cragent?.syncColorScheme?.(getEffectiveColorScheme(storedScheme));
+}
+
 export function applyColorScheme(storedScheme = readStoredColorScheme()) {
   applyColorSchemeToDocument(document, storedScheme);
   syncColorSchemeToChatFrames(storedScheme);
+  syncColorSchemeToWindowChrome(storedScheme);
 }
 
 export function syncColorSchemeToChatFrames(storedScheme = readStoredColorScheme()) {

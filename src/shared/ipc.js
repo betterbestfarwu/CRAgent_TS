@@ -44,4 +44,5 @@ export const IPC_CHANNELS = {
     clearHookLogs: "hooks:clearLogs",
     onConfirmRequest: "ui:confirmRequest",
     confirmResponse: "ui:confirmResponse",
+    syncColorScheme: "ui:syncColorScheme",
 };
