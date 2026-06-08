@@ -143,6 +143,11 @@ export function dipPointToPlatformPoint(x, y) {
     return screen.dipToScreenPoint(rounded);
 }
 
+/** macOS screencapture -R expects x,y,width,height (see man screencapture). */
+export function formatMacScreencaptureRegion(rect) {
+    return `${rect.x},${rect.y},${rect.width},${rect.height}`;
+}
+
 /** @param {Rect} bounds */
 export function dipRectToPlatformRect(bounds) {
     const screen = getScreenModule();

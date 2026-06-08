@@ -13,6 +13,7 @@ import { isComputerUseSupported } from "../src/main/computerUse.js";
 import {
     dipPointToPlatformPoint,
     dipRectToPlatformRect,
+    formatMacScreencaptureRegion,
     getDisplayLayout,
     resolveDisplayTarget,
     resolveGlobalPoint,
@@ -199,6 +200,17 @@ describe("computer use displays", () => {
             width: 200,
             height: 100,
         });
+    });
+
+    it("formats screencapture -R as x,y,width,height", () => {
+        assert.equal(
+            formatMacScreencaptureRegion({ x: 0, y: 0, width: 1920, height: 1080 }),
+            "0,0,1920,1080",
+        );
+        assert.equal(
+            formatMacScreencaptureRegion({ x: 1440, y: 0, width: 1920, height: 1080 }),
+            "1440,0,1920,1080",
+        );
     });
 });
 

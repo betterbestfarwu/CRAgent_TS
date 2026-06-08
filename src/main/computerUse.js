@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import {
     dipPointToPlatformPoint,
     dipRectToPlatformRect,
+    formatMacScreencaptureRegion,
     formatDisplayLayoutForPrompt,
     getDisplayLayout,
     resolveDisplayTarget,
@@ -106,7 +107,7 @@ async function readScreenshotDataUrl(filePath, meta = {}) {
 async function captureScreenshotMacRegion(bounds) {
     const tmp = path.join(os.tmpdir(), `cragent-screenshot-${Date.now()}.png`);
     const rect = dipRectToPlatformRect(bounds);
-    const region = `${rect.width},${rect.height},${rect.x},${rect.y}`;
+    const region = formatMacScreencaptureRegion(rect);
     try {
         await execFileAsync("/usr/sbin/screencapture", ["-x", "-t", "png", "-R", region, tmp]);
         await resizeScreenshotMac(tmp);
