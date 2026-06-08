@@ -764,6 +764,11 @@ export function App() {
     currentSession?.meta?.providerKey,
     currentSession?.meta?.modelId,
     currentSession?.meta?.executionMode,
+    currentSession?.meta?.updatedAt,
+    currentSession?.meta?.messageCount,
+    currentSession?.meta?.llmContextDividerId,
+    currentSession?.meta?.contextSummary,
+    currentSession?.messages?.length,
   ]);
 
   const contextUsage = useMemo(() => {
@@ -793,14 +798,19 @@ export function App() {
     });
     const storedUsage =
       sessionContextUsage?.sessionId === sessionId ? sessionContextUsage : null;
+    const tokens = storedUsage?.tokens ?? estimated.tokens;
+    const contextWindow = model?.contextWindow ?? estimated.contextWindow ?? 0;
+    const percent = contextWindow ? Math.round((tokens * 100) / contextWindow) : estimated.percent;
     if (!storedUsage?.categories?.length) {
-      return estimated;
+      return { ...estimated, tokens, percent };
     }
     return {
       ...estimated,
+      tokens,
+      percent,
       categories: reconcileContextBreakdownCategories(
         storedUsage.categories,
-        estimated.tokens,
+        tokens,
       ),
     };
   }, [currentSession, config, skills, sessionContextUsage]);

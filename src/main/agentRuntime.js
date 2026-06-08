@@ -36,10 +36,17 @@ import {
     shrinkSubAgentMessages,
     formatCompactSummary,
     getContextConfig,
+    MAX_AUTO_COMPACT_ROUNDS,
+    MAX_MANUAL_COMPACT_ROUNDS,
+    mergeCompactKeepSettings,
     microCompactMessages,
+    microCompactMessagesIfNeeded,
     parseReadFileResult,
     preCompactMicroCompact,
+    resolveCompactKeepSettings,
+    resolveMicroCompactKeepRecent,
     shouldAutoCompact,
+    shouldRunMicroCompact,
     splitMessagesForCompact,
     trackLoadedSkill,
     trackReadFile,
@@ -104,6 +111,7 @@ export class AgentRuntime {
         this.mainWindowGetter = mainWindowGetter;
         this.busyBySession = new Map();
         this.compactingSessions = new Set();
+        this.autoCompactTimers = new Map();
         this.pendingQueues = new Map();
         this.abortControllers = new Map();
         this.cancelledRuns = new Set();
@@ -331,6 +339,7 @@ export class AgentRuntime {
             categories.filter((category) => category.tokens > 0),
             breakdown.tokens,
         );
+        this.scheduleAutoCompactIfNeeded(sessionId);
         return { ...breakdown, categories, systemPromptText };
     }
 
@@ -1083,13 +1092,45 @@ export class AgentRuntime {
             sessionId: session.meta.id,
             ...state,
         });
+        if (state.isAboveAutoCompactThreshold) {
+            this.scheduleAutoCompactIfNeeded(session.meta.id);
+        }
     }
 
-    applyMicroCompact(session) {
+    scheduleAutoCompactIfNeeded(sessionId) {
         const contextConfig = getContextConfig(this.configStore);
+        if (!contextConfig.auto_compact_enabled || this.compactingSessions.has(sessionId)) {
+            return;
+        }
+        if (this.autoCompactTimers.has(sessionId)) {
+            return;
+        }
+
+        const session = this.sessionStore.get(sessionId);
+        const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
+        if (!shouldAutoCompact(session, model, contextConfig)) {
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            this.autoCompactTimers.delete(sessionId);
+            void this.maybeAutoCompact(sessionId);
+        }, 300);
+        this.autoCompactTimers.set(sessionId, timer);
+    }
+
+    applyMicroCompactIfNeeded(session, modelOverride = null) {
+        const contextConfig = getContextConfig(this.configStore);
+        const model =
+            modelOverride ??
+            this.configStore.model(session.meta.providerKey, session.meta.modelId);
+        if (!shouldRunMicroCompact(session, model, contextConfig)) {
+            return session;
+        }
+
         const fromIndex = getActiveLlmContextStartIndex(session);
         const active = session.messages.slice(fromIndex);
-        const { cleared } = microCompactMessages(active, contextConfig);
+        const { cleared } = microCompactMessagesIfNeeded(active, model, contextConfig);
         if (cleared) {
             session.meta.updatedAt = new Date().toISOString();
             this.sessionStore.save(session);
@@ -1097,6 +1138,10 @@ export class AgentRuntime {
         }
         this.emitContextWarning(session);
         return session;
+    }
+
+    applyMicroCompact(session) {
+        return this.applyMicroCompactIfNeeded(session);
     }
 
     async maybeAutoCompact(sessionId, signal) {
@@ -1146,6 +1191,7 @@ export class AgentRuntime {
         const contextConfig = getContextConfig(this.configStore);
         let session = this.sessionStore.get(sessionId);
         const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
+        session = this.applyMicroCompactIfNeeded(session, model);
         let state = calculateContextWarningState(session, model, contextConfig);
         this.emitContextWarning(session);
 
@@ -1217,6 +1263,7 @@ export class AgentRuntime {
 
     async prepareSubAgentContext(sessionId, messages, model) {
         const contextConfig = getContextConfig(this.configStore);
+        microCompactMessagesIfNeeded(messages, model, contextConfig, { extraTokens: 0 });
         let state = calculateMessagesContextWarningState(messages, model, contextConfig);
         this.emitContextWarning(this.sessionStore.get(sessionId));
 
@@ -1398,126 +1445,183 @@ export class AgentRuntime {
                 { matchQuery: auto ? "auto" : "manual" },
             );
             const contextConfig = getContextConfig(this.configStore);
-            let session = this.sessionStore.get(sessionId);
-            const entries = getActiveLlmContextEntries(session);
-            let activeMessages = entries.map((entry) => entry.message);
+            const maxRounds = auto ? MAX_AUTO_COMPACT_ROUNDS : MAX_MANUAL_COMPACT_ROUNDS;
+            let totalSummarized = 0;
+            let lastKeepLength = 0;
+            let roundsCompleted = 0;
 
-            preCompactMicroCompact(activeMessages, contextConfig);
-            this.sessionStore.save(session);
-
-            const { toSummarize, keep, keepStartIndex } = splitMessagesForCompact(
-                activeMessages,
-                contextConfig,
-            );
-
-            if (!toSummarize.length) {
-                if (!auto) {
-                    const notice = withAssistantModel(
-                        {
-                            id: randomUUID(),
-                            role: "assistant",
-                            content: "当前上下文过短，暂无需压缩。",
-                            createdAt: new Date().toISOString(),
-                        },
-                        { modelId: session.meta.modelId },
-                    );
-                    session = this.sessionStore.appendMessage(sessionId, notice);
-                    this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: notice });
-                    this.emit(IPC_CHANNELS.onSessionChanged, session);
+            for (let round = 0; round < maxRounds; round += 1) {
+                if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+                    return;
                 }
-                return;
-            }
 
-            let summary = null;
-            let compactMethod = "full_llm";
-            const memoryCompact = trySessionMemoryCompact(session, entries, keepStartIndex);
-            if (memoryCompact.ok && contextConfig.session_memory_enabled) {
-                summary = memoryCompact.summary;
-                compactMethod = memoryCompact.method;
-            } else {
-                session = this.sessionStore.get(sessionId);
-                const { transcript, droppedGroups } = buildCompactTranscript(
-                    session,
-                    toSummarize,
+                let session = this.sessionStore.get(sessionId);
+                const entries = getActiveLlmContextEntries(session);
+                let activeMessages = entries.map((entry) => entry.message);
+                const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
+                const contextState = calculateContextWarningState(session, model, contextConfig);
+                const compactConfig = mergeCompactKeepSettings(
                     contextConfig,
+                    resolveCompactKeepSettings(contextState, contextConfig),
+                );
+                const needsForcedSplit =
+                    contextState.isAboveAutoCompactThreshold || contextState.isAtBlockingLimit;
+
+                preCompactMicroCompact(activeMessages, compactConfig);
+                this.sessionStore.save(session);
+
+                let { toSummarize, keep, keepStartIndex } = splitMessagesForCompact(
+                    activeMessages,
+                    compactConfig,
                 );
 
-                const choice = await this.llmClient.complete({
-                    model: {
-                        providerKey: session.meta.providerKey,
-                        modelId: session.meta.modelId,
-                    },
-                    modelChain: this.modelChainForSession(session),
-                    messages: [
-                        { role: "system", content: COMPACT_SUMMARIZE_SYSTEM },
-                        { role: "user", content: transcript },
-                    ],
-                    signal,
-                });
-                summary = formatCompactSummary(choice.message.content || "");
-                if (droppedGroups > 0 && summary) {
-                    summary = `[Note: ${droppedGroups} oldest API round(s) omitted from compact input due to size limits]\n\n${summary}`;
+                if (!toSummarize.length && needsForcedSplit) {
+                    ({ toSummarize, keep, keepStartIndex } = splitMessagesForCompact(
+                        activeMessages,
+                        compactConfig,
+                        { minMessages: 2, forceSplit: true },
+                    ));
+                }
+
+                if (!toSummarize.length) {
+                    if (round === 0 && !auto) {
+                        const notice = withAssistantModel(
+                            {
+                                id: randomUUID(),
+                                role: "assistant",
+                                content: "当前上下文过短，暂无需压缩。",
+                                createdAt: new Date().toISOString(),
+                            },
+                            { modelId: session.meta.modelId },
+                        );
+                        session = this.sessionStore.appendMessage(sessionId, notice);
+                        this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: notice });
+                        this.emit(IPC_CHANNELS.onSessionChanged, session);
+                    }
+                    break;
+                }
+
+                if (
+                    round > 0 &&
+                    toSummarize.length <= 1 &&
+                    keep.length >= lastKeepLength &&
+                    roundsCompleted > 0
+                ) {
+                    break;
+                }
+                lastKeepLength = keep.length;
+
+                let summary = null;
+                let compactMethod = "full_llm";
+                const memoryCompact = trySessionMemoryCompact(session, entries, keepStartIndex);
+                if (memoryCompact.ok && contextConfig.session_memory_enabled) {
+                    summary = memoryCompact.summary;
+                    compactMethod = memoryCompact.method;
+                } else {
+                    session = this.sessionStore.get(sessionId);
+                    const { transcript, droppedGroups } = buildCompactTranscript(
+                        session,
+                        toSummarize,
+                        compactConfig,
+                    );
+
+                    const choice = await this.llmClient.complete({
+                        model: {
+                            providerKey: session.meta.providerKey,
+                            modelId: session.meta.modelId,
+                        },
+                        modelChain: this.modelChainForSession(session),
+                        messages: [
+                            { role: "system", content: COMPACT_SUMMARIZE_SYSTEM },
+                            { role: "user", content: transcript },
+                        ],
+                        signal,
+                    });
+                    summary = formatCompactSummary(choice.message.content || "");
+                    if (droppedGroups > 0 && summary) {
+                        summary = `[Note: ${droppedGroups} oldest API round(s) omitted from compact input due to size limits]\n\n${summary}`;
+                    }
+                }
+
+                if (!summary) {
+                    session = this.sessionStore.get(sessionId);
+                    session.meta.compactFailures = (session.meta.compactFailures ?? 0) + 1;
+                    this.sessionStore.save(session);
+                    this.emit(IPC_CHANNELS.onError, {
+                        sessionId,
+                        message: auto
+                            ? "自动压缩失败：模型未返回有效摘要。"
+                            : "压缩失败：模型未返回有效摘要。",
+                    });
+                    return;
+                }
+
+                session = this.sessionStore.get(sessionId);
+                const sessionKeepIndex = entries[keepStartIndex]?.index ?? entries[0]?.index ?? 0;
+                const postCompactContext =
+                    buildPostCompactContext(session, compactConfig) || undefined;
+                const dividerMessage = {
+                    id: randomUUID(),
+                    role: CONTEXT_DIVIDER_ROLE,
+                    content: CONTEXT_COMPACT_DIVIDER_LABEL,
+                    contextSummary: summary,
+                    ...(postCompactContext ? { postCompactContext } : {}),
+                    createdAt: new Date().toISOString(),
+                };
+                session.messages.splice(sessionKeepIndex, 0, dividerMessage);
+                session.meta.llmContextDividerId = dividerMessage.id;
+                delete session.meta.llmContextFromIndex;
+                session.meta.contextSummary = summary;
+                session.meta.postCompactContext = postCompactContext;
+                if (!session.meta.postCompactContext) {
+                    delete session.meta.postCompactContext;
+                }
+                session.meta.compactFailures = 0;
+                session.meta.updatedAt = new Date().toISOString();
+                const lastSummarizedIndex =
+                    entries[keepStartIndex - 1]?.index ?? sessionKeepIndex - 1;
+                syncSessionMemoryAfterCompact(session, summary, lastSummarizedIndex);
+                this.sessionStore.save(session);
+                this.emit(IPC_CHANNELS.onSessionChanged, session);
+                this.emitContextWarning(session);
+
+                totalSummarized += toSummarize.length;
+                roundsCompleted += 1;
+
+                const afterState = calculateContextWarningState(
+                    this.sessionStore.get(sessionId),
+                    model,
+                    contextConfig,
+                );
+                if (!afterState.isAboveAutoCompactThreshold && !afterState.isAtBlockingLimit) {
+                    break;
                 }
             }
 
-            if (!summary) {
-                session = this.sessionStore.get(sessionId);
-                session.meta.compactFailures = (session.meta.compactFailures ?? 0) + 1;
-                this.sessionStore.save(session);
-                this.emit(IPC_CHANNELS.onError, {
-                    sessionId,
-                    message: auto
-                        ? "自动压缩失败：模型未返回有效摘要。"
-                        : "压缩失败：模型未返回有效摘要。",
-                });
+            if (roundsCompleted === 0) {
                 return;
             }
 
             session = this.sessionStore.get(sessionId);
-            const sessionKeepIndex = entries[keepStartIndex]?.index ?? entries[0]?.index ?? 0;
-            const postCompactContext =
-                buildPostCompactContext(session, contextConfig) || undefined;
-            const dividerMessage = {
-                id: randomUUID(),
-                role: CONTEXT_DIVIDER_ROLE,
-                content: CONTEXT_COMPACT_DIVIDER_LABEL,
-                contextSummary: summary,
-                ...(postCompactContext ? { postCompactContext } : {}),
-                createdAt: new Date().toISOString(),
-            };
-            session.messages.splice(sessionKeepIndex, 0, dividerMessage);
-            session.meta.llmContextDividerId = dividerMessage.id;
-            delete session.meta.llmContextFromIndex;
-            session.meta.contextSummary = summary;
-            session.meta.postCompactContext = postCompactContext;
-            if (!session.meta.postCompactContext) {
-                delete session.meta.postCompactContext;
-            }
-            session.meta.compactFailures = 0;
-            session.meta.updatedAt = new Date().toISOString();
-            const lastSummarizedIndex = entries[keepStartIndex - 1]?.index ?? sessionKeepIndex - 1;
-            syncSessionMemoryAfterCompact(session, summary, lastSummarizedIndex);
-            this.sessionStore.save(session);
-            // Divider is spliced into the middle of the transcript; rely on session sync
-            // instead of onMessageAppended (which only appends to the tail in the renderer).
-            this.emit(IPC_CHANNELS.onSessionChanged, session);
-            this.emitContextWarning(session);
-
+            const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
             if (!silent) {
-                const methodNote =
-                    compactMethod === "session_memory"
-                        ? "（使用 Session Memory，未调用完整摘要）"
-                        : "";
+                const afterState = calculateContextWarningState(session, model, contextConfig);
                 const restoredNote = session.meta.postCompactContext
                     ? "，并恢复了最近读取的文件/技能摘要"
                     : "";
+                const roundsNote =
+                    roundsCompleted > 1 ? `（共 ${roundsCompleted} 轮）` : "";
+                const percentNote =
+                    afterState.percent >= 100
+                        ? `；当前仍约 ${afterState.percent}%，可再次 /compact 或 /clear_context`
+                        : `；当前约 ${afterState.percent}%`;
                 const feedback = withAssistantModel(
                     {
                         id: randomUUID(),
                         role: "assistant",
                         content: auto
-                            ? `[自动压缩${methodNote}] 已将 ${toSummarize.length} 条较早消息压缩为结构化摘要，保留最近 ${keep.length} 条完整消息${restoredNote}。`
-                            : `已压缩 ${toSummarize.length} 条较早消息为结构化摘要，保留最近 ${keep.length} 条消息完整上下文${restoredNote}。`,
+                            ? `[自动压缩] 已将 ${totalSummarized} 条较早消息压缩为结构化摘要${roundsNote}${restoredNote}${percentNote}。`
+                            : `已压缩 ${totalSummarized} 条较早消息为结构化摘要${roundsNote}${restoredNote}${percentNote}。`,
                         createdAt: new Date().toISOString(),
                     },
                     { modelId: session.meta.modelId },

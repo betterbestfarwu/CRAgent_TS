@@ -5,12 +5,21 @@ import {
     buildPostCompactContext,
     calculateContextWarningState,
     calculateMessagesContextWarningState,
+    estimateClearableToolResultTokens,
+    forceSplitMessagesForCompact,
+    isCompactableTool,
+    mergeCompactKeepSettings,
+    microCompactMessages,
+    microCompactMessagesIfNeeded,
+    resolveCompactKeepSettings,
+    resolveMicroCompactKeepRecent,
     shrinkSubAgentMessages,
     MICROCOMPACT_CLEARED_MARKER,
     formatCompactSummary,
     getAutoCompactThreshold,
-    microCompactMessages,
     shouldAutoCompact,
+    shouldMicroCompactMessages,
+    shouldRunMicroCompact,
     splitMessagesForCompact,
     trackLoadedSkill,
     trackReadFile,
@@ -28,6 +37,7 @@ import {
     estimateSessionContextUsage,
     reconcileContextBreakdownCategories,
 } from "../src/shared/tokenEstimator.js";
+import { DEFAULT_CONTEXT_CONFIG } from "../src/shared/contextConfig.js";
 
 test("formatCompactSummary extracts summary block and strips analysis", () => {
     const raw = `<analysis>thinking</analysis>
@@ -36,6 +46,51 @@ test("formatCompactSummary extracts summary block and strips analysis", () => {
 </summary>`;
     assert.match(formatCompactSummary(raw), /User said hello/);
     assert.doesNotMatch(formatCompactSummary(raw), /thinking/);
+});
+
+test("isCompactableTool includes MCP deferred tools", () => {
+    assert.equal(isCompactableTool("read_file"), true);
+    assert.equal(isCompactableTool("mcp__github__search"), true);
+    assert.equal(isCompactableTool("TodoWrite"), false);
+});
+
+test("shouldMicroCompactMessages requires warning threshold and clearable tool tokens", () => {
+    const model = { contextWindow: 128_000, maxTokens: 8192 };
+    const smallTools = [
+        { role: "tool", name: "read_file", content: "tiny" },
+        { role: "assistant", content: "ok" },
+    ];
+    assert.equal(shouldMicroCompactMessages(smallTools, model, DEFAULT_CONTEXT_CONFIG, 0), false);
+
+    const hugeTools = Array.from({ length: 6 }, (_item, index) => ({
+        role: "tool",
+        name: "read_file",
+        content: "x".repeat(25_000 + index),
+    }));
+    assert.equal(
+        shouldMicroCompactMessages(hugeTools, model, DEFAULT_CONTEXT_CONFIG, 90_000),
+        true,
+    );
+});
+
+test("resolveMicroCompactKeepRecent tightens keep count under pressure", () => {
+    const model = { contextWindow: 128_000, maxTokens: 8192 };
+    const session = {
+        meta: { llmContextFromIndex: 0, compactFailures: 0 },
+        messages: [{ role: "user", content: "x".repeat(900_000) }],
+    };
+    const state = calculateContextWarningState(session, model);
+    assert.equal(resolveMicroCompactKeepRecent(state, DEFAULT_CONTEXT_CONFIG, session.messages), 1);
+});
+
+test("microCompactMessagesIfNeeded skips when gate is closed", () => {
+    const model = { contextWindow: 128_000, maxTokens: 8192 };
+    const messages = [{ role: "tool", name: "read_file", content: "small payload" }];
+    const result = microCompactMessagesIfNeeded(messages, model, DEFAULT_CONTEXT_CONFIG, {
+        extraTokens: 0,
+    });
+    assert.equal(result.ran, false);
+    assert.equal(result.cleared, 0);
 });
 
 test("microCompactMessages clears old compactable tool results", () => {
@@ -58,6 +113,85 @@ test("microCompactMessages clears old compactable tool results", () => {
     assert.equal(cleared, 5);
     assert.equal(messages[0].content, MICROCOMPACT_CLEARED_MARKER);
     assert.equal(messages[7].content, "payload-7".repeat(40));
+});
+
+test("resolveCompactKeepSettings tightens keep budget when context is over threshold", () => {
+    const model = { contextWindow: 128_000, maxTokens: 8192 };
+    const session = {
+        meta: { llmContextFromIndex: 0, compactFailures: 0 },
+        messages: [{ role: "user", content: "x".repeat(900_000) }],
+    };
+    const state = calculateContextWarningState(session, model);
+    const resolved = resolveCompactKeepSettings(state);
+    assert.ok(resolved.keep_max_tokens < DEFAULT_CONTEXT_CONFIG.keep_max_tokens);
+    assert.equal(resolved.keep_min_text_messages, 2);
+    assert.equal(resolved.precompact_keep_recent, 0);
+});
+
+test("mergeCompactKeepSettings overlays resolved keep settings", () => {
+    const merged = mergeCompactKeepSettings(DEFAULT_CONTEXT_CONFIG, {
+        keep_max_tokens: 12_000,
+        keep_min_text_messages: 2,
+    });
+    assert.equal(merged.keep_max_tokens, 12_000);
+    assert.equal(merged.auto_compact_enabled, DEFAULT_CONTEXT_CONFIG.auto_compact_enabled);
+});
+
+test("splitMessagesForCompact retries with tighter keep when kept slice dominates tokens", () => {
+    const messages = [
+        { id: "1", role: "user", content: "tiny old user message" },
+        { id: "2", role: "assistant", content: "tiny old answer" },
+        { id: "3", role: "user", content: "recent question" },
+        { id: "4", role: "assistant", content: "y".repeat(120_000) },
+        { id: "5", role: "user", content: "follow up one" },
+        { id: "6", role: "assistant", content: "follow up two" },
+        { id: "7", role: "user", content: "follow up three" },
+        { id: "8", role: "assistant", content: "follow up four" },
+        { id: "9", role: "user", content: "follow up five" },
+        { id: "10", role: "assistant", content: "follow up six" },
+    ];
+    const split = splitMessagesForCompact(messages, {
+        keep_min_tokens: 8000,
+        keep_min_text_messages: 5,
+        keep_max_tokens: 40_000,
+    });
+    assert.ok(split.toSummarize.length > 2);
+    assert.ok(split.keep.length < messages.length);
+});
+
+test("forceSplitMessagesForCompact splits oversized transcript by API round", () => {
+    const messages = [
+        { id: "1", role: "user", content: "round one ".repeat(5000) },
+        { id: "2", role: "assistant", content: "answer one" },
+        { id: "3", role: "user", content: "round two ".repeat(5000) },
+        { id: "4", role: "assistant", content: "answer two" },
+    ];
+    const normal = splitMessagesForCompact(messages, {
+        keep_min_tokens: 8000,
+        keep_min_text_messages: 5,
+        keep_max_tokens: 40_000,
+    });
+    assert.equal(normal.toSummarize.length, 0);
+
+    const forced = splitMessagesForCompact(
+        messages,
+        {
+            keep_min_tokens: 8000,
+            keep_min_text_messages: 5,
+            keep_max_tokens: 40_000,
+        },
+        { minMessages: 2, forceSplit: true },
+    );
+    assert.ok(forced.toSummarize.length > 0);
+    assert.ok(forced.keep.length > 0);
+    assert.ok(forced.keep.some((message) => message.content === "answer two"));
+});
+
+test("forceSplitMessagesForCompact returns null for a single message", () => {
+    assert.equal(
+        forceSplitMessagesForCompact([{ role: "user", content: "only message" }]),
+        null,
+    );
 });
 
 test("splitMessagesForCompact preserves tool pairs", () => {
@@ -92,7 +226,7 @@ test("splitMessagesForCompact preserves tool pairs", () => {
 test("shouldAutoCompact respects threshold and failure circuit breaker", () => {
     const model = { contextWindow: 200_000, maxTokens: 8192 };
     const threshold = getAutoCompactThreshold(model);
-    assert.equal(threshold, 170_000);
+    assert.equal(threshold, 178_808);
     assert.equal(
         getAutoCompactThreshold({ contextWindow: 128_000, maxTokens: 8192 }),
         128_000 - 8192 - 13_000,

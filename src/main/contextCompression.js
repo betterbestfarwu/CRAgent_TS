@@ -1,6 +1,11 @@
 import { DEFAULT_CONTEXT_CONFIG } from "@shared/contextConfig";
 import {
+    getActiveLlmContextStartIndex,
+    isContextDividerMessage,
+} from "@shared/chatMessages.js";
+import {
     calculateAutoCompactThreshold,
+    DEFAULT_BOOTSTRAP_OVERHEAD,
     estimateMessageTokens,
     estimateMessagesTokens,
     estimateSessionContextUsage,
@@ -25,7 +30,20 @@ export const COMPACTABLE_TOOLS = new Set([
     "memory_get",
     "memory_search",
     "write_file",
+    "load_skill",
+    "Task",
 ]);
+
+export function isCompactableTool(name) {
+    const toolName = String(name || "").trim();
+    if (!toolName) {
+        return false;
+    }
+    if (COMPACTABLE_TOOLS.has(toolName)) {
+        return true;
+    }
+    return toolName.startsWith("mcp__");
+}
 
 export const COMPACT_SUMMARIZE_SYSTEM = `You compress conversation history for context-window management.
 Write your analysis inside <analysis>...</analysis>, then output ONLY the final summary inside <summary>...</summary>.
@@ -67,6 +85,165 @@ export function getAutoCompactThreshold(model, contextConfig = DEFAULT_CONTEXT) 
 
 export function shouldAutoCompact(session, model, contextConfig = DEFAULT_CONTEXT) {
     return calculateContextWarningState(session, model, contextConfig).isAboveAutoCompactThreshold;
+}
+
+/** Tighten keep/split budgets when context is already over the compact threshold. */
+export function resolveCompactKeepSettings(contextState, contextConfig = DEFAULT_CONTEXT) {
+    const baseKeepMax = contextConfig.keep_max_tokens ?? DEFAULT_CONTEXT.keep_max_tokens;
+    const baseKeepMin = contextConfig.keep_min_tokens ?? DEFAULT_CONTEXT.keep_min_tokens;
+    const baseKeepText =
+        contextConfig.keep_min_text_messages ?? DEFAULT_CONTEXT.keep_min_text_messages;
+    const basePrecompactKeep =
+        contextConfig.precompact_keep_recent ?? DEFAULT_CONTEXT.precompact_keep_recent;
+    const basePostCompactBudget =
+        contextConfig.post_compact_token_budget ?? DEFAULT_CONTEXT.post_compact_token_budget;
+    const basePostCompactSkillsBudget =
+        contextConfig.post_compact_skills_token_budget ??
+        DEFAULT_CONTEXT.post_compact_skills_token_budget;
+
+    const { tokens, autoCompactThreshold, percent } = contextState;
+    if (!autoCompactThreshold || tokens <= autoCompactThreshold) {
+        return {
+            keep_max_tokens: baseKeepMax,
+            keep_min_tokens: baseKeepMin,
+            keep_min_text_messages: baseKeepText,
+            precompact_keep_recent: basePrecompactKeep,
+            post_compact_token_budget: basePostCompactBudget,
+            post_compact_skills_token_budget: basePostCompactSkillsBudget,
+        };
+    }
+
+    const overflowRatio = tokens / autoCompactThreshold;
+    const keepShare =
+        overflowRatio >= 4 ? 0.12 : overflowRatio >= 2 ? 0.22 : overflowRatio >= 1.5 ? 0.32 : 0.42;
+    const keepBudget = Math.max(
+        4000,
+        Math.min(baseKeepMax, Math.floor(autoCompactThreshold * keepShare)),
+    );
+
+    return {
+        keep_max_tokens: keepBudget,
+        keep_min_tokens: Math.min(baseKeepMin, Math.max(2000, Math.floor(keepBudget * 0.2))),
+        keep_min_text_messages:
+            overflowRatio >= 2 ? 2 : overflowRatio >= 1.5 ? 3 : baseKeepText,
+        precompact_keep_recent: percent >= 100 ? 0 : percent >= 90 ? 1 : basePrecompactKeep,
+        post_compact_token_budget: percent >= 95 ? Math.min(basePostCompactBudget, 8000) : basePostCompactBudget,
+        post_compact_skills_token_budget:
+            percent >= 95 ? Math.min(basePostCompactSkillsBudget, 4000) : basePostCompactSkillsBudget,
+    };
+}
+
+export function mergeCompactKeepSettings(contextConfig, keepSettings) {
+    return { ...contextConfig, ...keepSettings };
+}
+
+export const MAX_MANUAL_COMPACT_ROUNDS = 5;
+export const MAX_AUTO_COMPACT_ROUNDS = 3;
+
+export function estimateClearableToolResultTokens(messages) {
+    let tokens = 0;
+    for (const message of messages || []) {
+        if (message?.role !== "tool") {
+            continue;
+        }
+        if (!isCompactableTool(message.name)) {
+            continue;
+        }
+        if (message.content === MICROCOMPACT_CLEARED_MARKER) {
+            continue;
+        }
+        tokens += estimateMessageTokens(message);
+    }
+    return tokens;
+}
+
+/** Claude Code-style gate: warning threshold + enough clearable tool payload. */
+export function shouldMicroCompactMessages(
+    messages,
+    model,
+    contextConfig = DEFAULT_CONTEXT,
+    extraTokens = DEFAULT_BOOTSTRAP_OVERHEAD,
+) {
+    if (contextConfig.microcompact_enabled === false) {
+        return false;
+    }
+    const state = calculateMessagesContextWarningState(
+        messages,
+        model,
+        contextConfig,
+        extraTokens,
+    );
+    if (!state.isAboveWarningThreshold) {
+        return false;
+    }
+    const minClearable =
+        contextConfig.microcompact_min_clearable_tokens ??
+        DEFAULT_CONTEXT.microcompact_min_clearable_tokens;
+    return estimateClearableToolResultTokens(messages) >= minClearable;
+}
+
+export function shouldRunMicroCompact(session, model, contextConfig = DEFAULT_CONTEXT) {
+    const fromIndex = getActiveLlmContextStartIndex(session);
+    const active = (session?.messages || [])
+        .slice(fromIndex)
+        .filter((message) => !isContextDividerMessage(message));
+    return shouldMicroCompactMessages(active, model, contextConfig);
+}
+
+export function resolveMicroCompactKeepRecent(
+    contextState,
+    contextConfig = DEFAULT_CONTEXT,
+    messages = [],
+) {
+    const baseKeep =
+        contextConfig.microcompact_keep_recent ?? DEFAULT_CONTEXT.microcompact_keep_recent;
+    const warningKeep =
+        contextConfig.microcompact_warning_keep_recent ??
+        DEFAULT_CONTEXT.microcompact_warning_keep_recent;
+    const criticalKeep =
+        contextConfig.microcompact_critical_keep_recent ??
+        DEFAULT_CONTEXT.microcompact_critical_keep_recent;
+    const idleKeep =
+        contextConfig.microcompact_idle_keep_recent ?? DEFAULT_CONTEXT.microcompact_idle_keep_recent;
+    const idleMinutes =
+        contextConfig.microcompact_idle_minutes ?? DEFAULT_CONTEXT.microcompact_idle_minutes;
+    const isIdle = getMinutesSinceLastAssistant(messages) >= idleMinutes;
+
+    const { percent, isAboveAutoCompactThreshold, tokens, autoCompactThreshold } = contextState;
+    if (percent >= 100 || isAboveAutoCompactThreshold) {
+        return criticalKeep;
+    }
+    if (percent >= 90) {
+        return warningKeep;
+    }
+    if (autoCompactThreshold && tokens >= autoCompactThreshold * 0.85) {
+        return Math.min(baseKeep, warningKeep);
+    }
+    if (isIdle) {
+        return idleKeep;
+    }
+    return baseKeep;
+}
+
+export function microCompactMessagesIfNeeded(
+    messages,
+    model,
+    contextConfig = DEFAULT_CONTEXT,
+    options = {},
+) {
+    const extraTokens = options.extraTokens ?? 0;
+    if (!shouldMicroCompactMessages(messages, model, contextConfig, extraTokens)) {
+        return { cleared: 0, savedTokens: 0, keepRecent: null, ran: false };
+    }
+    const state = calculateMessagesContextWarningState(
+        messages,
+        model,
+        contextConfig,
+        extraTokens,
+    );
+    const keepRecent = resolveMicroCompactKeepRecent(state, contextConfig, messages);
+    const result = microCompactMessages(messages, contextConfig, { keepRecent });
+    return { ...result, keepRecent, ran: result.cleared > 0 };
 }
 
 export function calculateMessagesContextWarningState(
@@ -286,8 +463,64 @@ function adjustKeepStartForToolPairs(messages, keepStartIndex) {
     return start;
 }
 
-export function splitMessagesForCompact(messages, contextConfig = DEFAULT_CONTEXT) {
-    if (messages.length < COMPACT_MIN_CONTEXT_MESSAGES) {
+/** Force-split by API round when normal keep logic would retain the entire transcript. */
+export function forceSplitMessagesForCompact(messages, contextConfig = DEFAULT_CONTEXT) {
+    if (messages.length < 2) {
+        return null;
+    }
+
+    const maxTokens = contextConfig.keep_max_tokens ?? DEFAULT_CONTEXT.keep_max_tokens;
+    const groups = groupMessagesByApiRound(messages);
+
+    if (groups.length >= 2) {
+        let keepGroupCount = 0;
+        let tokens = 0;
+        for (let index = groups.length - 1; index >= 0; index -= 1) {
+            const groupTokens = estimateMessagesTokens(groups[index]);
+            if (keepGroupCount > 0 && tokens + groupTokens > maxTokens) {
+                break;
+            }
+            keepGroupCount += 1;
+            tokens += groupTokens;
+        }
+
+        if (keepGroupCount >= groups.length) {
+            keepGroupCount = groups.length - 1;
+        }
+        if (keepGroupCount <= 0) {
+            keepGroupCount = 1;
+        }
+
+        const keep = groups.slice(-keepGroupCount).flat();
+        let keepStartIndex = messages.length - keep.length;
+        keepStartIndex = adjustKeepStartForToolPairs(messages, keepStartIndex);
+        if (keepStartIndex <= 0) {
+            return null;
+        }
+
+        return {
+            toSummarize: messages.slice(0, keepStartIndex),
+            keep: messages.slice(keepStartIndex),
+            keepStartIndex,
+        };
+    }
+
+    const midpoint = Math.floor(messages.length / 2);
+    let keepStartIndex = adjustKeepStartForToolPairs(messages, midpoint);
+    if (keepStartIndex <= 0) {
+        return null;
+    }
+
+    return {
+        toSummarize: messages.slice(0, keepStartIndex),
+        keep: messages.slice(keepStartIndex),
+        keepStartIndex,
+    };
+}
+
+export function splitMessagesForCompact(messages, contextConfig = DEFAULT_CONTEXT, options = {}) {
+    const minMessages = options.minMessages ?? COMPACT_MIN_CONTEXT_MESSAGES;
+    if (messages.length < minMessages) {
         return { toSummarize: [], keep: messages, keepStartIndex: 0 };
     }
 
@@ -332,8 +565,36 @@ export function splitMessagesForCompact(messages, contextConfig = DEFAULT_CONTEX
     let keepStartIndex = messages.length - keep.length;
     keepStartIndex = adjustKeepStartForToolPairs(messages, keepStartIndex);
     const finalKeep = messages.slice(keepStartIndex);
+    const keptTokens = estimateMessagesTokens(finalKeep);
+    const summarizedTokens = estimateMessagesTokens(messages.slice(0, keepStartIndex));
+
+    if (
+        keepStartIndex > 0 &&
+        keptTokens > maxTokens &&
+        summarizedTokens < keptTokens * 0.15 &&
+        !options.retriedTightKeep
+    ) {
+        return splitMessagesForCompact(
+            messages,
+            {
+                ...contextConfig,
+                keep_max_tokens: Math.max(4000, Math.floor(maxTokens * 0.55)),
+                keep_min_text_messages: Math.min(minTextMessages, 2),
+            },
+            { ...options, retriedTightKeep: true },
+        );
+    }
 
     if (keepStartIndex <= 0) {
+        if (options.forceSplit) {
+            return (
+                forceSplitMessagesForCompact(messages, contextConfig) ?? {
+                    toSummarize: [],
+                    keep: messages,
+                    keepStartIndex: 0,
+                }
+            );
+        }
         return { toSummarize: [], keep: messages, keepStartIndex: 0 };
     }
 
@@ -364,7 +625,7 @@ export function microCompactMessages(messages, contextConfig = DEFAULT_CONTEXT, 
         if (message.role !== "tool") {
             continue;
         }
-        if (!COMPACTABLE_TOOLS.has(message.name)) {
+        if (!isCompactableTool(message.name)) {
             continue;
         }
         if (message.content === MICROCOMPACT_CLEARED_MARKER) {
@@ -388,8 +649,11 @@ export function microCompactMessages(messages, contextConfig = DEFAULT_CONTEXT, 
     return { cleared, savedTokens, keepRecent };
 }
 
-export function preCompactMicroCompact(messages, contextConfig = DEFAULT_CONTEXT) {
-    const keepRecent = contextConfig.precompact_keep_recent ?? DEFAULT_CONTEXT.precompact_keep_recent;
+export function preCompactMicroCompact(messages, contextConfig = DEFAULT_CONTEXT, options = {}) {
+    const keepRecent =
+        options.keepRecent ??
+        contextConfig.precompact_keep_recent ??
+        DEFAULT_CONTEXT.precompact_keep_recent;
     return microCompactMessages(messages, contextConfig, { keepRecent });
 }
 

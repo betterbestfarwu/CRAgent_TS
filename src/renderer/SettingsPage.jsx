@@ -945,16 +945,22 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
           <div className="settings-general-scroll">
             <h2 className="settings-general-title">Context</h2>
             <p className="settings-general-lead">
-              控制 MicroCompact、Session Memory 与 Full Compact。接近窗口上限时会自动压缩，也可手动使用
-              /compact。
+              按 Claude Code 策略分层管理上下文：MicroCompact 在每次 LLM 请求前清理旧 tool
+              结果；Session Memory 与 Full Compact 在接近窗口上限时摘要较早对话。
             </p>
 
             <SettingsGroup label="General">
               <SettingsToggleRow
                 title="Auto-compact"
-                description="接近上下文窗口上限时自动压缩较早对话。"
+                description="上下文达到触发百分比时自动摘要较早对话（默认 95%）。"
                 checked={Boolean(contextDraft.auto_compact_enabled)}
                 onChange={(checked) => updateContext({ auto_compact_enabled: checked })}
+              />
+              <SettingsToggleRow
+                title="MicroCompact"
+                description="超过 warning 阈值且旧 tool 结果足够大时，每次 LLM 请求前清理较早 tool 输出。"
+                checked={contextDraft.microcompact_enabled !== false}
+                onChange={(checked) => updateContext({ microcompact_enabled: checked })}
               />
               <SettingsToggleRow
                 title="Session Memory"
@@ -966,17 +972,53 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
 
             <SettingsGroup
               label="MicroCompact"
-              footer="每轮对话前清空较早 tool 结果，保留最近几条完整输出。"
+              footer="不调用 LLM，仅将旧 tool 结果替换为占位符；Critical 模式在 ≥100% 时只保留 1 条最近 tool 全文。"
             >
               <SettingsNumberRow
+                title="Min clearable tool tokens"
+                description="可清理的旧 tool 结果至少达到该 token 数才触发 MicroCompact。"
+                min={1000}
+                value={contextDraft.microcompact_min_clearable_tokens}
+                onChange={(raw) =>
+                  updateContextNumber("microcompact_min_clearable_tokens", raw, {
+                    min: 1000,
+                    fallback: DEFAULT_CONTEXT_CONFIG.microcompact_min_clearable_tokens,
+                  })
+                }
+              />
+              <SettingsNumberRow
                 title="Keep recent tool results"
-                description="活跃会话中保留的最近 tool 结果数量。"
+                description="正常模式下保留的最近 tool 结果数量。"
                 min={1}
                 value={contextDraft.microcompact_keep_recent}
                 onChange={(raw) =>
                   updateContextNumber("microcompact_keep_recent", raw, {
                     min: 1,
                     fallback: DEFAULT_CONTEXT_CONFIG.microcompact_keep_recent,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Warning keep count"
+                description="上下文 ≥90% 时保留的 tool 结果数量。"
+                min={1}
+                value={contextDraft.microcompact_warning_keep_recent}
+                onChange={(raw) =>
+                  updateContextNumber("microcompact_warning_keep_recent", raw, {
+                    min: 1,
+                    fallback: DEFAULT_CONTEXT_CONFIG.microcompact_warning_keep_recent,
+                  })
+                }
+              />
+              <SettingsNumberRow
+                title="Critical keep count"
+                description="上下文 ≥100% 或已达 auto-compact 阈值时保留的 tool 结果数量。"
+                min={0}
+                value={contextDraft.microcompact_critical_keep_recent}
+                onChange={(raw) =>
+                  updateContextNumber("microcompact_critical_keep_recent", raw, {
+                    min: 0,
+                    fallback: DEFAULT_CONTEXT_CONFIG.microcompact_critical_keep_recent,
                   })
                 }
               />
