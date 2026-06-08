@@ -15,6 +15,8 @@ import {
 } from "@shared/sessionStoragePaths.js";
 import { resolveCwd, resolvePathInWorkspace } from "../workspacePaths.js";
 import { resolveSkillName } from "../skillLoader.js";
+import { truncateShellOutput } from "../shellOutputLimits.js";
+import { DEFAULT_MAX_RESULT_SIZE_CHARS } from "@shared/toolLimits.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -81,7 +83,7 @@ async function runShell(command, cwd, runtime) {
         if (Date.now() - startedAt >= timeoutMs) {
             text += "\n--- stderr ---\n(command timed out after 60s)";
         }
-        return text;
+        return truncateShellOutput(text);
     }
 }
 
@@ -105,6 +107,7 @@ export function createBuiltinTools({
     const tools = [
         {
             name: "read_file",
+            maxResultSizeChars: Infinity,
             requiresConfirmation: false,
             enabled: () => getAgentTools().enable_file_tools !== false,
             schema: fnSchema(
@@ -143,6 +146,7 @@ export function createBuiltinTools({
         },
         {
             name: "write_file",
+            maxResultSizeChars: DEFAULT_MAX_RESULT_SIZE_CHARS,
             requiresConfirmation: true,
             enabled: () => getAgentTools().enable_file_tools !== false,
             schema: fnSchema(
@@ -175,6 +179,7 @@ export function createBuiltinTools({
         },
         {
             name: "list_dir",
+            maxResultSizeChars: 20_000,
             requiresConfirmation: false,
             enabled: () => getAgentTools().enable_file_tools !== false,
             schema: fnSchema("list_dir", "List entries in a workspace directory and return one name per line.", {
@@ -204,6 +209,7 @@ export function createBuiltinTools({
         },
         {
             name: "bash",
+            maxResultSizeChars: 30_000,
             requiresConfirmation: false,
             enabled: () => getAgentTools().enable_tools !== false,
             schema: fnSchema(
@@ -263,6 +269,7 @@ export function createBuiltinTools({
         },
         {
             name: "web_fetch",
+            maxResultSizeChars: 8000,
             requiresConfirmation: false,
             enabled: () => getAgentTools().enable_tools !== false,
             schema: fnSchema("web_fetch", "Fetch the raw text/HTML content of an HTTP(S) URL.", {

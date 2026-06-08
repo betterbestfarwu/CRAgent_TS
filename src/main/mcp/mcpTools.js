@@ -1,4 +1,5 @@
 import { mcpToolRegistryName } from "@shared/mcpConfig.js";
+import { DEFAULT_MAX_RESULT_SIZE_CHARS } from "@shared/toolLimits.js";
 
 function fnSchema(name, description, parameters) {
     return {
@@ -24,6 +25,7 @@ export function createMcpTools({ mcpManager, getAgentTools, getConfig }) {
                 `MCP tool '${tool.name}' from server '${serverId}'`;
             built.push({
                 name: registryName,
+                maxResultSizeChars: DEFAULT_MAX_RESULT_SIZE_CHARS,
                 requiresConfirmation: true,
                 enabled: () => {
                     const agentTools = getAgentTools();

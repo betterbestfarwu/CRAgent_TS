@@ -97,6 +97,14 @@ import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeToolResult, toolResultContent } from "@shared/toolResult.js";
 import { computerUseSystemPromptSection } from "./tools/computerUseTools.js";
 import { rejectAllPendingConfirms } from "./confirmBridge.js";
+import {
+    enforceToolResultBudget,
+    finalizeToolResultForLlm,
+    isPersistedToolResultContent,
+    loadToolResultBudgetState,
+    resolveToolMaxResultSizeChars,
+    serializeToolResultBudgetState,
+} from "./toolResultStorage.js";
 
 const HOOK_LOG_LIMIT = 80;
 
@@ -829,6 +837,7 @@ export class AgentRuntime {
                 }
                 const result = await this.executeToolWithHooks(call, {
                     sessionId,
+                    sessionsDir: this.sessionStore.locateSessionStorage(sessionId),
                     runId: subRunId,
                     parentRunId,
                     isSubAgent: true,
@@ -841,7 +850,7 @@ export class AgentRuntime {
                 ) {
                     this.skillLoader.reload();
                 }
-                const normalized = normalizeToolResult(result);
+                const normalized = await this.finalizeToolMessageResult(sessionId, call, result);
                 messages.push({
                     id: randomUUID(),
                     role: "tool",
@@ -1119,6 +1128,80 @@ export class AgentRuntime {
         this.autoCompactTimers.set(sessionId, timer);
     }
 
+    recordPersistedToolResult(session, toolCallId, content) {
+        if (!toolCallId || !isPersistedToolResultContent(content)) {
+            return session;
+        }
+        const state = loadToolResultBudgetState(session);
+        state.seenIds.add(toolCallId);
+        state.replacements.set(toolCallId, content);
+        session.meta.toolResultBudgetState = serializeToolResultBudgetState(state);
+        return session;
+    }
+
+    async finalizeToolMessageResult(sessionId, call, result) {
+        const tool = this.toolRegistry
+            .activeTools(sessionId)
+            .find((entry) => entry.name === call.function.name);
+        const normalized = normalizeToolResult(result);
+        const sessionsDir = this.sessionStore.locateSessionStorage(sessionId);
+        return finalizeToolResultForLlm(normalized, {
+            toolName: call.function.name,
+            toolUseId: call.id,
+            maxResultSizeChars: tool ? resolveToolMaxResultSizeChars(tool) : undefined,
+            sessionsDir,
+            sessionId,
+            hasImages: Boolean(normalized.images?.length),
+        });
+    }
+
+    async applyToolResultBudgetToSession(sessionId) {
+        const session = this.sessionStore.get(sessionId);
+        const fromIndex = getActiveLlmContextStartIndex(session);
+        const activeIndices = [];
+        const active = [];
+        for (let index = fromIndex; index < session.messages.length; index += 1) {
+            const message = session.messages[index];
+            if (isContextDividerMessage(message)) {
+                continue;
+            }
+            activeIndices.push(index);
+            active.push(message);
+        }
+        if (!active.length) {
+            return session;
+        }
+
+        const state = loadToolResultBudgetState(session);
+        const skipToolNames = new Set(
+            this.toolRegistry
+                .activeTools(sessionId)
+                .filter((tool) => resolveToolMaxResultSizeChars(tool) === Infinity)
+                .map((tool) => tool.name),
+        );
+        const beforeState = serializeToolResultBudgetState(state);
+        const result = await enforceToolResultBudget(active, state, {
+            sessionsDir: this.sessionStore.locateSessionStorage(sessionId),
+            sessionId,
+            skipToolNames,
+        });
+        const afterState = serializeToolResultBudgetState(state);
+        const stateChanged = JSON.stringify(beforeState) !== JSON.stringify(afterState);
+
+        if (result.changed) {
+            for (let index = 0; index < active.length; index += 1) {
+                session.messages[activeIndices[index]] = result.messages[index];
+            }
+        }
+        if (result.changed || stateChanged) {
+            session.meta.toolResultBudgetState = afterState;
+            session.meta.updatedAt = new Date().toISOString();
+            this.sessionStore.save(session);
+            this.emit(IPC_CHANNELS.onSessionChanged, session);
+        }
+        return session;
+    }
+
     applyMicroCompactIfNeeded(session, modelOverride = null) {
         const contextConfig = getContextConfig(this.configStore);
         const model =
@@ -1191,6 +1274,7 @@ export class AgentRuntime {
         const contextConfig = getContextConfig(this.configStore);
         let session = this.sessionStore.get(sessionId);
         const model = this.configStore.model(session.meta.providerKey, session.meta.modelId);
+        session = await this.applyToolResultBudgetToSession(sessionId);
         session = this.applyMicroCompactIfNeeded(session, model);
         let state = calculateContextWarningState(session, model, contextConfig);
         this.emitContextWarning(session);
@@ -1263,18 +1347,40 @@ export class AgentRuntime {
 
     async prepareSubAgentContext(sessionId, messages, model) {
         const contextConfig = getContextConfig(this.configStore);
+        const session = this.sessionStore.get(sessionId);
+        const state = loadToolResultBudgetState(session);
+        const skipToolNames = new Set(
+            this.toolRegistry
+                .activeTools(sessionId)
+                .filter((tool) => resolveToolMaxResultSizeChars(tool) === Infinity)
+                .map((tool) => tool.name),
+        );
+        const beforeState = serializeToolResultBudgetState(state);
+        const budgetResult = await enforceToolResultBudget(messages, state, {
+            sessionsDir: this.sessionStore.locateSessionStorage(sessionId),
+            sessionId,
+            skipToolNames,
+        });
+        const afterState = serializeToolResultBudgetState(state);
+        if (budgetResult.changed) {
+            messages.splice(0, messages.length, ...budgetResult.messages);
+        }
+        if (budgetResult.changed || JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
+            session.meta.toolResultBudgetState = afterState;
+            this.sessionStore.save(session);
+        }
         microCompactMessagesIfNeeded(messages, model, contextConfig, { extraTokens: 0 });
-        let state = calculateMessagesContextWarningState(messages, model, contextConfig);
+        let contextState = calculateMessagesContextWarningState(messages, model, contextConfig);
         this.emitContextWarning(this.sessionStore.get(sessionId));
 
-        if (!state.isAtBlockingLimit) {
-            return { blocked: false, state };
+        if (!contextState.isAtBlockingLimit) {
+            return { blocked: false, state: contextState };
         }
 
         if (shrinkSubAgentMessages(messages, contextConfig)) {
-            state = calculateMessagesContextWarningState(messages, model, contextConfig);
-            if (!state.isAtBlockingLimit) {
-                return { blocked: false, state };
+            contextState = calculateMessagesContextWarningState(messages, model, contextConfig);
+            if (!contextState.isAtBlockingLimit) {
+                return { blocked: false, state: contextState };
             }
         }
 
@@ -1285,16 +1391,16 @@ export class AgentRuntime {
         });
 
         while (shrinkSubAgentMessages(messages, contextConfig)) {
-            state = calculateMessagesContextWarningState(messages, model, contextConfig);
-            if (!state.isAtBlockingLimit) {
-                return { blocked: false, state };
+            contextState = calculateMessagesContextWarningState(messages, model, contextConfig);
+            if (!contextState.isAtBlockingLimit) {
+                return { blocked: false, state: contextState };
             }
         }
 
-        if (state.isAtBlockingLimit) {
-            return { blocked: true, state };
+        if (contextState.isAtBlockingLimit) {
+            return { blocked: true, state: contextState };
         }
-        return { blocked: false, state };
+        return { blocked: false, state: contextState };
     }
 
     async requestSubAgentLlm(sessionId, messages, model, invoke) {
@@ -1811,7 +1917,7 @@ export class AgentRuntime {
                     ) {
                         this.skillLoader.reload();
                     }
-                    const normalized = normalizeToolResult(result);
+                    const normalized = await this.finalizeToolMessageResult(sessionId, call, result);
                     const toolMessage = {
                         id: randomUUID(),
                         role: "tool",
@@ -1823,6 +1929,14 @@ export class AgentRuntime {
                         runId,
                     };
                     session = this.sessionStore.appendMessage(sessionId, toolMessage);
+                    session = this.recordPersistedToolResult(
+                        session,
+                        call.id,
+                        normalized.content,
+                    );
+                    if (session.meta.toolResultBudgetState) {
+                        this.sessionStore.save(session);
+                    }
                     this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: toolMessage });
                     this.emit(IPC_CHANNELS.onSessionChanged, session);
                     session = this.trackToolSideEffects(session, call, normalized);
