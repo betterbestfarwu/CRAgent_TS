@@ -290,15 +290,15 @@ function SessionRow({ meta, active, busy, unread, forceActionButtons, onSelect, 
             <button
               type="button"
               className="session-share"
-              title="在 Finder 中显示会话"
-              aria-label="在 Finder 中显示会话"
+              title="在 Finder 中显示"
+              aria-label="在 Finder 中显示"
               onClick={(e) => {
                 e.stopPropagation();
                 setHovered(false);
                 void window.cragent?.openSessionDirectory?.(meta.id);
               }}
             >
-              <CursorOutlineIcon name="folder-open" />
+              {ICON_SEARCH}
             </button>
             <button
               type="button"
