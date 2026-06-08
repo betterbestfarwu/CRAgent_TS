@@ -219,30 +219,28 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
   padding: 4px var(--chat-inner-x);
 }
 
-/* 仅文本：按内容自然宽度收缩，上限 80%，无 200px 下限 */
+/* 仅文本：短句按内容收缩；超长内容在 max-width 内换行 */
 .msg.user .bubble.bubble--text-only {
-  display: inline-block;
-  vertical-align: top;
-  width: fit-content;
+  display: block;
+  width: max-content;
   max-width: 100%;
   min-width: 0;
-  overflow-wrap: break-word;
-  word-break: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-/* 覆盖 .bubble > * { min-width: 0 }，避免 shrink-to-fit 把中文压成逐字换行 */
 .msg.user .bubble.bubble--text-only > * {
-  min-width: max-content;
+  min-width: 0;
   max-width: 100%;
 }
 
 .msg.user .bubble.bubble--text-only .msg-text--plain {
   display: inline;
-  min-width: max-content;
+  min-width: 0;
   max-width: 100%;
   white-space: pre-wrap;
-  overflow-wrap: break-word;
-  word-break: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .msg.user .bubble.bubble--text-only .msg-text:not(.msg-text--plain),
@@ -251,9 +249,9 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
   display: block;
   width: auto;
   max-width: 100%;
-  min-width: max-content;
-  overflow-wrap: break-word;
-  word-break: normal;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .msg.user .bubble.bubble--text-only .msg-text > :first-child {
@@ -264,14 +262,13 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
   margin-bottom: 0;
 }
 
-/* MD.render 的 <p> 在 shrink-to-fit 气泡里会塌成极窄宽；改为按内容撑开 */
 .msg.user .bubble.bubble--text-only .msg-text:not(.msg-text--plain) p {
   display: block;
-  width: max-content;
+  width: auto;
   max-width: 100%;
   margin: 0;
-  overflow-wrap: break-word;
-  word-break: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* 仅图片 */
@@ -290,7 +287,17 @@ html.session-switch-rendering body::-webkit-scrollbar-thumb:hover {
   flex-direction: column;
   align-items: stretch;
   width: max(var(--user-image-max-size), fit-content);
+  max-width: 100%;
   min-width: min(var(--user-image-max-size), 100%);
+}
+
+.msg.user .bubble.bubble--text-image .msg-text,
+.msg.user .bubble.bubble--text-image .msg-user-body,
+.msg.user .bubble.bubble--text-image .msg-system-hint {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 
