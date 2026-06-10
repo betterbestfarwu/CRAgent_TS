@@ -98,6 +98,7 @@
 
   function inline(text, ctx) {
     ctx = ctx || { footnotes: {}, linkRefs: {}, usedFootnotes: [] };
+    text = unwrapMathFromInlineCode(text);
     var math = protectMath(text);
     text = math.text;
     var codePlaceholders = [];
@@ -232,6 +233,33 @@
 
   function isMermaidLang(lang) {
     return /^mermaid$/i.test(lang || '');
+  }
+
+  function isMathLang(lang) {
+    return /^(?:math|latex|tex|katex|equation)$/i.test((lang || '').split(/\s+/)[0]);
+  }
+
+  function extractMathFenceBody(body, lang) {
+    var t = (body || '').trim();
+    if (!t) return null;
+    if (isMathLang(lang)) {
+      if (/^\$\$[\s\S]+\$\$$/.test(t)) return t;
+      if (/^\\\[[\s\S]+\\\]$/.test(t)) return t;
+      return '$$' + t + '$$';
+    }
+    if (/^\$\$[\s\S]+\$\$$/.test(t)) return t;
+    if (/^\\\[[\s\S]+\\\]$/.test(t)) return t;
+    return null;
+  }
+
+  function renderMathBlock(mathContent) {
+    return '<p class="math-block">' + mathContent + '</p>';
+  }
+
+  function unwrapMathFromInlineCode(text) {
+    return text
+      .replace(/`(\$\$[\s\S]+?\$\$)`/g, '$1')
+      .replace(/`(\\\[[\s\S]+?\\\])`/g, '$1');
   }
 
   function isMermaidSource(lines) {
@@ -402,7 +430,10 @@
         }
         if (i < lines.length) i++;
         var body = buf.join('\n');
-        if (isMermaidLang(lang) || (!lang && isMermaidSource(buf))) {
+        var mathBody = extractMathFenceBody(body, lang);
+        if (mathBody) {
+          html += renderMathBlock(mathBody);
+        } else if (isMermaidLang(lang) || (!lang && isMermaidSource(buf))) {
           html += renderMermaidBlock(body);
         } else {
           var langClass = lang ? ' class="language-' + escapeHTML(lang.split(/\s+/)[0]) + '"' : '';
@@ -427,7 +458,13 @@
           codeLines.push(stripped);
           i++;
         }
-        html += '<pre><code>' + escapeHTML(codeLines.join('\n')) + '</code></pre>';
+        var indentedBody = codeLines.join('\n');
+        var indentedMath = extractMathFenceBody(indentedBody, '');
+        if (indentedMath) {
+          html += renderMathBlock(indentedMath);
+        } else {
+          html += '<pre><code>' + escapeHTML(indentedBody) + '</code></pre>';
+        }
         continue;
       }
 

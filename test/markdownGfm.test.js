@@ -91,3 +91,22 @@ test('renders footnotes with backlink', () => {
   assert.match(html, /Footnote body/);
   assert.match(html, /footnote-backref/);
 });
+
+test('renders math-only fenced blocks as display math', () => {
+  const html = render('```\n$$a = \\frac{GM}{(R+h)^2}$$\n```');
+  assert.doesNotMatch(html, /<pre><code>/);
+  assert.match(html, /class="math-block"/);
+  assert.match(html, /\$\$a = \\frac\{GM\}\{\(R\+h\)\^2\}\$\$/);
+});
+
+test('renders latex fenced blocks as display math', () => {
+  const html = render('```latex\nE = mc^2\n```');
+  assert.doesNotMatch(html, /<pre><code>/);
+  assert.match(html, /\$\$E = mc\^2\$\$/);
+});
+
+test('unwraps display math from inline code backticks', () => {
+  const html = render('公式 `$$g = \\frac{GM}{R^2}$$` 如下');
+  assert.doesNotMatch(html, /<code>/);
+  assert.match(html, /\$\$g = \\frac\{GM\}\{R\^2\}\$\$/);
+});

@@ -276,22 +276,28 @@
     { left: '\\(', right: '\\)', display: false }
   ];
 
+  function postProcessRoot(el) {
+    if (el && el.isConnected) return el;
+    return container;
+  }
+
   function typesetMath(el) {
-    if (!el) return;
+    var root = postProcessRoot(el);
+    if (!root) return Promise.resolve();
     if (typeof renderMathInElement !== 'function') {
-      if (!/\$|\\\(|\\\[/.test(el.textContent || '')) return;
-      loadKatexScripts()
+      if (!/\$|\\\(|\\\[/.test(root.textContent || '')) return Promise.resolve();
+      return loadKatexScripts()
         .then(function () {
-          typesetMath(el);
+          return typesetMath(root);
         })
         .catch(function () {});
-      return;
     }
-    renderMathInElement(el, {
+    renderMathInElement(root, {
       delimiters: MATH_DELIMITERS,
       throwOnError: false,
       ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
     });
+    return Promise.resolve();
   }
 
   var mermaidReady = false;
@@ -489,8 +495,9 @@
   }
 
   function highlightCodeBlocks(root) {
-    if (!root || !root.querySelector('pre code')) return;
-    loadHighlightScript()
+    root = postProcessRoot(root);
+    if (!root || !root.querySelector('pre code')) return Promise.resolve();
+    return loadHighlightScript()
       .then(function () {
         if (!window.hljs) return;
         root.querySelectorAll('pre code').forEach(function (block) {
@@ -563,11 +570,10 @@
   var batchPostProcess = false;
 
   function postProcessRenderedContent(root) {
-    if (!root || batchPostProcess) return;
-    typesetMath(root);
-    highlightCodeBlocks(root);
+    if (!root || batchPostProcess) return Promise.resolve();
     enhanceCodeCopyButtons(root);
     typesetMermaid(root);
+    return Promise.all([typesetMath(root), highlightCodeBlocks(root)]);
   }
 
   function preText(pre) {
@@ -1100,7 +1106,7 @@
   function userTextNeedsMarkdownRender(text) {
     var s = String(text || '');
     if (!s) return false;
-    return /[*_`#[\]]|^>\s|^\d+\.\s|^-\s/m.test(s);
+    return /[*_`#[\]$]|^>\s|^\d+\.\s|^-\s/m.test(s);
   }
 
   function appendSystemHintBlock(bubble, systemHint) {
@@ -1475,6 +1481,7 @@
     }
     container.replaceChildren(fragment);
     buffer.remove();
+    postProcessRenderedContent(container);
     stabilizeSessionSwitchScroll();
   }
 
@@ -1701,8 +1708,9 @@
     } finally {
       batchPostProcess = false;
       requestAnimationFrame(function () {
-        postProcessRenderedContent(target);
-        if (onPostProcessComplete) onPostProcessComplete(target);
+        Promise.resolve(postProcessRenderedContent(target)).then(function () {
+          if (onPostProcessComplete) onPostProcessComplete(target);
+        });
       });
     }
   }
