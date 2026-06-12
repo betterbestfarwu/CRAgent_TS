@@ -59,7 +59,9 @@ import {
 } from "@shared/sessionTitle";
 import { parseActiveSlashCommand, isActiveManualSlashCommand, isSlashKey } from "@shared/chatCommands.js";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
+import { buildComposerRetryState } from "@shared/composerRetry.js";
 import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
+import { isPlanRejectionMessage } from "@shared/planMessages.js";
 import {
   estimateSessionContextBreakdown,
   reconcileContextBreakdownCategories,
@@ -1799,6 +1801,31 @@ export function App() {
     }
   }
 
+  function handleRetryMessage(messageId) {
+    if (!currentSession || page !== "chat") return;
+    const message = currentSession.messages.find((item) => item.id === messageId);
+    if (!message || message.role !== "user" || isPlanRejectionMessage(message)) return;
+
+    const state = buildComposerRetryState(message);
+    setInput(state.text);
+    setComposerCaret(state.text.length);
+    setPendingImages(state.images);
+    setPendingFiles(state.files);
+    setPendingAtMentions(state.mentions);
+    composerAttachSeqRef.current = state.nextAttachSeq;
+    setAtMentionManualStart(null);
+    setSlashCommandManualStart(null);
+    setComposerQuickMenuOpen(false);
+    requestAnimationFrame(() => {
+      const editor = textareaRef.current;
+      if (editor) {
+        placeComposerCaretAtEnd(editor);
+        editor.focus();
+      }
+      resizeComposer();
+    });
+  }
+
   const chatWelcomeLayout = !active && !hasComposerDraft;
   const onSettingsPage = page === "settings";
 
@@ -1968,6 +1995,7 @@ export function App() {
                   planContext={planContext}
                   onDelete={handleDeleteMessage}
                   onFork={handleForkMessage}
+                  onRetry={handleRetryMessage}
                   onOpenImage={(image) => setViewerImage(image)}
                   onOpenPlanFile={(sessionId) => window.cragent.openPlanFile?.(sessionId)}
                 />

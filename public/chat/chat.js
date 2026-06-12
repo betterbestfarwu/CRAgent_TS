@@ -17,6 +17,7 @@
   var ICON_CHECK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
   var ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
   var ICON_FORK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 17h-8l-3.5-5h-6.5"></path><path d="M21 7h-8l-3.495 5"></path><path d="M18 10l3-3-3-3"></path><path d="M18 20l3-3-3-3"></path></svg>';
+  var ICON_RETRY = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>';
   var ICON_EXPAND = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
 
   var ICON_CHEVRON_UP = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>';
@@ -1384,8 +1385,12 @@
     if (msg.role === 'user') {
       var userActions = document.createElement('div');
       userActions.className = 'meta user-actions-only';
+      var retryBtn = msg.plan_rejection
+        ? ''
+        : '<button class="icon-btn" data-action="retry" data-id="' + escapeAttr(msg.id) + '" title="重试" aria-label="重试">' + ICON_RETRY + '</button>';
       userActions.innerHTML =
         '<span class="actions">' +
+          retryBtn +
           '<button class="icon-btn" data-action="copy" data-id="' + escapeAttr(msg.id) + '" title="复制" aria-label="复制">' + ICON_COPY + '</button>' +
         '</span>';
       wrap.appendChild(userActions);
@@ -1777,6 +1782,11 @@
     setSessionModel: function (modelId) {
       currentSessionModelId = modelId ? String(modelId) : '';
     },
+    setFontScale: function (scale) {
+      var numeric = Number(scale);
+      if (!isFinite(numeric)) return;
+      document.documentElement.style.zoom = String(Math.min(1.6, Math.max(0.8, Math.round(numeric * 10) / 10)));
+    },
   };
 
   function copyToClipboard(text) {
@@ -1877,6 +1887,10 @@
     }
     if (action === 'fork' && id) {
       notifyHost({ action: 'fork', id: id });
+      return;
+    }
+    if (action === 'retry' && id) {
+      notifyHost({ action: 'retry', id: id });
       return;
     }
     if (id) notifyHost({ action: action, id: id });

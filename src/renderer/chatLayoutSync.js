@@ -1,3 +1,4 @@
+import { applyChatFontScaleToDocument, readStoredChatFontScale } from "@shared/chatFontScale.js";
 import { applyColorSchemeToDocument, readStoredColorScheme } from "@shared/colorScheme.js";
 
 const LAYOUT_VARS = [
@@ -24,4 +25,5 @@ export function injectChatLayout(iframeDoc) {
   target.style.removeProperty("--chat-bg");
 
   applyColorSchemeToDocument(iframeDoc, readStoredColorScheme());
+  applyChatFontScaleToDocument(iframeDoc, readStoredChatFontScale());
 }
