@@ -8,6 +8,7 @@ import {
   restoreComposerEditorCaret,
   restoreComposerEditorCaretAtOffset,
 } from "@shared/composerEditor.js";
+import { applyComposerEditShortcut } from "@shared/composerEditShortcuts.js";
 import {
   createFileChipElement,
   createMentionChipElement,
@@ -218,7 +219,17 @@ function ComposerInlineEditor({
       onKeyUp={reportCaret}
       onClick={reportCaret}
       onSelect={reportCaret}
-      onKeyDown={(event) => onKeyDown?.(event, { contentEditable: true })}
+      onKeyDown={(event) => {
+        if (
+          applyComposerEditShortcut(event, {
+            contentEditable: true,
+            onAfterCut: () => queueMicrotask(handleInput),
+          })
+        ) {
+          return;
+        }
+        onKeyDown?.(event, { contentEditable: true });
+      }}
     />
   );
 }
@@ -274,12 +285,15 @@ function ComposerPlainTextarea({
       onKeyUp={reportCaret}
       onClick={reportCaret}
       onSelect={reportCaret}
-      onKeyDown={(event) =>
+      onKeyDown={(event) => {
+        if (applyComposerEditShortcut(event, { contentEditable: false })) {
+          return;
+        }
         onKeyDown?.(event, {
           textIndex: 0,
           segmentStart,
-        })
-      }
+        });
+      }}
     />
   );
 }
