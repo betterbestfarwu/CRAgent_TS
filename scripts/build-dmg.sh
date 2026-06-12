@@ -39,6 +39,14 @@ mkdir -p "$STAGING"
 cp -R "$APP_PATH" "$STAGING/"
 ln -sf /Applications "$STAGING/Applications"
 
+ICON_ICNS="$ROOT/build/icon.icns"
+if [[ ! -f "$ICON_ICNS" ]]; then
+  echo "Missing $ICON_ICNS" >&2
+  exit 1
+fi
+cp "$ICON_ICNS" "$STAGING/.VolumeIcon.icns"
+SetFile -a C "$STAGING"
+
 hdiutil create \
   -volname "CRAgent ${VERSION}" \
   -srcfolder "$STAGING" \
