@@ -106,14 +106,29 @@ export function matchChatCommand(input) {
   return null;
 }
 
+function normalizeSlashCommandSearchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
 export function filterSlashCommands(query) {
   const normalized = String(query || "").toLowerCase();
+  const compactNormalized = normalizeSlashCommandSearchText(query);
   return CHAT_COMMANDS.filter((command) => {
     if (!normalized) {
       return true;
     }
     const names = getCommandSlashNames(command);
     if (names.some((name) => name.toLowerCase().includes(normalized))) {
+      return true;
+    }
+    if (
+      compactNormalized &&
+      names.some((name) =>
+        normalizeSlashCommandSearchText(name).includes(compactNormalized),
+      )
+    ) {
       return true;
     }
     return String(command.description || "")
@@ -153,7 +168,7 @@ export function formatHelpText() {
 export function parseComputerUseInvocation(input) {
   const match = String(input || "")
     .trim()
-    .match(/^\/computer use(?:\s+([\s\S]*))?$/i);
+    .match(/^\/computer(?:[\s_-]*use)?(?:\s+([\s\S]*))?$/i);
   if (!match) {
     return null;
   }
