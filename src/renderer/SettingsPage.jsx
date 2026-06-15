@@ -318,7 +318,7 @@ function SettingsModelRow({ title, checked, onToggle, onDelete }) {
   );
 }
 
-export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onProbeMcp }) {
+export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncProviderModels, onProbeMcp }) {
   const [activeTab, setActiveTab] = useState("models");
   const [draftConfig, setDraftConfig] = useState(() =>
     ensureUiConfigShape(ensureMcpConfigShape(clone(config))),
@@ -340,19 +340,22 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
     providerKeys[0] || "",
   );
 
-  useEffect(() => {
-    const next = ensureUiConfigShape(ensureMcpConfigShape(clone(config)));
-    setDraftConfig(next);
-    draftConfigRef.current = next;
-    const keys = Object.keys(next.models || {});
-    setSelectedProviderKey((prev) =>
-      prev && keys.includes(prev) ? prev : keys[0] || "",
-    );
-  }, [config]);
+  function commitDraftConfig(updater) {
+    setDraftConfig((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      draftConfigRef.current = next;
+      return next;
+    });
+  }
 
-  useEffect(() => {
-    draftConfigRef.current = draftConfig;
-  }, [draftConfig]);
+  function buildPersistableConfig(source = draftConfigRef.current) {
+    return ensureMcpConfigShape(source);
+  }
+
+  async function persistDraftConfig(source = draftConfigRef.current) {
+    if (!onPersistConfig) return;
+    await onPersistConfig(buildPersistableConfig(source));
+  }
 
   const selectedProvider = selectedProviderKey
     ? draftConfig.models?.[selectedProviderKey]
@@ -495,7 +498,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
       }
       return next;
     });
-    setDraftConfig((prev) => renameProviderInConfig(prev, selectedProviderKey, nextProviderKey));
+    commitDraftConfig((prev) => renameProviderInConfig(prev, selectedProviderKey, nextProviderKey));
     setSelectedProviderKey(nextProviderKey);
     setProviderDialog(null);
   }
@@ -511,8 +514,15 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
       delete next[keyToDelete];
       return next;
     });
-    setDraftConfig((prev) => removeProviderFromConfig(prev, keyToDelete));
+    let nextConfig = removeProviderFromConfig(draftConfigRef.current, keyToDelete);
+    commitDraftConfig(nextConfig);
     setSelectedProviderKey(remainingKeys[0] || "");
+    void persistDraftConfig(nextConfig).catch((err) => {
+        setProviderSyncError(
+          keyToDelete,
+          err instanceof Error ? err.message : "删除 Provider 后写入 config.json 失败",
+        );
+      });
   }
 
   function updateModelState(modelId, checked) {
@@ -552,7 +562,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
   }
 
   function handleSave() {
-    void onSave(ensureMcpConfigShape(draftConfigRef.current));
+    void onSave(buildPersistableConfig(draftConfig));
   }
 
   async function handleSyncModels() {
@@ -574,7 +584,11 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
     setSyncLoading(true);
     setProviderSyncError(providerKey, "");
     try {
-      const result = await onSyncProviderModels(providerKey, connection);
+      const result = await onSyncProviderModels(
+        providerKey,
+        connection,
+        draftConfigRef.current.models,
+      );
       const syncedProvider = result.config?.models?.[providerKey];
       if (!syncedProvider) {
         throw new Error("同步结果缺少 provider 配置");
@@ -1379,7 +1393,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
       {deleteProviderConfirmOpen ? (
         <ConfirmDialog
           message={`确定删除 Provider「${selectedProviderKey}」？`}
-          detail="该 Provider 的 API 连接、密钥及下属模型将被一并移除。保存设置后无法恢复，请确认后再操作。"
+          detail="该 Provider 的 API 连接、密钥及下属模型将被一并移除，并立即写入 config.json。此操作无法恢复，请确认后再操作。"
           confirmLabel="删除"
           cancelLabel="取消"
           destructive

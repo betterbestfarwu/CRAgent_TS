@@ -67,6 +67,31 @@ test("mergeSyncedProviderIntoConfig updates one provider without restoring delet
     assert.equal(next.models.openai.models[0].id, "gpt-5");
 });
 
+test("syncProviderModels applies draft models before updating provider on disk", () => {
+    const configFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cragent-sync-")), "config.json");
+    const store = new ConfigStore(configFile);
+    const initial = store.get();
+    store.update({
+        ...initial,
+        models: sampleConfig().models,
+        agents: sampleConfig().agents,
+    });
+
+    const draftModels = removeProviderFromConfig(store.get(), "anthropic").models;
+    store.update({
+        ...store.get(),
+        models: draftModels,
+    });
+    store.updateProvider("openai", {
+        ...store.get().models.openai,
+        models: [{ id: "gpt-5", state: true }],
+    });
+
+    const persisted = JSON.parse(fs.readFileSync(configFile, "utf-8"));
+    assert.equal("anthropic" in persisted.models, false);
+    assert.equal(persisted.models.openai.models[0].id, "gpt-5");
+});
+
 test("ConfigStore.update persists provider removal from config", () => {
     const configFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cragent-models-")), "config.json");
     const store = new ConfigStore(configFile);

@@ -720,7 +720,7 @@ export function installWebBridge() {
       return { toolCount: 0, errors: {} };
     },
 
-    async syncProviderModels({ providerKey, connection }) {
+    async syncProviderModels({ providerKey, connection, models: draftModels }) {
       const { config } = ensureState();
       if (!providerKey) {
         return { ok: false, error: "缺少 providerKey" };
@@ -729,12 +729,17 @@ export function installWebBridge() {
       if (!validation.ok) {
         return { ok: false, error: validation.error };
       }
-      const existing = config.models?.[providerKey] ?? createEmptyProvider();
+      const baseModels =
+        draftModels && typeof draftModels === "object" ? draftModels : config.models || {};
+      const existing = baseModels[providerKey];
+      if (!existing) {
+        return { ok: false, error: "未找到 provider" };
+      }
       const provider = applyProviderConnection(existing, connection);
       const nextConfig = {
         ...config,
         models: {
-          ...config.models,
+          ...baseModels,
           [providerKey]: provider,
         },
       };

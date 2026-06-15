@@ -1764,6 +1764,12 @@ export function App() {
     if (compactLayout) setSidebarOpen(false);
   }
 
+  async function persistConfig(next) {
+    const updated = await window.cragent.updateConfig(next);
+    setConfig(updated);
+    return updated;
+  }
+
   async function handleDeleteMessage(messageId) {
     if (!currentSession || !window.cragent?.deleteMessages) return;
     const messageIds = collectMessageIdsForDeletion(currentSession.messages, messageId);
@@ -1949,11 +1955,16 @@ export function App() {
             config={config}
             onBack={() => setPage("chat")}
             onSave={saveConfig}
-            onSyncProviderModels={async (providerKey, connection) => {
+            onPersistConfig={persistConfig}
+            onSyncProviderModels={async (providerKey, connection, draftModels) => {
               if (!window.cragent?.syncProviderModels) {
                 throw new Error("主进程未支持模型同步，请重启应用。");
               }
-              const result = await window.cragent.syncProviderModels({ providerKey, connection });
+              const result = await window.cragent.syncProviderModels({
+                providerKey,
+                connection,
+                models: draftModels,
+              });
               if (!result?.ok) {
                 throw new Error(result?.error || "同步模型失败");
               }
