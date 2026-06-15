@@ -386,6 +386,48 @@ export function normalizeMessagesForLlm(messages) {
     return padMissingAssistantsBetweenUsers(merged);
 }
 
+const COMPUTER_SCREENSHOT_TOOL_NAMES = new Set(["computer_screenshot", "computer_action"]);
+
+function isComputerScreenshotToolMessage(message) {
+    if (message?.role !== "tool" || !message?.images?.length) {
+        return false;
+    }
+    if (message.name === "computer_screenshot") {
+        return true;
+    }
+    if (message.name === "computer_action") {
+        return /screenshot captured/i.test(String(message.content || ""));
+    }
+    return false;
+}
+
+/** Keep only the newest computer screenshots in LLM context to avoid vision payload bloat. */
+export function trimStaleComputerScreenshots(messages, keepLast = 2) {
+    const screenshotIndices = [];
+    for (let index = 0; index < (messages || []).length; index += 1) {
+        if (isComputerScreenshotToolMessage(messages[index])) {
+            screenshotIndices.push(index);
+        }
+    }
+    const stripCount = Math.max(0, screenshotIndices.length - Math.max(1, keepLast));
+    if (!stripCount) {
+        return messages;
+    }
+    const stripIndices = new Set(screenshotIndices.slice(0, stripCount));
+    return (messages || []).map((message, index) => {
+        if (!stripIndices.has(index)) {
+            return message;
+        }
+        const suffix = "\n\n[Earlier screenshot omitted from context to save tokens.]";
+        const content = String(message.content || "");
+        return {
+            ...message,
+            images: undefined,
+            content: content.includes("[Earlier screenshot omitted") ? content : `${content}${suffix}`,
+        };
+    });
+}
+
 /** Stable wire fingerprint for user image metadata (ignores data_url vs image_src churn). */
 export function userImagesWireFingerprint(messages) {
     return JSON.stringify(

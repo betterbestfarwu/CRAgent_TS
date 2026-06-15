@@ -7,6 +7,7 @@ import {
     dragTo,
     isComputerUseSupported,
     moveTo,
+    openApp,
     pressKey,
     scroll,
     typeText,
@@ -101,6 +102,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                                 "key",
                                 "scroll",
                                 "wait",
+                                "open_app",
                             ],
                             description: "Desktop action to perform.",
                         },
@@ -158,6 +160,11 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                         ms: {
                             type: "integer",
                             description: "Wait duration in milliseconds. Default 1000.",
+                        },
+                        app: {
+                            type: "string",
+                            description:
+                                'Application name for open_app, e.g. "Google Chrome", "Safari", "Visual Studio Code".',
                         },
                     },
                     required: ["action"],
@@ -253,6 +260,15 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                         context.sessionId,
                     );
                     return waitForComputer({ ms, signal: context.signal });
+                }
+                if (action === "open_app") {
+                    const app = String(args.app ?? "").trim();
+                    await confirmComputerAction(
+                        "computer_action",
+                        `Open app: ${app}`,
+                        context.sessionId,
+                    );
+                    return openApp({ app, signal: context.signal });
                 }
                 throw new Error(`Unsupported computer_action action: ${args.action}`);
             },

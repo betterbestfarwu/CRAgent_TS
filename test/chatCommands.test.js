@@ -121,6 +121,7 @@ describe("chatCommands computer use", () => {
         const enabledPrompt = buildComputerUsePrompt("", { enabled: true });
         assert.match(enabledPrompt, /computer_action/);
         assert.match(enabledPrompt, /截图.*观察.*执行.*验证/);
+        assert.match(enabledPrompt, /open_app/);
         assert.match(enabledPrompt, /drag/);
     });
 });

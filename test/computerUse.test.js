@@ -9,7 +9,14 @@ import { messagesToApiPayloads, parseAssistantContent } from "../src/main/llmCli
 import { shouldRequireToolConfirmation } from "../src/main/authPolicy.js";
 import { ToolRegistry } from "../src/main/toolRegistry.js";
 import { createComputerUseTools } from "../src/main/tools/computerUseTools.js";
-import { dragTo, isComputerUseSupported, waitForComputer } from "../src/main/computerUse.js";
+import {
+    dragTo,
+    isComputerUseSupported,
+    waitForComputer,
+    computerActionFingerprint,
+    formatComputerLoopNudge,
+    openApp,
+} from "../src/main/computerUse.js";
 import {
     dipPointToPlatformPoint,
     dipRectToPlatformRect,
@@ -376,6 +383,61 @@ describe("computer use tools", () => {
         );
 
         assert.equal(result, "Waited 1ms");
+    });
+
+    it("registers open_app in computer_action schema", () => {
+        const enabled = createComputerUseTools({
+            getAgentTools: () => ({ enable_tools: true, enable_computer_use: true }),
+            confirmToolExecution: async () => true,
+        });
+        const actionTool = enabled.find((tool) => tool.name === "computer_action");
+        const actions =
+            actionTool.schema.function.parameters.properties.action.enum;
+        assert.ok(actions.includes("open_app"));
+    });
+});
+
+describe("computer use helpers", () => {
+    it("normalizes computer_action and computer_key into the same fingerprint", () => {
+        assert.equal(
+            computerActionFingerprint({
+                function: {
+                    name: "computer_action",
+                    arguments: JSON.stringify({ action: "key", key: "cmd+space" }),
+                },
+            }),
+            "key:cmd+space",
+        );
+        assert.equal(
+            computerActionFingerprint({
+                function: {
+                    name: "computer_key",
+                    arguments: JSON.stringify({ key: "cmd+space" }),
+                },
+            }),
+            "key:cmd+space",
+        );
+        assert.equal(
+            computerActionFingerprint({
+                function: {
+                    name: "computer_action",
+                    arguments: JSON.stringify({ action: "screenshot" }),
+                },
+            }),
+            null,
+        );
+    });
+
+    it("formats a loop nudge after repeated actions", () => {
+        assert.match(formatComputerLoopNudge(3), /repeated 3 times/);
+        assert.match(formatComputerLoopNudge(3), /open_app/);
+    });
+
+    it("rejects open_app without app name", async () => {
+        if (!isComputerUseSupported()) {
+            return;
+        }
+        await assert.rejects(() => openApp({ app: "" }), /app is required/);
     });
 });
 

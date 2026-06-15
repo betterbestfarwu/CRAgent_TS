@@ -31,16 +31,57 @@ export function isComputerUseSupported(platform = process.platform) {
     return platform === "darwin" || platform === "win32";
 }
 
+export function computerActionFingerprint(toolCall) {
+    const name = toolCall?.function?.name;
+    if (!name || !name.startsWith("computer")) {
+        return null;
+    }
+    let args = {};
+    try {
+        args = JSON.parse(toolCall.function.arguments || "{}");
+    } catch {
+        return `${name}:${toolCall.function.arguments || ""}`;
+    }
+    if (name === "computer_action") {
+        const action = String(args.action || "").toLowerCase();
+        if (action === "screenshot") {
+            return null;
+        }
+        if (action === "key") {
+            return `key:${String(args.key || "").toLowerCase()}`;
+        }
+        if (action === "open_app") {
+            return `open_app:${String(args.app || "").toLowerCase()}`;
+        }
+        return `action:${action}:${JSON.stringify(args)}`;
+    }
+    if (name === "computer_key") {
+        return `key:${String(args.key || "").toLowerCase()}`;
+    }
+    return `${name}:${JSON.stringify(args)}`;
+}
+
+export function formatComputerLoopNudge(repeatCount = 3) {
+    return (
+        `\n\n[system] The same desktop action was repeated ${repeatCount} times without progress. ` +
+        "Take a fresh screenshot, verify the UI changed, and switch strategy " +
+        '(e.g. computer_action open_app, click a Dock icon, or a different shortcut).'
+    );
+}
+
 export function computerUseSystemPromptSection() {
     return [
         "<computer_use>",
         "Use computer_* tools only when the task requires desktop interaction. Use a vision-capable model.",
         "Prefer computer_action for built-in-style desktop control. Low-level computer_displays, computer_screenshot, computer_move, computer_click, computer_type, computer_key, and computer_scroll remain available.",
         "Workflow: computer_action({action:\"screenshot\"}) or computer_displays → inspect the result → act with computer_action → verify important UI changes with another screenshot.",
-        "Supported computer_action actions: screenshot, move, click, double_click, drag, type, key, scroll, wait.",
+        "Supported computer_action actions: screenshot, move, click, double_click, drag, type, key, scroll, wait, open_app.",
         "Use global virtual-desktop coordinates in DIP/logical pixels from Electron display.bounds.",
         "On multi-monitor setups, call computer_displays before any coordinate-based action.",
         "Prefer computer_key for shortcuts when possible; use computer_type for literal text entry.",
+        "To launch an app, prefer computer_action({action:\"open_app\", app:\"Google Chrome\"}) on macOS/Windows instead of repeating Spotlight shortcuts.",
+        "If using Spotlight (cmd+space), type the app name and press enter in the same step — do not press cmd+space repeatedly.",
+        "If two consecutive screenshots look unchanged, switch strategy instead of repeating the same key or click.",
         "On macOS, grant Accessibility permission to CRAgent if input tools fail.",
         "</computer_use>",
     ].join("\n");
@@ -665,6 +706,28 @@ for ($i = 0; $i -lt ${clicks}; $i++) {
 }
 `;
     await runPowerShell(script);
+}
+
+export async function openApp({ app, signal } = {}) {
+    const name = String(app ?? "").trim();
+    if (!name) {
+        throw new Error("app is required");
+    }
+    if (signal?.aborted) {
+        throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+    }
+    if (process.platform === "darwin") {
+        await execFileAsync("/usr/bin/open", ["-a", name], signal ? { signal } : {});
+    } else if (process.platform === "win32") {
+        await execFileAsync(
+            "cmd",
+            ["/c", "start", "", name],
+            signal ? { signal } : {},
+        );
+    } else {
+        throw new Error("Computer use is supported only on macOS and Windows");
+    }
+    return `Opened app: ${name}`;
 }
 
 export async function scroll({ direction = "down", amount = 3, at, signal } = {}) {

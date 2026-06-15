@@ -11,6 +11,7 @@ import {
     mergeAdjacentSameContentUserMessages,
     normalizeMessagesForLlm,
     padMissingAssistantsBetweenUsers,
+    trimStaleComputerScreenshots,
     reconcileLlmContextAfterMessageRemoval,
     removeAdjacentDuplicateContextDividers,
     normalizeLlmContextMeta,
@@ -445,4 +446,33 @@ test("normalizeMessagesForLlm applies exclude, merge, and pad in order", () => {
             ["user", "next"],
         ],
     );
+});
+
+test("trimStaleComputerScreenshots keeps only the newest computer screenshots", () => {
+    const image = { mimeType: "image/png", dataUrl: "data:image/png;base64,abc" };
+    const messages = [
+        {
+            role: "tool",
+            name: "computer_screenshot",
+            content: "Screenshot captured (old).",
+            images: [image],
+        },
+        {
+            role: "tool",
+            name: "computer_action",
+            content: "Screenshot captured ([0] display).",
+            images: [image],
+        },
+        {
+            role: "tool",
+            name: "computer_screenshot",
+            content: "Screenshot captured (new).",
+            images: [image],
+        },
+    ];
+    const trimmed = trimStaleComputerScreenshots(messages, 1);
+    assert.equal(trimmed[0].images, undefined);
+    assert.match(trimmed[0].content, /Earlier screenshot omitted/);
+    assert.equal(trimmed[1].images, undefined);
+    assert.deepEqual(trimmed[2].images, [image]);
 });

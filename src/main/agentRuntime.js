@@ -9,6 +9,7 @@ import {
     isContextDividerMessage,
     normalizeMessagesForLlm,
     sessionHasActiveLlmContext,
+    trimStaleComputerScreenshots,
     withAssistantModel,
 } from "@shared/chatMessages";
 import { IPC_CHANNELS } from "@shared/ipc";
@@ -96,6 +97,7 @@ import { ipcPayloadForRenderer } from "./rendererSession.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeToolResult, toolResultContent } from "@shared/toolResult.js";
 import { computerUseSystemPromptSection } from "./tools/computerUseTools.js";
+import { computerActionFingerprint, formatComputerLoopNudge } from "./computerUse.js";
 import { rejectAllPendingConfirms } from "./confirmBridge.js";
 import {
     enforceToolResultBudget,
@@ -404,7 +406,9 @@ export class AgentRuntime {
             const history = session.messages
                 .slice(fromIndex)
                 .filter((message) => !isContextDividerMessage(message));
-            messages.push(...normalizeMessagesForLlm(history));
+            messages.push(
+                ...normalizeMessagesForLlm(trimStaleComputerScreenshots(history)),
+            );
         }
         return messages;
     }
@@ -1776,6 +1780,7 @@ export class AgentRuntime {
             const toolsEnabled = agent?.tools?.enable_tools !== false;
             const unlockedToolNames = new Set();
             let round = 0;
+            const computerActionHistory = [];
 
             while (round < maxRounds) {
                 if (this.wasRunCancelled(sessionId)) {
@@ -1921,12 +1926,27 @@ export class AgentRuntime {
                         this.skillLoader.reload();
                     }
                     const normalized = await this.finalizeToolMessageResult(sessionId, call, result);
+                    let toolContent = normalized.content;
+                    const fingerprint = computerActionFingerprint(call);
+                    if (fingerprint) {
+                        computerActionHistory.push(fingerprint);
+                        if (computerActionHistory.length > 5) {
+                            computerActionHistory.shift();
+                        }
+                        const recent = computerActionHistory.slice(-3);
+                        if (
+                            recent.length === 3 &&
+                            recent.every((entry) => entry === recent[0])
+                        ) {
+                            toolContent += formatComputerLoopNudge(3);
+                        }
+                    }
                     const toolMessage = {
                         id: randomUUID(),
                         role: "tool",
                         name: call.function.name,
                         toolCallId: call.id,
-                        content: normalized.content,
+                        content: toolContent,
                         ...(normalized.images ? { images: normalized.images } : {}),
                         createdAt: new Date().toISOString(),
                         runId,
@@ -1935,7 +1955,7 @@ export class AgentRuntime {
                     session = this.recordPersistedToolResult(
                         session,
                         call.id,
-                        normalized.content,
+                        toolContent,
                     );
                     if (session.meta.toolResultBudgetState) {
                         this.sessionStore.save(session);

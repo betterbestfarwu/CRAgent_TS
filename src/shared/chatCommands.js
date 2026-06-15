@@ -184,7 +184,9 @@ export function buildComputerUsePrompt(rest, { enabled = false } = {}) {
   }
   const workflow = [
     "建议流程：使用 computer_action 先截图，观察截图内容，再执行一个明确动作，最后按需再次截图验证结果。",
-    "可用动作：screenshot, move, click, double_click, drag, type, key, scroll, wait。",
+    "可用动作：screenshot, move, click, double_click, drag, type, key, scroll, wait, open_app。",
+    "打开应用时优先用 computer_action({action:\"open_app\", app:\"Google Chrome\"})；若用 Spotlight，需 cmd+space 后输入应用名再按 enter，不要重复按 cmd+space。",
+    "若连续两次截图无变化，应换策略（open_app、点击 Dock/桌面图标等），不要重复相同按键。",
     "多显示器或坐标不确定时，可先调用 computer_displays；底层 computer_screenshot / computer_click 等工具仍可使用。",
   ].join("\n");
   if (rest) {
