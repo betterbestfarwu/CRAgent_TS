@@ -35,7 +35,9 @@ export function computerUseSystemPromptSection() {
     return [
         "<computer_use>",
         "Use computer_* tools only when the task requires desktop interaction. Use a vision-capable model.",
-        "Workflow: computer_displays or computer_screenshot → inspect the result → computer_move / computer_click / computer_type / computer_key / computer_scroll.",
+        "Prefer computer_action for built-in-style desktop control. Low-level computer_displays, computer_screenshot, computer_move, computer_click, computer_type, computer_key, and computer_scroll remain available.",
+        "Workflow: computer_action({action:\"screenshot\"}) or computer_displays → inspect the result → act with computer_action → verify important UI changes with another screenshot.",
+        "Supported computer_action actions: screenshot, move, click, double_click, drag, type, key, scroll, wait.",
         "Use global virtual-desktop coordinates in DIP/logical pixels from Electron display.bounds.",
         "On multi-monitor setups, call computer_displays before any coordinate-based action.",
         "Prefer computer_key for shortcuts when possible; use computer_type for literal text entry.",
@@ -315,6 +317,135 @@ export async function clickAt(args) {
         throw new Error("Computer use is supported only on macOS and Windows");
     }
     return formatPointResult(`Clicked (${button})`, resolved);
+}
+
+function normalizeDurationMs(value, defaultMs, { min = 0, max = 10000, label = "ms" } = {}) {
+    const resolved = value == null ? defaultMs : Number(value);
+    if (!Number.isFinite(resolved) || resolved < min || resolved > max) {
+        throw new Error(`${label} must be between ${min} and ${max}`);
+    }
+    return Math.round(resolved);
+}
+
+function waitWithAbort(ms, signal) {
+    if (signal?.aborted) {
+        return Promise.reject(Object.assign(new Error("Aborted"), { name: "AbortError" }));
+    }
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            signal?.removeEventListener?.("abort", abort);
+            resolve();
+        };
+        const abort = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(timer);
+            reject(Object.assign(new Error("Aborted"), { name: "AbortError" }));
+        };
+        const timer = setTimeout(finish, ms);
+        signal?.addEventListener?.("abort", abort, { once: true });
+    });
+}
+
+export async function waitForComputer({ ms = 1000, signal } = {}) {
+    const duration = normalizeDurationMs(ms, 1000, { min: 0, max: 10000, label: "ms" });
+    await waitWithAbort(duration, signal);
+    return `Waited ${duration}ms`;
+}
+
+async function dragMac(start, end, durationMs) {
+    const steps = Math.max(2, Math.min(60, Math.round(durationMs / 16)));
+    const stepDelay = Math.max(0.005, durationMs / steps / 1000);
+    const source = `
+import CoreGraphics
+import Foundation
+
+let start = CGPoint(x: ${start.x}, y: ${start.y})
+let end = CGPoint(x: ${end.x}, y: ${end.y})
+let steps = ${steps}
+let delay = ${stepDelay}
+
+func post(_ type: CGEventType, _ point: CGPoint) {
+    if let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left) {
+        event.post(tap: .cghidEventTap)
+    }
+}
+
+post(.leftMouseDown, start)
+for index in 1...steps {
+    let progress = CGFloat(index) / CGFloat(steps)
+    let point = CGPoint(
+        x: start.x + (end.x - start.x) * progress,
+        y: start.y + (end.y - start.y) * progress
+    )
+    post(.leftMouseDragged, point)
+    Thread.sleep(forTimeInterval: delay)
+}
+post(.leftMouseUp, end)
+`;
+    await runSwift(source);
+}
+
+async function dragWin(start, end, durationMs) {
+    const startPoint = dipPointToPlatformPoint(start.x, start.y);
+    const endPoint = dipPointToPlatformPoint(end.x, end.y);
+    const steps = Math.max(2, Math.min(60, Math.round(durationMs / 16)));
+    const stepDelay = Math.max(1, Math.round(durationMs / steps));
+    const script = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class NativeMouse {
+  [DllImport("user32.dll")]
+  public static extern bool SetCursorPos(int X, int Y);
+  [DllImport("user32.dll")]
+  public static extern void mouse_event(int dwFlags, int dx, int dy, int cButtons, int dwExtraInfo);
+}
+"@
+$startX = ${startPoint.x}
+$startY = ${startPoint.y}
+$endX = ${endPoint.x}
+$endY = ${endPoint.y}
+$steps = ${steps}
+[NativeMouse]::SetCursorPos($startX, $startY) | Out-Null
+[NativeMouse]::mouse_event(0x0002, 0, 0, 0, 0)
+for ($i = 1; $i -le $steps; $i++) {
+  $x = [Math]::Round($startX + (($endX - $startX) * $i / $steps))
+  $y = [Math]::Round($startY + (($endY - $startY) * $i / $steps))
+  [NativeMouse]::SetCursorPos($x, $y) | Out-Null
+  Start-Sleep -Milliseconds ${stepDelay}
+}
+[NativeMouse]::mouse_event(0x0004, 0, 0, 0, 0)
+`;
+    await runPowerShell(script);
+}
+
+export async function dragTo(args = {}) {
+    const start = resolveGlobalPoint(args.x, args.y);
+    const end = resolveGlobalPoint(args.to_x, args.to_y);
+    const durationMs = normalizeDurationMs(args.duration_ms, 500, {
+        min: 1,
+        max: 10000,
+        label: "duration_ms",
+    });
+    if (args?.signal?.aborted) {
+        throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+    }
+    if (process.platform === "darwin") {
+        await dragMac(start, end, durationMs);
+    } else if (process.platform === "win32") {
+        await dragWin(start, end, durationMs);
+    } else {
+        throw new Error("Computer use is supported only on macOS and Windows");
+    }
+    return `Dragged from (${start.x}, ${start.y}) to (${end.x}, ${end.y})`;
 }
 
 async function typeTextMac(text, clearFirst = false, signal) {

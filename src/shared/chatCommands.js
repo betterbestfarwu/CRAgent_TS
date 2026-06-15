@@ -34,7 +34,7 @@ export const CHAT_COMMANDS = [
   {
     id: "computer_use",
     name: "computer",
-    description: "使用 computer_* 工具控制桌面（需 vision 模型；设置中启用 Computer use）",
+    description: "使用 computer_action / computer_* 工具控制桌面（需 vision 模型；设置中启用 Computer use）",
     slashOnly: true,
   },
 ];
@@ -160,7 +160,7 @@ export function formatHelpText() {
     "",
     "Skills: ~/.CRAgent/skills/ — use load_skill, download_skill, delete_skill",
     "",
-    "Computer use: /computer [任务描述] — computer_displays, computer_screenshot, computer_move, computer_click, …",
+    "Computer use: /computer [任务描述] — computer_action（screenshot/click/drag/type/key/scroll/wait）或底层 computer_* 工具",
   ].join("\n");
 }
 
@@ -182,14 +182,17 @@ export function buildComputerUsePrompt(rest, { enabled = false } = {}) {
       "请在 设置 → Agent → Tools 中打开 Enable computer use，并使用支持 vision 的模型后重试。",
     ].join("\n");
   }
-  const workflow =
-    "建议流程：computer_displays → computer_screenshot → computer_move / computer_click / computer_type / computer_key / computer_scroll。";
+  const workflow = [
+    "建议流程：使用 computer_action 先截图，观察截图内容，再执行一个明确动作，最后按需再次截图验证结果。",
+    "可用动作：screenshot, move, click, double_click, drag, type, key, scroll, wait。",
+    "多显示器或坐标不确定时，可先调用 computer_displays；底层 computer_screenshot / computer_click 等工具仍可使用。",
+  ].join("\n");
   if (rest) {
     return `请使用 computer_* 桌面控制工具完成任务：${rest}\n\n${workflow}`;
   }
   return [
-    "请使用 computer_* 桌面控制工具查看并操作当前桌面。",
+    "请使用 computer_action / computer_* 桌面控制工具查看并操作当前桌面。",
     workflow,
-    "先了解显示器布局并截图，再根据图像执行操作。",
+    "按“截图 → 观察 → 执行 → 验证”的节奏推进，不要在未观察截图前盲目点击或输入。",
   ].join("\n");
 }

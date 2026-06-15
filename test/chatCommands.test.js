@@ -118,6 +118,9 @@ describe("chatCommands computer use", () => {
     it("builds prompts based on enable flag", () => {
         assert.match(buildComputerUsePrompt("", { enabled: false }), /未在设置中启用/);
         assert.match(buildComputerUsePrompt("open Settings", { enabled: true }), /open Settings/);
-        assert.match(buildComputerUsePrompt("", { enabled: true }), /computer_displays/);
+        const enabledPrompt = buildComputerUsePrompt("", { enabled: true });
+        assert.match(enabledPrompt, /computer_action/);
+        assert.match(enabledPrompt, /截图.*观察.*执行.*验证/);
+        assert.match(enabledPrompt, /drag/);
     });
 });

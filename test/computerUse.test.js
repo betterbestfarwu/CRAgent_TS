@@ -9,7 +9,7 @@ import { messagesToApiPayloads, parseAssistantContent } from "../src/main/llmCli
 import { shouldRequireToolConfirmation } from "../src/main/authPolicy.js";
 import { ToolRegistry } from "../src/main/toolRegistry.js";
 import { createComputerUseTools } from "../src/main/tools/computerUseTools.js";
-import { isComputerUseSupported } from "../src/main/computerUse.js";
+import { dragTo, isComputerUseSupported, waitForComputer } from "../src/main/computerUse.js";
 import {
     dipPointToPlatformPoint,
     dipRectToPlatformRect,
@@ -315,7 +315,56 @@ describe("computer use tools", () => {
                 .map((tool) => tool.name)
                 .sort()
                 .join(","),
-            "computer_click,computer_displays,computer_key,computer_move,computer_screenshot,computer_scroll,computer_type",
+            "computer_action,computer_click,computer_displays,computer_key,computer_move,computer_screenshot,computer_scroll,computer_type",
         );
+    });
+
+    it("routes computer_action wait without OS desktop APIs", async () => {
+        if (!isComputerUseSupported()) {
+            return;
+        }
+        const registry = new ToolRegistry(
+            () =>
+                createComputerUseTools({
+                    getAgentTools: () => ({ enable_tools: true, enable_computer_use: true }),
+                    confirmToolExecution: async () => true,
+                    getAuthMode: () => "fullAccess",
+                }),
+            async () => true,
+            () => "fullAccess",
+        );
+
+        const result = await registry.execute(
+            {
+                id: "call-computer-action-wait",
+                function: {
+                    name: "computer_action",
+                    arguments: JSON.stringify({ action: "wait", ms: 1 }),
+                },
+            },
+            { sessionId: "session-full" },
+        );
+
+        assert.equal(result, "Waited 1ms");
+    });
+});
+
+describe("computer use wait", () => {
+    it("rejects negative wait durations", async () => {
+        await assert.rejects(() => waitForComputer({ ms: -1 }), /ms must be between/);
+    });
+});
+
+describe("computer use drag", () => {
+    it("rejects invalid drag durations before OS interaction", async () => {
+        setComputerUseScreenGetter(mockScreen());
+        try {
+            await assert.rejects(
+                () => dragTo({ x: 10, y: 10, to_x: 20, to_y: 20, duration_ms: 0 }),
+                /duration_ms must be between/,
+            );
+        } finally {
+            setComputerUseScreenGetter(null);
+        }
     });
 });

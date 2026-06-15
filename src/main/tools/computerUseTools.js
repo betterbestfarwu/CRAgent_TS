@@ -4,11 +4,13 @@ import {
     clickAt,
     computerUseSystemPromptSection,
     describeDisplays,
+    dragTo,
     isComputerUseSupported,
     moveTo,
     pressKey,
     scroll,
     typeText,
+    waitForComputer,
 } from "../computerUse.js";
 
 function fnSchema(name, description, parameters) {
@@ -62,6 +64,183 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
             ),
             async execute() {
                 return describeDisplays();
+            },
+        },
+        {
+            name: "computer_action",
+            requiresConfirmation: false,
+            enabled,
+            schema: fnSchema(
+                "computer_action",
+                "Preferred high-level computer-use action tool. Use screenshot-observe-act-verify loops for desktop control.",
+                {
+                    type: "object",
+                    properties: {
+                        action: {
+                            type: "string",
+                            enum: [
+                                "screenshot",
+                                "move",
+                                "click",
+                                "double_click",
+                                "drag",
+                                "type",
+                                "key",
+                                "scroll",
+                                "wait",
+                            ],
+                            description: "Desktop action to perform.",
+                        },
+                        display: {
+                            type: "string",
+                            description:
+                                'For screenshot: "main", "all", or numeric display index. Default main.',
+                        },
+                        x: {
+                            type: "number",
+                            description: "Global DIP x coordinate for pointer actions.",
+                        },
+                        y: {
+                            type: "number",
+                            description: "Global DIP y coordinate for pointer actions.",
+                        },
+                        to_x: {
+                            type: "number",
+                            description: "Drag destination global DIP x coordinate.",
+                        },
+                        to_y: {
+                            type: "number",
+                            description: "Drag destination global DIP y coordinate.",
+                        },
+                        button: {
+                            type: "string",
+                            enum: ["left", "right", "double"],
+                            description: "Mouse button for click. Default left.",
+                        },
+                        text: {
+                            type: "string",
+                            description: "Text for type action.",
+                        },
+                        clear_first: {
+                            type: "boolean",
+                            description: "For type action, select all and clear before typing.",
+                        },
+                        key: {
+                            type: "string",
+                            description: "Key or key chord for key action, e.g. enter, cmd+a.",
+                        },
+                        direction: {
+                            type: "string",
+                            enum: ["up", "down", "left", "right"],
+                            description: "Scroll direction. Default down.",
+                        },
+                        amount: {
+                            type: "integer",
+                            description: "Scroll wheel lines/clicks (1-20). Default 3.",
+                        },
+                        duration_ms: {
+                            type: "integer",
+                            description: "Drag duration in milliseconds. Default 500.",
+                        },
+                        ms: {
+                            type: "integer",
+                            description: "Wait duration in milliseconds. Default 1000.",
+                        },
+                    },
+                    required: ["action"],
+                },
+            ),
+            async execute(args, context = {}) {
+                const action = String(args.action || "").toLowerCase();
+                if (action === "screenshot") {
+                    const display = args.display ?? "main";
+                    await confirmComputerAction(
+                        "computer_action",
+                        `Capture desktop screenshot (display=${display})`,
+                        context.sessionId,
+                    );
+                    const { image, caption } = await captureScreenshot({ display });
+                    return {
+                        text: `${caption}\n\nInspect the attached image before clicking or typing.`,
+                        images: [image],
+                    };
+                }
+                if (action === "move") {
+                    await confirmComputerAction(
+                        "computer_action",
+                        `Move cursor to (${args.x}, ${args.y})`,
+                        context.sessionId,
+                    );
+                    return moveTo({ x: args.x, y: args.y, signal: context.signal });
+                }
+                if (action === "click" || action === "double_click") {
+                    const button = action === "double_click" ? "double" : args.button || "left";
+                    await confirmComputerAction(
+                        "computer_action",
+                        `${button} click at (${args.x}, ${args.y})`,
+                        context.sessionId,
+                    );
+                    return clickAt({ x: args.x, y: args.y, button, signal: context.signal });
+                }
+                if (action === "drag") {
+                    await confirmComputerAction(
+                        "computer_action",
+                        `Drag from (${args.x}, ${args.y}) to (${args.to_x}, ${args.to_y})`,
+                        context.sessionId,
+                    );
+                    return dragTo({
+                        x: args.x,
+                        y: args.y,
+                        to_x: args.to_x,
+                        to_y: args.to_y,
+                        duration_ms: args.duration_ms,
+                        signal: context.signal,
+                    });
+                }
+                if (action === "type") {
+                    const preview = String(args.text ?? "").slice(0, 120);
+                    await confirmComputerAction(
+                        "computer_action",
+                        `Type text${args.clear_first ? " (clear first)" : ""}: ${preview}${String(args.text ?? "").length > 120 ? "…" : ""}`,
+                        context.sessionId,
+                    );
+                    return typeText({
+                        text: args.text,
+                        clear_first: args.clear_first,
+                        signal: context.signal,
+                    });
+                }
+                if (action === "key") {
+                    await confirmComputerAction(
+                        "computer_action",
+                        `Press key: ${args.key}`,
+                        context.sessionId,
+                    );
+                    return pressKey({ key: args.key, signal: context.signal });
+                }
+                if (action === "scroll") {
+                    const direction = args.direction || "down";
+                    const amount = args.amount ?? 3;
+                    const at =
+                        args.x != null && args.y != null ? { x: args.x, y: args.y } : undefined;
+                    const atHint = at ? ` at (${at.x}, ${at.y})` : "";
+                    await confirmComputerAction(
+                        "computer_action",
+                        `Scroll ${direction} (${amount})${atHint}`,
+                        context.sessionId,
+                    );
+                    return scroll({ direction, amount, at, signal: context.signal });
+                }
+                if (action === "wait") {
+                    const ms = args.ms ?? 1000;
+                    await confirmComputerAction(
+                        "computer_action",
+                        `Wait ${ms}ms`,
+                        context.sessionId,
+                    );
+                    return waitForComputer({ ms, signal: context.signal });
+                }
+                throw new Error(`Unsupported computer_action action: ${args.action}`);
             },
         },
         {
