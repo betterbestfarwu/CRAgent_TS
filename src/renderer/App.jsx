@@ -1957,7 +1957,6 @@ export function App() {
               if (!result?.ok) {
                 throw new Error(result?.error || "同步模型失败");
               }
-              setConfig(result.config);
               return result;
             }}
             onProbeMcp={

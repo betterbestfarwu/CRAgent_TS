@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfig";
 import { ensureMcpConfigShape } from "@shared/mcpConfig.js";
+import {
+  mergeSyncedProviderIntoConfig,
+  removeProviderFromConfig,
+  renameProviderInConfig,
+} from "@shared/modelsConfig.js";
 import { DEFAULT_UI_CONFIG, mergeUiConfig } from "@shared/uiConfig.js";
 import { validateProviderConnectionFields } from "@shared/providerConnection.js";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
@@ -121,31 +126,6 @@ function createEmptyProvider() {
     state: true,
     models: [],
   };
-}
-
-function replaceProviderRef(ref, oldKey, newKey) {
-  const prefix = `${oldKey}/`;
-  if (typeof ref === "string" && ref.startsWith(prefix)) {
-    return `${newKey}/${ref.slice(prefix.length)}`;
-  }
-  return ref;
-}
-
-function modelRefUsesProvider(ref, providerKey) {
-  return typeof ref === "string" && ref.startsWith(`${providerKey}/`);
-}
-
-function firstModelRef(models) {
-  for (const [providerKey, provider] of Object.entries(models || {})) {
-    for (const model of provider.models || []) {
-      if (model.state) return `${providerKey}/${model.id}`;
-    }
-  }
-  for (const [providerKey, provider] of Object.entries(models || {})) {
-    const first = provider.models?.[0];
-    if (first) return `${providerKey}/${first.id}`;
-  }
-  return "";
 }
 
 function ProviderNameDialog({ title, initialName = "", onClose, onConfirm }) {
@@ -358,6 +338,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
   const [providerDialog, setProviderDialog] = useState(null);
   const [deleteProviderConfirmOpen, setDeleteProviderConfirmOpen] = useState(false);
   const modelsPanelRef = useRef(null);
+  const draftConfigRef = useRef(draftConfig);
   const providerKeys = useMemo(
     () => Object.keys(draftConfig.models || {}),
     [draftConfig.models],
@@ -369,11 +350,16 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
   useEffect(() => {
     const next = ensureUiConfigShape(ensureMcpConfigShape(clone(config)));
     setDraftConfig(next);
+    draftConfigRef.current = next;
     const keys = Object.keys(next.models || {});
     setSelectedProviderKey((prev) =>
       prev && keys.includes(prev) ? prev : keys[0] || "",
     );
   }, [config]);
+
+  useEffect(() => {
+    draftConfigRef.current = draftConfig;
+  }, [draftConfig]);
 
   const selectedProvider = selectedProviderKey
     ? draftConfig.models?.[selectedProviderKey]
@@ -516,31 +502,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
       }
       return next;
     });
-    setDraftConfig((prev) => {
-      const provider = prev.models[selectedProviderKey];
-      const { [selectedProviderKey]: _removed, ...restModels } = prev.models;
-      const defaultModel = prev.agents?.default?.model || {};
-      return {
-        ...prev,
-        models: {
-          ...restModels,
-          [nextProviderKey]: provider,
-        },
-        agents: {
-          ...prev.agents,
-          default: {
-            ...prev.agents.default,
-            model: {
-              ...defaultModel,
-              primary: replaceProviderRef(defaultModel.primary, selectedProviderKey, nextProviderKey),
-              fallbacks: (defaultModel.fallbacks || []).map((ref) =>
-                replaceProviderRef(ref, selectedProviderKey, nextProviderKey),
-              ),
-            },
-          },
-        },
-      };
-    });
+    setDraftConfig((prev) => renameProviderInConfig(prev, selectedProviderKey, nextProviderKey));
     setSelectedProviderKey(nextProviderKey);
     setProviderDialog(null);
   }
@@ -550,32 +512,13 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
     const keyToDelete = selectedProviderKey;
     const remainingKeys = providerKeys.filter((key) => key !== keyToDelete);
     setProviderSyncError(keyToDelete, "");
-    setDraftConfig((prev) => {
-      const { [keyToDelete]: _removed, ...restModels } = prev.models;
-      const defaultModel = prev.agents?.default?.model || {};
-      let nextPrimary = defaultModel.primary || "";
-      if (modelRefUsesProvider(nextPrimary, keyToDelete)) {
-        nextPrimary = firstModelRef(restModels);
-      }
-      const nextFallbacks = (defaultModel.fallbacks || []).filter(
-        (ref) => !modelRefUsesProvider(ref, keyToDelete),
-      );
-      return {
-        ...prev,
-        models: restModels,
-        agents: {
-          ...prev.agents,
-          default: {
-            ...prev.agents.default,
-            model: {
-              ...defaultModel,
-              primary: nextPrimary,
-              fallbacks: nextFallbacks,
-            },
-          },
-        },
-      };
+    setProviderSyncErrors((prev) => {
+      if (!(keyToDelete in prev)) return prev;
+      const next = { ...prev };
+      delete next[keyToDelete];
+      return next;
     });
+    setDraftConfig((prev) => removeProviderFromConfig(prev, keyToDelete));
     setSelectedProviderKey(remainingKeys[0] || "");
   }
 
@@ -616,7 +559,7 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
   }
 
   function handleSave() {
-    void onSave(ensureMcpConfigShape(draftConfig));
+    void onSave(ensureMcpConfigShape(draftConfigRef.current));
   }
 
   async function handleSyncModels() {
@@ -639,7 +582,11 @@ export function SettingsPage({ config, onBack, onSave, onSyncProviderModels, onP
     setProviderSyncError(providerKey, "");
     try {
       const result = await onSyncProviderModels(providerKey, connection);
-      setDraftConfig(clone(result.config));
+      const syncedProvider = result.config?.models?.[providerKey];
+      if (!syncedProvider) {
+        throw new Error("同步结果缺少 provider 配置");
+      }
+      setDraftConfig((prev) => mergeSyncedProviderIntoConfig(prev, providerKey, syncedProvider));
     } catch (err) {
       setProviderSyncError(providerKey, err instanceof Error ? err.message : String(err));
     } finally {
