@@ -340,6 +340,10 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
     providerKeys[0] || "",
   );
 
+  useEffect(() => {
+    draftConfigRef.current = draftConfig;
+  }, [draftConfig]);
+
   function commitDraftConfig(updater) {
     setDraftConfig((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -514,7 +518,7 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
       delete next[keyToDelete];
       return next;
     });
-    let nextConfig = removeProviderFromConfig(draftConfigRef.current, keyToDelete);
+    const nextConfig = removeProviderFromConfig(draftConfig, keyToDelete);
     commitDraftConfig(nextConfig);
     setSelectedProviderKey(remainingKeys[0] || "");
     void persistDraftConfig(nextConfig).catch((err) => {
@@ -587,7 +591,7 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
       const result = await onSyncProviderModels(
         providerKey,
         connection,
-        draftConfigRef.current.models,
+        draftConfig.models,
       );
       const syncedProvider = result.config?.models?.[providerKey];
       if (!syncedProvider) {
