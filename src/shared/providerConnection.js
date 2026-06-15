@@ -1,3 +1,13 @@
+export function createEmptyProvider() {
+    return {
+        baseUrl: "",
+        apiKey: "",
+        api: "chat/completions",
+        state: true,
+        models: [],
+    };
+}
+
 export function hasValidProviderApiKey(apiKey) {
     const key = String(apiKey || "").trim();
     return key.length > 0 && !key.includes("REPLACE_ME");

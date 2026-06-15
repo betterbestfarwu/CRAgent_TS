@@ -7,7 +7,10 @@ import {
   renameProviderInConfig,
 } from "@shared/modelsConfig.js";
 import { DEFAULT_UI_CONFIG, mergeUiConfig } from "@shared/uiConfig.js";
-import { validateProviderConnectionFields } from "@shared/providerConnection.js";
+import {
+  createEmptyProvider,
+  validateProviderConnectionFields,
+} from "@shared/providerConnection.js";
 import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { withConfigFileLinks } from "./ConfigFileLink.jsx";
 import { SingleDotIcon } from "./DotGridAnimator.jsx";
@@ -117,16 +120,6 @@ const ICON_EDIT = (
     <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
   </svg>
 );
-
-function createEmptyProvider() {
-  return {
-    baseUrl: "",
-    apiKey: "",
-    api: "chat/completions",
-    state: true,
-    models: [],
-  };
-}
 
 function ProviderNameDialog({ title, initialName = "", onClose, onConfirm }) {
   const [name, setName] = useState(initialName);

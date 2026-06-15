@@ -18,6 +18,7 @@ import { normalizeAuthMode } from "@shared/authMode.js";
 import { parseModelRef } from "@shared/modelRef.js";
 import {
     applyProviderConnection,
+    createEmptyProvider,
     validateProviderConnectionFields,
 } from "@shared/providerConnection.js";
 
@@ -721,14 +722,14 @@ export function installWebBridge() {
 
     async syncProviderModels({ providerKey, connection }) {
       const { config } = ensureState();
-      if (!providerKey || !config.models?.[providerKey]) {
-        return { ok: false, error: "未找到 provider" };
+      if (!providerKey) {
+        return { ok: false, error: "缺少 providerKey" };
       }
       const validation = validateProviderConnectionFields(connection);
       if (!validation.ok) {
         return { ok: false, error: validation.error };
       }
-      const existing = config.models[providerKey];
+      const existing = config.models?.[providerKey] ?? createEmptyProvider();
       const provider = applyProviderConnection(existing, connection);
       const nextConfig = {
         ...config,

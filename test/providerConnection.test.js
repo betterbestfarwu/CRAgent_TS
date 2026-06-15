@@ -2,9 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
     applyProviderConnection,
+    createEmptyProvider,
     hasValidProviderApiKey,
     validateProviderConnectionFields,
 } from "../src/shared/providerConnection.js";
+
+test("createEmptyProvider returns a usable default provider", () => {
+    const provider = createEmptyProvider();
+    assert.equal(provider.baseUrl, "");
+    assert.equal(provider.api, "chat/completions");
+    assert.equal(provider.state, true);
+    assert.deepEqual(provider.models, []);
+});
 
 test("applyProviderConnection uses connection values directly", () => {
     const existing = {
