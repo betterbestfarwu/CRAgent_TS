@@ -33,7 +33,7 @@ export const CHAT_COMMANDS = [
   },
   {
     id: "computer_use",
-    name: "computer use",
+    name: "computer",
     description: "使用 computer_* 工具控制桌面（需 vision 模型；设置中启用 Computer use）",
     slashOnly: true,
   },
@@ -160,11 +160,11 @@ export function formatHelpText() {
     "",
     "Skills: ~/.CRAgent/skills/ — use load_skill, download_skill, delete_skill",
     "",
-    "Computer use: /computer use [任务描述] — computer_displays, computer_screenshot, computer_move, computer_click, …",
+    "Computer use: /computer [任务描述] — computer_displays, computer_screenshot, computer_move, computer_click, …",
   ].join("\n");
 }
 
-/** Match `/computer use` with optional task text (case-insensitive). */
+/** Match `/computer` (or legacy `/computer use`) with optional task text (case-insensitive). */
 export function parseComputerUseInvocation(input) {
   const match = String(input || "")
     .trim()

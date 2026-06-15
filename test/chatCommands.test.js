@@ -91,17 +91,17 @@ describe("chatCommands computer use", () => {
         assert.ok(matches.some((command) => command.id === "computer_use"));
     });
 
-    it("matches computer use when slash menu query omits separators", () => {
-        const matches = filterSlashCommands("computeruse");
+    it("matches computer when slash menu query is a prefix", () => {
+        const matches = filterSlashCommands("comp");
         assert.ok(matches.some((command) => command.id === "computer_use"));
     });
 
-    it("does not treat /computer use as a built-in chat command id", () => {
-        assert.equal(matchChatCommand("/computer use"), null);
-        assert.equal(matchChatCommand("/computer use open Safari"), null);
+    it("does not treat /computer as a built-in chat command id", () => {
+        assert.equal(matchChatCommand("/computer"), null);
+        assert.equal(matchChatCommand("/computer open Safari"), null);
     });
 
-    it("parses /computer use invocations", () => {
+    it("parses /computer invocations", () => {
         assert.deepEqual(parseComputerUseInvocation("/computer use"), { rest: "" });
         assert.deepEqual(parseComputerUseInvocation("/computer"), { rest: "" });
         assert.deepEqual(parseComputerUseInvocation("/computer-use click OK"), {
