@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mcpToolRegistryName } from "../src/shared/mcpConfig.js";
 import { ToolRegistry } from "../src/main/toolRegistry.js";
 import {
+    COMPUTER_USE_TOOL_NAMES,
     PINNED_TOOL_NAMES,
     schemasForToolCatalog,
     searchDeferredTools,
@@ -101,6 +102,18 @@ test("ToolRegistry tool_search unlocks deferred tools for the run", async () => 
         { unlockedToolNames: unlocked },
     );
     assert.equal(output, `ok:${mcpToolRegistryName("srv", "tool_2")}`);
+});
+
+test("computer tools stay visible when catalog uses tool search", () => {
+    const tools = buildCatalog(5);
+    assert.equal(shouldUseToolSearch(tools.length), true);
+
+    const schemas = schemasForToolCatalog(tools, { unlockedToolNames: new Set() });
+    const names = schemas.map((schema) => schema.function.name);
+
+    for (const toolName of COMPUTER_USE_TOOL_NAMES) {
+        assert.ok(names.includes(toolName), `missing pinned computer tool: ${toolName}`);
+    }
 });
 
 test("small catalogs pass through all schemas", () => {

@@ -2,6 +2,18 @@ import { parseMcpToolRegistryName } from "@shared/mcpConfig.js";
 
 export const TOOL_SEARCH_THRESHOLD = 20;
 
+/** Built-in desktop control tools; always visible when enabled and catalog uses tool search. */
+export const COMPUTER_USE_TOOL_NAMES = [
+    "computer_action",
+    "computer_displays",
+    "computer_screenshot",
+    "computer_move",
+    "computer_click",
+    "computer_type",
+    "computer_key",
+    "computer_scroll",
+];
+
 /** Always exposed when the catalog exceeds {@link TOOL_SEARCH_THRESHOLD}. */
 export const PINNED_TOOL_NAMES = new Set([
     "read_file",
@@ -17,6 +29,7 @@ export const PINNED_TOOL_NAMES = new Set([
     "TodoWrite",
     "Task",
     "tool_search",
+    ...COMPUTER_USE_TOOL_NAMES,
 ]);
 
 export function shouldUseToolSearch(activeToolCount) {

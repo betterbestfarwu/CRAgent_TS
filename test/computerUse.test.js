@@ -319,6 +319,36 @@ describe("computer use tools", () => {
         );
     });
 
+    it("skips inline confirmation for read-only computer tools", async () => {
+        if (!isComputerUseSupported()) {
+            return;
+        }
+        let confirmCalls = 0;
+        const confirmToolExecution = async () => {
+            confirmCalls += 1;
+            return true;
+        };
+        const registry = new ToolRegistry(
+            () =>
+                createComputerUseTools({
+                    getAgentTools: () => ({ enable_tools: true, enable_computer_use: true }),
+                    confirmToolExecution,
+                    getAuthMode: () => "default",
+                }),
+            confirmToolExecution,
+            () => "default",
+        );
+
+        await registry.execute(
+            {
+                id: "call-displays",
+                function: { name: "computer_displays", arguments: "{}" },
+            },
+            { sessionId: "session-default" },
+        );
+        assert.equal(confirmCalls, 0);
+    });
+
     it("routes computer_action wait without OS desktop APIs", async () => {
         if (!isComputerUseSupported()) {
             return;

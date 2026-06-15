@@ -985,8 +985,11 @@ export class AgentRuntime {
             content: messageContent,
             createdAt: new Date().toISOString(),
             runId,
-            ...(normalizedMentions.length
-                ? { userText: displayText, atMentions: normalizedMentions }
+            ...(normalizedMentions.length || computerUseInvoke || skillInvoke
+                ? {
+                      userText: displayText,
+                      ...(normalizedMentions.length ? { atMentions: normalizedMentions } : {}),
+                  }
                 : {}),
             ...(skillInvoke
                 ? { skillName: skillInvoke.skillName, skillLoaded: true }

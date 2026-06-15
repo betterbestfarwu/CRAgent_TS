@@ -38,7 +38,20 @@ export { computerUseSystemPromptSection };
 export function createComputerUseTools({ getAgentTools, confirmToolExecution, getAuthMode }) {
     const enabled = computerEnabled(getAgentTools);
 
-    async function confirmComputerAction(toolName, summary, sessionId) {
+    function isReadOnlyComputerAction(toolName, args = {}) {
+        if (toolName === "computer_displays" || toolName === "computer_screenshot") {
+            return true;
+        }
+        if (toolName === "computer_action") {
+            return String(args.action || "").toLowerCase() === "screenshot";
+        }
+        return false;
+    }
+
+    async function confirmComputerAction(toolName, summary, sessionId, args = {}) {
+        if (isReadOnlyComputerAction(toolName, args)) {
+            return;
+        }
         const needsConfirm = shouldRequireToolConfirmation(
             { requiresConfirmation: true },
             () => (typeof getAuthMode === "function" ? getAuthMode(sessionId) : "default"),
@@ -158,6 +171,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                         "computer_action",
                         `Capture desktop screenshot (display=${display})`,
                         context.sessionId,
+                        args,
                     );
                     const { image, caption } = await captureScreenshot({ display });
                     return {
