@@ -970,3 +970,43 @@ test("getSessionContextDetail exposes system prompt preview and full-session bre
     const categorizedTotal = detail.categories.reduce((sum, category) => sum + category.tokens, 0);
     assert.equal(categorizedTotal, detail.tokens);
 });
+
+test("cancelRun does not block the next user message from running the LLM", async () => {
+    let releaseFirst;
+    const firstGate = new Promise((resolve) => {
+        releaseFirst = resolve;
+    });
+    let callCount = 0;
+    const { session, runtime, sessionStore, llmCalls } = makeRuntimeHarness({
+        chatImpl: async () => {
+            callCount += 1;
+            if (callCount === 1) {
+                await firstGate;
+            }
+            return {
+                message: {
+                    id: `assistant-${callCount}`,
+                    role: "assistant",
+                    content: `reply-${callCount}`,
+                    createdAt: new Date().toISOString(),
+                },
+            };
+        },
+    });
+
+    void runtime.sendUserMessage(session.meta.id, "first");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(llmCalls.length, 1);
+
+    runtime.cancelRun(session.meta.id);
+    await runtime.sendUserMessage(session.meta.id, "second");
+
+    assert.equal(llmCalls.length, 2);
+    const updated = sessionStore.get(session.meta.id);
+    assert.ok(
+        updated.messages.some((message) => message.role === "assistant" && message.content === "reply-2"),
+        "second run should produce an assistant reply",
+    );
+
+    releaseFirst();
+});

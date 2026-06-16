@@ -124,7 +124,8 @@ export class AgentRuntime {
         this.autoCompactTimers = new Map();
         this.pendingQueues = new Map();
         this.abortControllers = new Map();
-        this.cancelledRuns = new Set();
+        this.activeRunIdBySession = new Map();
+        this.cancelledRunIds = new Set();
         this.hookLogsBySession = new Map();
         this.hookRunner = new HookRunner({
             getHooksConfig: (sessionId) =>
@@ -508,7 +509,10 @@ export class AgentRuntime {
     }
 
     cancelRun(sessionId) {
-        this.cancelledRuns.add(sessionId);
+        const runId = this.activeRunIdBySession.get(sessionId);
+        if (runId) {
+            this.cancelledRunIds.add(runId);
+        }
         this.abortControllers.get(sessionId)?.abort();
         this.pendingQueues.set(sessionId, []);
         this.emit(IPC_CHANNELS.onQueueChanged, { sessionId, queue: [] });
@@ -537,19 +541,25 @@ export class AgentRuntime {
     createAbortSignal(sessionId) {
         const controller = new AbortController();
         this.abortControllers.set(sessionId, controller);
-        return controller.signal;
+        return controller;
     }
 
-    clearAbortSignal(sessionId) {
-        this.abortControllers.delete(sessionId);
+    clearAbortSignal(sessionId, controller) {
+        if (this.abortControllers.get(sessionId) === controller) {
+            this.abortControllers.delete(sessionId);
+        }
     }
 
-    wasRunCancelled(sessionId) {
-        if (!this.cancelledRuns.has(sessionId)) {
+    wasRunCancelled(runId) {
+        if (!this.cancelledRunIds.has(runId)) {
             return false;
         }
-        this.cancelledRuns.delete(sessionId);
+        this.cancelledRunIds.delete(runId);
         return true;
+    }
+
+    isRunCancelled(runId) {
+        return Boolean(runId && this.cancelledRunIds.has(runId));
     }
 
     hookExtrasFromContext(context = {}) {
@@ -1234,8 +1244,8 @@ export class AgentRuntime {
         return this.applyMicroCompactIfNeeded(session);
     }
 
-    async maybeAutoCompact(sessionId, signal) {
-        if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+    async maybeAutoCompact(sessionId, signal, runId) {
+        if (signal?.aborted || this.isRunCancelled(runId)) {
             return false;
         }
         const contextConfig = getContextConfig(this.configStore);
@@ -1254,6 +1264,7 @@ export class AgentRuntime {
             preserveBusy: Boolean(this.busyBySession.get(sessionId)),
             silent: Boolean(this.busyBySession.get(sessionId)),
             signal,
+            runId,
         });
         return true;
     }
@@ -1274,8 +1285,8 @@ export class AgentRuntime {
         );
     }
 
-    async prepareContextForLlm(sessionId, signal) {
-        if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+    async prepareContextForLlm(sessionId, signal, runId) {
+        if (signal?.aborted || this.isRunCancelled(runId)) {
             throw Object.assign(new Error("Aborted"), { name: "AbortError" });
         }
         const contextConfig = getContextConfig(this.configStore);
@@ -1295,6 +1306,7 @@ export class AgentRuntime {
             preserveBusy: Boolean(this.busyBySession.get(sessionId)),
             silent: true,
             signal,
+            runId,
         });
         session = this.sessionStore.get(sessionId);
         state = calculateContextWarningState(session, model, contextConfig);
@@ -1306,14 +1318,14 @@ export class AgentRuntime {
         return { blocked: false, state };
     }
 
-    async requestAgentLlm(sessionId, invoke, signal) {
+    async requestAgentLlm(sessionId, invoke, signal, runId) {
         let overflowRetries = 0;
 
         while (true) {
-            if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+            if (signal?.aborted || this.isRunCancelled(runId)) {
                 throw Object.assign(new Error("Aborted"), { name: "AbortError" });
             }
-            const prep = await this.prepareContextForLlm(sessionId, signal);
+            const prep = await this.prepareContextForLlm(sessionId, signal, runId);
             if (prep.blocked) {
                 return { blocked: true, state: prep.state };
             }
@@ -1337,19 +1349,20 @@ export class AgentRuntime {
                     preserveBusy: Boolean(this.busyBySession.get(sessionId)),
                     silent: true,
                     signal,
+                    runId,
                 });
             }
         }
     }
 
-    requestAgentChat(sessionId, chatArgsOrFactory, signal) {
+    requestAgentChat(sessionId, chatArgsOrFactory, signal, runId) {
         return this.requestAgentLlm(sessionId, () => {
             const chatArgs =
                 typeof chatArgsOrFactory === "function"
                     ? chatArgsOrFactory()
                     : chatArgsOrFactory;
             return this.llmClient.chat(chatArgs);
-        }, signal);
+        }, signal, runId);
     }
 
     async prepareSubAgentContext(sessionId, messages, model) {
@@ -1537,8 +1550,8 @@ export class AgentRuntime {
     }
 
     async compactLlmContext(sessionId, options = {}) {
-        const { auto = false, preserveBusy = false, silent = false, signal } = options;
-        if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+        const { auto = false, preserveBusy = false, silent = false, signal, runId } = options;
+        if (signal?.aborted || this.isRunCancelled(runId)) {
             return;
         }
         if (this.compactingSessions.has(sessionId)) {
@@ -1564,7 +1577,7 @@ export class AgentRuntime {
             let roundsCompleted = 0;
 
             for (let round = 0; round < maxRounds; round += 1) {
-                if (signal?.aborted || this.cancelledRuns.has(sessionId)) {
+                if (signal?.aborted || this.isRunCancelled(runId)) {
                     return;
                 }
 
@@ -1752,7 +1765,7 @@ export class AgentRuntime {
                 { matchQuery: auto ? "auto" : "manual" },
             );
         } catch (error) {
-            if (error?.name === "AbortError" || this.cancelledRuns.has(sessionId)) {
+            if (error?.name === "AbortError" || this.isRunCancelled(runId)) {
                 return;
             }
             const session = this.sessionStore.get(sessionId);
@@ -1772,8 +1785,10 @@ export class AgentRuntime {
 
     async runLoop(session, runId) {
         const sessionId = session.meta.id;
+        this.activeRunIdBySession.set(sessionId, runId);
         this.setBusy(sessionId, true);
-        const signal = this.createAbortSignal(sessionId);
+        const abortController = this.createAbortSignal(sessionId);
+        const signal = abortController.signal;
         try {
             const agent = this.defaultAgent();
             const maxRounds = Math.max(1, agent?.max_tool_rounds ?? 8);
@@ -1783,7 +1798,7 @@ export class AgentRuntime {
             const computerActionHistory = [];
 
             while (round < maxRounds) {
-                if (this.wasRunCancelled(sessionId)) {
+                if (this.wasRunCancelled(runId)) {
                     return;
                 }
                 const planMode = this.sessionExecutionMode(sessionId) === "plan";
@@ -1792,11 +1807,11 @@ export class AgentRuntime {
                     : null;
                 session = this.sessionStore.get(sessionId);
                 session = this.applyMicroCompact(session);
-                if (this.wasRunCancelled(sessionId)) {
+                if (this.wasRunCancelled(runId)) {
                     return;
                 }
-                await this.maybeAutoCompact(sessionId, signal);
-                if (this.wasRunCancelled(sessionId)) {
+                await this.maybeAutoCompact(sessionId, signal, runId);
+                if (this.wasRunCancelled(runId)) {
                     return;
                 }
                 session = this.sessionStore.get(sessionId);
@@ -1833,8 +1848,9 @@ export class AgentRuntime {
                         };
                     },
                     signal,
+                    runId,
                 );
-                if (this.wasRunCancelled(sessionId)) {
+                if (this.wasRunCancelled(runId)) {
                     return;
                 }
                 if (chatResult.blocked) {
@@ -1894,7 +1910,7 @@ export class AgentRuntime {
                 }
 
                 for (const call of calls) {
-                    if (this.wasRunCancelled(sessionId)) {
+                    if (this.wasRunCancelled(runId)) {
                         return;
                     }
                     const result = await this.executeToolWithHooks(
@@ -1981,8 +1997,8 @@ export class AgentRuntime {
             this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: limitMessage });
             this.emit(IPC_CHANNELS.onSessionChanged, session);
         } catch (error) {
-            if (error?.name === "AbortError" || this.cancelledRuns.has(sessionId)) {
-                this.cancelledRuns.delete(sessionId);
+            if (error?.name === "AbortError" || this.isRunCancelled(runId)) {
+                this.cancelledRunIds.delete(runId);
                 return;
             }
             this.emit(IPC_CHANNELS.onError, {
@@ -1990,11 +2006,12 @@ export class AgentRuntime {
                 message: error instanceof Error ? error.message : String(error),
             });
         } finally {
-            if (this.cancelledRuns.has(sessionId)) {
-                this.cancelledRuns.delete(sessionId);
+            this.cancelledRunIds.delete(runId);
+            if (this.activeRunIdBySession.get(sessionId) === runId) {
+                this.activeRunIdBySession.delete(sessionId);
+                this.clearAbortSignal(sessionId, abortController);
+                this.setBusy(sessionId, false);
             }
-            this.clearAbortSignal(sessionId);
-            this.setBusy(sessionId, false);
         }
     }
 }
