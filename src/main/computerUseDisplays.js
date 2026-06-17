@@ -108,11 +108,104 @@ export function resolveDisplayTarget(displayArg) {
     );
 }
 
+function formatCoordinateForError(value) {
+    if (typeof value === "number" && Number.isNaN(value)) {
+        return "missing or invalid";
+    }
+    if (value === undefined) {
+        return "undefined";
+    }
+    if (value === null) {
+        return "null";
+    }
+    if (typeof value === "object") {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return String(value);
+        }
+    }
+    return `${JSON.stringify(value)} (${typeof value})`;
+}
+
+export function coerceCoordinate(value) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return NaN;
+        }
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : NaN;
+    }
+    return NaN;
+}
+
+function pointerAliasesForKeys(xKey, yKey) {
+    if (xKey === "x" && yKey === "y") {
+        return ["coordinate", "coordinates", "point", "position", "start"];
+    }
+    if (xKey === "to_x" && yKey === "to_y") {
+        return ["to_coordinate", "to_coordinates", "to_point", "to_position", "destination", "end"];
+    }
+    return [];
+}
+
+function coordinatesFromAliasValue(value) {
+    if (Array.isArray(value) && value.length >= 2) {
+        const x = coerceCoordinate(value[0]);
+        const y = coerceCoordinate(value[1]);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+            return { x, y };
+        }
+    }
+    if (value && typeof value === "object") {
+        const x = coerceCoordinate(value.x ?? value.X);
+        const y = coerceCoordinate(value.y ?? value.Y);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+            return { x, y };
+        }
+    }
+    return null;
+}
+
+/** Normalize x/y from tool args, including common alternate coordinate shapes from vision models. */
+export function resolvePointerCoordinates(args = {}, { xKey = "x", yKey = "y" } = {}) {
+    let x = coerceCoordinate(args[xKey]);
+    let y = coerceCoordinate(args[yKey]);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+        return { x, y };
+    }
+
+    for (const alias of pointerAliasesForKeys(xKey, yKey)) {
+        const fromAlias = coordinatesFromAliasValue(args[alias]);
+        if (!fromAlias) {
+            continue;
+        }
+        if (!Number.isFinite(x)) {
+            x = fromAlias.x;
+        }
+        if (!Number.isFinite(y)) {
+            y = fromAlias.y;
+        }
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+            return { x, y };
+        }
+    }
+
+    return { x, y };
+}
+
 export function resolveGlobalPoint(x, y) {
-    const px = Number(x);
-    const py = Number(y);
+    const px = coerceCoordinate(x);
+    const py = coerceCoordinate(y);
     if (!Number.isFinite(px) || !Number.isFinite(py)) {
-        throw new Error("x and y must be numbers");
+        throw new Error(
+            `x and y must be finite numbers (received x=${formatCoordinateForError(x)}, y=${formatCoordinateForError(y)}). ` +
+                "Use global DIP pixels from computer_displays, or pass coordinate: [x, y].",
+        );
     }
 
     const layout = getDisplayLayout();

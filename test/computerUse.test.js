@@ -24,6 +24,7 @@ import {
     getDisplayLayout,
     resolveDisplayTarget,
     resolveGlobalPoint,
+    resolvePointerCoordinates,
     setComputerUseScreenGetter,
 } from "../src/main/computerUseDisplays.js";
 
@@ -190,6 +191,35 @@ describe("computer use displays", () => {
         assert.equal(outside.displayIndex, null);
     });
 
+    it("coerces string coordinates and alternate coordinate shapes", () => {
+        setComputerUseScreenGetter(mockScreen());
+        assert.deepEqual(resolvePointerCoordinates({ x: "618", y: "198" }), { x: 618, y: 198 });
+        assert.deepEqual(resolvePointerCoordinates({ coordinate: [618, 198] }), { x: 618, y: 198 });
+        assert.deepEqual(resolvePointerCoordinates({ position: { x: 618, y: 198 } }), {
+            x: 618,
+            y: 198,
+        });
+        assert.deepEqual(resolveGlobalPoint("618", "198"), {
+            x: 618,
+            y: 198,
+            displayIndex: 0,
+            display: getDisplayLayout().displays[0],
+            layout: getDisplayLayout(),
+        });
+    });
+
+    it("reports received coordinate values in validation errors", () => {
+        setComputerUseScreenGetter(mockScreen());
+        assert.throws(
+            () => resolveGlobalPoint(undefined, 198),
+            /received x=undefined, y=198/,
+        );
+        assert.throws(
+            () => resolveGlobalPoint([618, 198], undefined),
+            /received x=\[618,198\]/,
+        );
+    });
+
     it("resolves display targets by index", () => {
         setComputerUseScreenGetter(mockScreen());
         const target = resolveDisplayTarget("1");
@@ -354,6 +384,35 @@ describe("computer use tools", () => {
             { sessionId: "session-default" },
         );
         assert.equal(confirmCalls, 0);
+    });
+
+    it("accepts object-shaped tool arguments for computer_action", async () => {
+        if (!isComputerUseSupported()) {
+            return;
+        }
+        const registry = new ToolRegistry(
+            () =>
+                createComputerUseTools({
+                    getAgentTools: () => ({ enable_tools: true, enable_computer_use: true }),
+                    confirmToolExecution: async () => true,
+                    getAuthMode: () => "fullAccess",
+                }),
+            async () => true,
+            () => "fullAccess",
+        );
+
+        const result = await registry.execute(
+            {
+                id: "call-computer-action-wait-object-args",
+                function: {
+                    name: "computer_action",
+                    arguments: { action: "wait", ms: 1 },
+                },
+            },
+            { sessionId: "session-full" },
+        );
+
+        assert.equal(result, "Waited 1ms");
     });
 
     it("routes computer_action wait without OS desktop APIs", async () => {

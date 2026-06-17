@@ -1,6 +1,13 @@
 import { shouldRequireToolConfirmation } from "./authPolicy.js";
 import { executeToolSearch, schemasForToolCatalog } from "./toolSearch.js";
 
+function parseToolCallArgs(raw) {
+    if (raw != null && typeof raw === "object") {
+        return raw;
+    }
+    return JSON.parse(raw || "{}");
+}
+
 export class ToolRegistry {
     constructor(toolFactory, confirmToolExecution, getAuthMode = () => "default") {
         this.toolFactory = toolFactory;
@@ -33,7 +40,7 @@ export class ToolRegistry {
         if (call.function.name === "tool_search") {
             let args = {};
             try {
-                args = JSON.parse(call.function.arguments || "{}");
+                args = parseToolCallArgs(call.function.arguments);
             } catch (error) {
                 return `Error: invalid tool arguments ${error.message}`;
             }
@@ -48,7 +55,7 @@ export class ToolRegistry {
 
         let args = {};
         try {
-            args = JSON.parse(call.function.arguments || "{}");
+            args = parseToolCallArgs(call.function.arguments);
         } catch (error) {
             return `Error: invalid tool arguments ${error.message}`;
         }

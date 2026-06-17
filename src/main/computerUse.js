@@ -12,6 +12,7 @@ import {
     getDisplayLayout,
     resolveDisplayTarget,
     resolveGlobalPoint,
+    resolvePointerCoordinates,
 } from "./computerUseDisplays.js";
 
 const execFileAsync = promisify(execFile);
@@ -24,6 +25,7 @@ export {
     getDisplayLayout,
     resolveDisplayTarget,
     resolveGlobalPoint,
+    resolvePointerCoordinates,
     setComputerUseScreenGetter,
 } from "./computerUseDisplays.js";
 
@@ -280,7 +282,8 @@ export async function moveTo(args) {
     if (args?.signal?.aborted) {
         throw Object.assign(new Error("Aborted"), { name: "AbortError" });
     }
-    const resolved = resolveGlobalPoint(args.x, args.y);
+    const { x, y } = resolvePointerCoordinates(args);
+    const resolved = resolveGlobalPoint(x, y);
     if (process.platform === "darwin") {
         await moveMac(resolved);
     } else if (process.platform === "win32") {
@@ -347,7 +350,8 @@ Start-Sleep -Milliseconds 50
 }
 
 export async function clickAt(args) {
-    const resolved = resolveGlobalPoint(args.x, args.y);
+    const { x, y } = resolvePointerCoordinates(args);
+    const resolved = resolveGlobalPoint(x, y);
     const button = args.button || "left";
     const signal = args.signal;
     if (process.platform === "darwin") {
@@ -469,8 +473,10 @@ for ($i = 1; $i -le $steps; $i++) {
 }
 
 export async function dragTo(args = {}) {
-    const start = resolveGlobalPoint(args.x, args.y);
-    const end = resolveGlobalPoint(args.to_x, args.to_y);
+    const startCoords = resolvePointerCoordinates(args);
+    const endCoords = resolvePointerCoordinates(args, { xKey: "to_x", yKey: "to_y" });
+    const start = resolveGlobalPoint(startCoords.x, startCoords.y);
+    const end = resolveGlobalPoint(endCoords.x, endCoords.y);
     const durationMs = normalizeDurationMs(args.duration_ms, 500, {
         min: 1,
         max: 10000,

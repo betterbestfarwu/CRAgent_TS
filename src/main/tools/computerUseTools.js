@@ -13,6 +13,7 @@ import {
     typeText,
     waitForComputer,
 } from "../computerUse.js";
+import { resolvePointerCoordinates } from "../computerUseDisplays.js";
 
 function fnSchema(name, description, parameters) {
     return {
@@ -192,7 +193,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                         `Move cursor to (${args.x}, ${args.y})`,
                         context.sessionId,
                     );
-                    return moveTo({ x: args.x, y: args.y, signal: context.signal });
+                    return moveTo({ ...args, signal: context.signal });
                 }
                 if (action === "click" || action === "double_click") {
                     const button = action === "double_click" ? "double" : args.button || "left";
@@ -201,7 +202,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                         `${button} click at (${args.x}, ${args.y})`,
                         context.sessionId,
                     );
-                    return clickAt({ x: args.x, y: args.y, button, signal: context.signal });
+                    return clickAt({ ...args, button, signal: context.signal });
                 }
                 if (action === "drag") {
                     await confirmComputerAction(
@@ -209,14 +210,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                         `Drag from (${args.x}, ${args.y}) to (${args.to_x}, ${args.to_y})`,
                         context.sessionId,
                     );
-                    return dragTo({
-                        x: args.x,
-                        y: args.y,
-                        to_x: args.to_x,
-                        to_y: args.to_y,
-                        duration_ms: args.duration_ms,
-                        signal: context.signal,
-                    });
+                    return dragTo({ ...args, signal: context.signal });
                 }
                 if (action === "type") {
                     const preview = String(args.text ?? "").slice(0, 120);
@@ -242,8 +236,11 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                 if (action === "scroll") {
                     const direction = args.direction || "down";
                     const amount = args.amount ?? 3;
+                    const coords = resolvePointerCoordinates(args);
                     const at =
-                        args.x != null && args.y != null ? { x: args.x, y: args.y } : undefined;
+                        Number.isFinite(coords.x) && Number.isFinite(coords.y)
+                            ? { x: coords.x, y: coords.y }
+                            : undefined;
                     const atHint = at ? ` at (${at.x}, ${at.y})` : "";
                     await confirmComputerAction(
                         "computer_action",
@@ -333,7 +330,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                     `Move cursor to (${args.x}, ${args.y})`,
                     context.sessionId,
                 );
-                return moveTo({ x: args.x, y: args.y, signal: context.signal });
+                return moveTo({ ...args, signal: context.signal });
             },
         },
         {
@@ -370,7 +367,7 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                     `${button} click at (${args.x}, ${args.y})`,
                     context.sessionId,
                 );
-                return clickAt({ x: args.x, y: args.y, button, signal: context.signal });
+                return clickAt({ ...args, button, signal: context.signal });
             },
         },
         {

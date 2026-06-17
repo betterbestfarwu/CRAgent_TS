@@ -574,8 +574,12 @@ export class AgentRuntime {
     }
 
     parseToolCallArguments(call) {
+        const raw = call?.function?.arguments;
+        if (raw != null && typeof raw === "object") {
+            return raw;
+        }
         try {
-            return JSON.parse(call.function.arguments || "{}");
+            return JSON.parse(raw || "{}");
         } catch {
             return null;
         }
