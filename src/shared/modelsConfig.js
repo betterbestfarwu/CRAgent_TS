@@ -23,6 +23,58 @@ export function firstModelRef(models) {
     return "";
 }
 
+export function firstEnabledModelRef(models) {
+    for (const [providerKey, provider] of Object.entries(models || {})) {
+        for (const model of provider.models || []) {
+            if (model.state) {
+                return `${providerKey}/${model.id}`;
+            }
+        }
+    }
+    return "";
+}
+
+export function resolvePrimaryModelRef(models, primaryRef) {
+    const primary = String(primaryRef || "").trim();
+    if (primary) {
+        return primary;
+    }
+    return firstEnabledModelRef(models);
+}
+
+export function prepareDefaultAgentConfigForSave(config) {
+    const baseConfig = config || {};
+    const defaultModel = baseConfig.agents?.default?.model || {};
+    const primary = resolvePrimaryModelRef(baseConfig.models, defaultModel.primary);
+    if (!primary) {
+        return {
+            config: baseConfig,
+            error: "请先在 Models 页启用至少一个模型，再保存 Agent 设置。",
+        };
+    }
+    if (primary === defaultModel.primary) {
+        return { config: baseConfig, error: "" };
+    }
+    const nextFallbacks = (defaultModel.fallbacks || []).filter((ref) => ref !== primary);
+    return {
+        config: {
+            ...baseConfig,
+            agents: {
+                ...baseConfig.agents,
+                default: {
+                    ...baseConfig.agents?.default,
+                    model: {
+                        ...defaultModel,
+                        primary,
+                        fallbacks: nextFallbacks,
+                    },
+                },
+            },
+        },
+        error: "",
+    };
+}
+
 export function removeProviderFromConfig(config, providerKey) {
     if (!providerKey || !config?.models?.[providerKey]) {
         return config;

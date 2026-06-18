@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { ConfigStore } from "../src/main/configStore.js";
 import {
+    firstEnabledModelRef,
     mergeSyncedProviderIntoConfig,
+    prepareDefaultAgentConfigForSave,
     removeProviderFromConfig,
     renameProviderInConfig,
 } from "../src/shared/modelsConfig.js";
@@ -65,6 +67,80 @@ test("mergeSyncedProviderIntoConfig updates one provider without restoring delet
     const next = mergeSyncedProviderIntoConfig(draft, "openai", syncedProvider);
     assert.deepEqual(Object.keys(next.models), ["openai"]);
     assert.equal(next.models.openai.models[0].id, "gpt-5");
+});
+
+test("firstEnabledModelRef returns the first enabled model and ignores disabled models", () => {
+    assert.equal(
+        firstEnabledModelRef({
+            openai: {
+                models: [
+                    { id: "gpt-4o-mini", state: false },
+                    { id: "gpt-5", state: true },
+                ],
+            },
+            anthropic: {
+                models: [{ id: "claude-opus-4-5", state: true }],
+            },
+        }),
+        "openai/gpt-5",
+    );
+});
+
+test("firstEnabledModelRef returns empty when no models are enabled", () => {
+    assert.equal(
+        firstEnabledModelRef({
+            openai: {
+                models: [{ id: "gpt-4o-mini", state: false }],
+            },
+        }),
+        "",
+    );
+});
+
+test("prepareDefaultAgentConfigForSave fills missing primary model from enabled models", () => {
+    const { config, error } = prepareDefaultAgentConfigForSave({
+        models: {
+            openai: {
+                models: [
+                    { id: "gpt-4o-mini", state: false },
+                    { id: "gpt-5", state: true },
+                ],
+            },
+        },
+        agents: {
+            default: {
+                model: {
+                    primary: "",
+                    fallbacks: ["openai/gpt-5"],
+                },
+            },
+        },
+    });
+
+    assert.equal(error, "");
+    assert.equal(config.agents.default.model.primary, "openai/gpt-5");
+    assert.deepEqual(config.agents.default.model.fallbacks, []);
+});
+
+test("prepareDefaultAgentConfigForSave reports an error when no models are enabled", () => {
+    const { config, error } = prepareDefaultAgentConfigForSave({
+        models: {
+            openai: {
+                models: [{ id: "gpt-4o-mini", state: false }],
+            },
+        },
+        agents: {
+            default: {
+                model: {
+                    primary: "",
+                    fallbacks: [],
+                },
+            },
+        },
+    });
+
+    assert.equal(error, "请先在 Models 页启用至少一个模型，再保存 Agent 设置。");
+    assert.equal(config.agents.default.model.primary, "");
 });
 
 test("syncProviderModels applies draft models before updating provider on disk", () => {

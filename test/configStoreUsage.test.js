@@ -60,6 +60,38 @@ test("ConfigStore preserves slashes inside configured model refs", () => {
     ]);
 });
 
+test("ConfigStore.resolvePrimaryRef falls back to the first enabled model", () => {
+    const configFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cragent-primary-ref-")), "config.json");
+    const store = new ConfigStore(configFile);
+    store.update({
+        ...store.get(),
+        agents: {
+            ...store.get().agents,
+            default: {
+                ...store.get().agents.default,
+                model: {
+                    primary: "",
+                    fallbacks: [],
+                },
+            },
+        },
+        models: {
+            openai: {
+                ...store.get().models.openai,
+                models: [
+                    { id: "gpt-4o-mini", state: false },
+                    { id: "gpt-5", state: true },
+                ],
+            },
+        },
+    });
+
+    assert.deepEqual(store.resolvePrimaryRef(), {
+        providerKey: "openai",
+        modelId: "gpt-5",
+    });
+});
+
 test("LlmClient reports token usage from chat response", async () => {
     const usageCalls = [];
     const originalFetch = globalThis.fetch;

@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import { DEFAULT_CONTEXT_CONFIG } from "@shared/contextConfig";
-import { parseModelRef } from "@shared/modelRef.js";
 import { DEFAULT_UI_CONFIG } from "@shared/uiConfig.js";
+import { parseModelRef } from "@shared/modelRef.js";
+import { resolvePrimaryModelRef } from "@shared/modelsConfig.js";
 export class ConfigStore {
     constructor(filePath) {
         this.filePath = filePath;
@@ -28,7 +29,8 @@ export class ConfigStore {
     }
     resolvePrimaryRef() {
         return (
-            parseModelRef(this.data.agents.default.model.primary) || {
+            parseModelRef(resolvePrimaryModelRef(this.data.models, this.data.agents.default.model.primary)) ||
+            {
                 providerKey: "",
                 modelId: "",
             }

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CONTEXT_CONFIG, mergeContextConfig } from "@shared/contextConfig";
 import { ensureMcpConfigShape } from "@shared/mcpConfig.js";
 import {
+  prepareDefaultAgentConfigForSave,
   mergeSyncedProviderIntoConfig,
   removeProviderFromConfig,
   renameProviderInConfig,
+  resolvePrimaryModelRef,
 } from "@shared/modelsConfig.js";
 import { DEFAULT_UI_CONFIG, mergeUiConfig } from "@shared/uiConfig.js";
 import {
@@ -328,6 +330,7 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
   const [showApiKey, setShowApiKey] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [providerSyncErrors, setProviderSyncErrors] = useState({});
+  const [saveError, setSaveError] = useState("");
   const [providerDialog, setProviderDialog] = useState(null);
   const [deleteProviderConfirmOpen, setDeleteProviderConfirmOpen] = useState(false);
   const modelsPanelRef = useRef(null);
@@ -354,6 +357,10 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
 
   function buildPersistableConfig(source = draftConfigRef.current) {
     return ensureMcpConfigShape(source);
+  }
+
+  function prepareConfigForSave(source = draftConfigRef.current) {
+    return prepareDefaultAgentConfigForSave(buildPersistableConfig(source));
   }
 
   async function persistDraftConfig(source = draftConfigRef.current) {
@@ -405,6 +412,10 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
     [draftConfig.models],
   );
   const defaultAgentConfig = draftConfig.agents?.default || {};
+  const effectivePrimaryModelRef = resolvePrimaryModelRef(
+    draftConfig.models,
+    defaultAgentConfig.model?.primary,
+  );
   const defaultAgentListItem =
     draftConfig.agents?.list?.find((item) => item.is_default) ||
     draftConfig.agents?.list?.[0] ||
@@ -531,6 +542,7 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
 
   function updateModelState(modelId, checked) {
     if (!selectedProviderKey) return;
+    setSaveError("");
     setDraftConfig((prev) => {
       const provider = prev.models[selectedProviderKey];
       return {
@@ -566,7 +578,16 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
   }
 
   function handleSave() {
-    void onSave(buildPersistableConfig(draftConfig));
+    const { config: nextConfig, error } = prepareConfigForSave(draftConfig);
+    if (error) {
+      setSaveError(error);
+      return;
+    }
+    setSaveError("");
+    if (nextConfig.agents?.default?.model?.primary !== defaultAgentConfig.model?.primary) {
+      commitDraftConfig(nextConfig);
+    }
+    void onSave(nextConfig);
   }
 
   async function handleSyncModels() {
@@ -662,6 +683,7 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
   }
 
   function setPrimaryModel(modelRef) {
+    setSaveError("");
     const current = defaultAgentConfig.model?.fallbacks || [];
     const nextFallbacks = current.filter((ref) => ref !== modelRef);
     updateDefaultAgentModel({
@@ -1246,7 +1268,7 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
               <SettingsSelectRow
                 title="Primary model"
                 description="主对话与压缩摘要使用的默认模型。"
-                value={defaultAgentConfig.model?.primary || ""}
+                value={effectivePrimaryModelRef || ""}
                 onChange={setPrimaryModel}
               >
                 {enabledModelRefs.map((modelRef) => (
@@ -1369,14 +1391,17 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
       activeTab === "chat" ||
       activeTab === "agent" ||
       activeTab === "mcp" ? (
-        <footer className="settings-page-footer">
-          <button type="button" className="settings-btn secondary" onClick={onBack}>
-            取消
-          </button>
-          <button type="button" className="settings-btn primary" onClick={handleSave}>
-            保存
-          </button>
-        </footer>
+        <>
+          {saveError ? <p className="settings-field-error">{saveError}</p> : null}
+          <footer className="settings-page-footer">
+            <button type="button" className="settings-btn secondary" onClick={onBack}>
+              取消
+            </button>
+            <button type="button" className="settings-btn primary" onClick={handleSave}>
+              保存
+            </button>
+          </footer>
+        </>
       ) : null}
 
       {providerDialog?.mode === "add" ? (
