@@ -269,14 +269,51 @@
     );
   }
 
+  function isFlowchartSource(source) {
+    var first = String(source || '').split('\n', 1)[0].trim();
+    return /^(?:graph\s|flowchart\s)/i.test(first);
+  }
+
+  function quoteMermaidLabel(label) {
+    var text = String(label || '').trim();
+    if (!text) return label;
+    if (/^(["'`]).*\1$/.test(text)) return label;
+    return '"' + text.replace(/"/g, '\\"') + '"';
+  }
+
+  function normalizeMermaidFlowchartSource(source) {
+    if (!isFlowchartSource(source)) return source;
+    return String(source || '')
+      .split('\n')
+      .map(function (line) {
+        var trimmed = line.trimStart();
+        if (
+          /^(?:%%|subgraph\b|end\b|direction\b|click\b|style\b|classDef\b|class\b|linkStyle\b|accTitle\s*:|accDescr\s*:)/i.test(
+            trimmed,
+          )
+        ) {
+          return line;
+        }
+        return line.replace(/(\b[A-Za-z_][\w-]*)\s*(\[[^\]]*\]|\{[^}]*\})/g, function (_, id, body) {
+          var open = body.charAt(0);
+          var close = body.charAt(body.length - 1);
+          var text = body.slice(1, -1);
+          if (/^(["'`]).*\1$/.test(text.trim())) return id + body;
+          return id + open + quoteMermaidLabel(text) + close;
+        });
+      })
+      .join('\n');
+  }
+
   function renderMermaidBlock(source) {
+    var normalizedSource = normalizeMermaidFlowchartSource(source);
     return (
       '<div class="mermaid-diagram-card">' +
       '<pre class="mermaid-source" hidden>' +
       escapeHTML(source) +
       '</pre>' +
       '<div class="mermaid-diagram-body"><div class="mermaid">' +
-      escapeHTML(source) +
+      escapeHTML(normalizedSource) +
       '</div></div>' +
       '</div>'
     );

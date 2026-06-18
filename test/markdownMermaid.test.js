@@ -26,3 +26,14 @@ test('renders unlabeled graph blocks as mermaid', () => {
   const html = render('```\nflowchart LR\n  X-->Y\n```');
   assert.match(html, /class="mermaid-diagram-card"/);
 });
+
+test('normalizes flowchart labels that break mermaid parsing', () => {
+  const html = render(`\`\`\`mermaid
+flowchart TD
+    A[收图端 StartRTC线程启动] --> B[先 StartRTC(this.Mode,false)]
+    B -->|成功| C{MQTT模式?}
+\`\`\``);
+  assert.match(html, /A\[\&quot;收图端 StartRTC线程启动\&quot;\]/);
+  assert.match(html, /B\[\&quot;先 StartRTC\(this\.Mode,false\)\&quot;\]/);
+  assert.match(html, /C\{\&quot;MQTT模式\?\&quot;\}/);
+});
