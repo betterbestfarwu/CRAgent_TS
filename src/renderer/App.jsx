@@ -50,7 +50,7 @@ import { PlanApprovalDialog } from "./PlanApprovalDialog.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { TitleBar } from "./TitleBar.jsx";
 import { getSessionBusyState, shouldAutoSwitchToChatPage } from "./appNavigation.js";
-import { sessionShowsLoadOlder } from "./sessionUi.js";
+import { sessionHasActiveSurface, sessionShowsLoadOlder } from "./sessionUi.js";
 import { displayTitle } from "./sidebarUtils.js";
 import {
   isDefaultSessionTitle,
@@ -905,7 +905,7 @@ export function App() {
     return projects.find((project) => project.id === projectId) || null;
   }, [currentSession?.meta?.projectId, projects]);
 
-  const active = Boolean(currentSession && currentSession.messages.length > 0);
+  const active = sessionHasActiveSurface({ session: currentSession, busy });
   const hasComposerDraft =
     input.length > 0 ||
     pendingImages.length > 0 ||
