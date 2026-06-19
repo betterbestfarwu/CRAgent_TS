@@ -49,7 +49,7 @@ import { ConfirmDialog } from "./ConfirmDialog.jsx";
 import { PlanApprovalDialog } from "./PlanApprovalDialog.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { TitleBar } from "./TitleBar.jsx";
-import { shouldAutoSwitchToChatPage } from "./appNavigation.js";
+import { getSessionBusyState, shouldAutoSwitchToChatPage } from "./appNavigation.js";
 import { sessionShowsLoadOlder } from "./sessionUi.js";
 import { displayTitle } from "./sidebarUtils.js";
 import {
@@ -1567,9 +1567,11 @@ export function App() {
                 ? expandedProjectIds[0]
                 : null;
       const next = await window.cragent.newSession({ projectId: resolvedProjectId });
+      sessionIdRef.current = next.meta.id;
       setCurrentSession(next);
       setFocusedProjectId(next?.meta?.projectId ?? null);
       ensureProjectExpanded(next?.meta?.projectId);
+      setBusy(getSessionBusyState(busyBySessionRef.current, next.meta.id));
       setSessions((prev) => {
         const has = prev.some((s) => s.id === next.meta.id);
         if (has) return sortSessions(prev);
@@ -1608,7 +1610,7 @@ export function App() {
     setCurrentSession(session);
     setFocusedProjectId(session?.meta?.projectId ?? null);
     ensureProjectExpanded(session?.meta?.projectId);
-    setBusy(busyBySessionRef.current.get(sessionId) ?? false);
+    setBusy(getSessionBusyState(busyBySessionRef.current, sessionId));
     setPage("chat");
     if (compactLayout) setSidebarOpen(false);
     requestAnimationFrame(() => {
