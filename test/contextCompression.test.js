@@ -7,6 +7,7 @@ import {
     calculateMessagesContextWarningState,
     estimateClearableToolResultTokens,
     forceSplitMessagesForCompact,
+    formatMessagesForSummary,
     isCompactableTool,
     mergeCompactKeepSettings,
     microCompactMessages,
@@ -46,6 +47,20 @@ test("formatCompactSummary extracts summary block and strips analysis", () => {
 </summary>`;
     assert.match(formatCompactSummary(raw), /User said hello/);
     assert.doesNotMatch(formatCompactSummary(raw), /thinking/);
+});
+
+test("formatMessagesForSummary preserves original user text when content was expanded", () => {
+    const transcript = formatMessagesForSummary([
+        {
+            role: "user",
+            content: "请检查 /Users/airdroid/CRAgent_TS/src/main/agentRuntime.js",
+            userText: "请检查 @src/main/agentRuntime.js",
+        },
+    ]);
+
+    assert.match(transcript, /User: 请检查 @src\/main\/agentRuntime\.js/);
+    assert.match(transcript, /Expanded content sent to model:/);
+    assert.match(transcript, /\/Users\/airdroid\/CRAgent_TS\/src\/main\/agentRuntime\.js/);
 });
 
 test("isCompactableTool includes MCP deferred tools", () => {

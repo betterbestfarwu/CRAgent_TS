@@ -403,6 +403,14 @@ export class AgentRuntime {
                 createdAt: new Date().toISOString(),
             });
         }
+        if (session.meta.sessionMemory) {
+            messages.push({
+                id: randomUUID(),
+                role: "user",
+                content: `<session_memory>\n${session.meta.sessionMemory}\n</session_memory>`,
+                createdAt: new Date().toISOString(),
+            });
+        }
         if (includeSessionHistory) {
             const history = session.messages
                 .slice(fromIndex)

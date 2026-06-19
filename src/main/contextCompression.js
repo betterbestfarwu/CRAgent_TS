@@ -404,7 +404,15 @@ export function formatMessagesForSummary(messages) {
                 const imageNote = message.images?.length
                     ? ` [${message.images.length} image(s)]`
                     : "";
-                return `User: ${stripInlineImagePayloads(message.content)}${imageNote}`.trimEnd();
+                const original = stripInlineImagePayloads(
+                    message.userText != null ? message.userText : message.content,
+                );
+                const expanded = stripInlineImagePayloads(message.content);
+                let line = `User: ${original}${imageNote}`.trimEnd();
+                if (message.userText != null && expanded.trim() && expanded !== original) {
+                    line += `\nExpanded content sent to model: ${expanded}`;
+                }
+                return line;
             }
             if (message.role === "assistant") {
                 let line = `Assistant: ${stripInlineImagePayloads(message.content)}`.trimEnd();

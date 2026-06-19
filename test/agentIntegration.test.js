@@ -694,6 +694,23 @@ test("messagesForLLM injects active todos into system prompt", () => {
     assert.match(system.content, /Write tests/);
 });
 
+test("messagesForLLM injects session memory when present", () => {
+    const { session, runtime, sessionStore } = makeRuntimeHarness();
+    session.meta.sessionMemory = '<section name="current_work">keep this memory</section>';
+    sessionStore.save(session);
+
+    const messages = runtime.messagesForLLM(sessionStore.get(session.meta.id));
+
+    assert.ok(
+        messages.some(
+            (message) =>
+                message.role === "user" &&
+                message.content.includes("<session_memory>") &&
+                message.content.includes("keep this memory"),
+        ),
+    );
+});
+
 test("runLoop compacts and retries after context overflow error", async () => {
     let chatCount = 0;
     const { session, runtime, events, sessionStore } = makeRuntimeHarness({
