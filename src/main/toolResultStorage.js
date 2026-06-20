@@ -17,9 +17,9 @@ export function getToolResultsDir(sessionsDir, sessionId) {
     return path.join(sessionDir(sessionsDir, sessionId), TOOL_RESULTS_SUBDIR);
 }
 
-export function getToolResultPath(sessionsDir, sessionId, toolUseId) {
+export function getToolResultPath(sessionsDir, sessionId, toolUseId, { isJson = false } = {}) {
     const safeId = String(toolUseId || "unknown").replace(/[^a-zA-Z0-9._-]/g, "_");
-    return path.join(getToolResultsDir(sessionsDir, sessionId), `${safeId}.txt`);
+    return path.join(getToolResultsDir(sessionsDir, sessionId), `${safeId}.${isJson ? "json" : "txt"}`);
 }
 
 export function isToolResultContentEmpty(content) {
@@ -48,6 +48,18 @@ export function generatePreview(content, maxChars = TOOL_RESULT_PREVIEW_CHARS) {
     return { preview: text.slice(0, cutPoint), hasMore: true };
 }
 
+function normalizeToolResultContent(content) {
+    if (!Array.isArray(content)) {
+        return { text: String(content || ""), isJson: false };
+    }
+    if (content.some((block) => block?.type !== "text")) {
+        return {
+            error: "Cannot persist tool results containing non-text content",
+        };
+    }
+    return { text: JSON.stringify(content, null, 2), isJson: true };
+}
+
 export function buildLargeToolResultMessage({ filepath, originalSize, preview, hasMore }) {
     let message = `${PERSISTED_OUTPUT_TAG}\n`;
     message += `Output too large (${formatByteSize(originalSize)}). Full output saved to: ${filepath}\n\n`;
@@ -65,9 +77,13 @@ async function ensureToolResultsDir(sessionsDir, sessionId) {
 }
 
 export async function persistToolResult(content, sessionsDir, sessionId, toolUseId) {
-    const text = String(content || "");
+    const normalized = normalizeToolResultContent(content);
+    if (normalized.error) {
+        return { error: normalized.error };
+    }
+    const { text, isJson } = normalized;
     await ensureToolResultsDir(sessionsDir, sessionId);
-    const filepath = getToolResultPath(sessionsDir, sessionId, toolUseId);
+    const filepath = getToolResultPath(sessionsDir, sessionId, toolUseId, { isJson });
     try {
         await fsPromises.writeFile(filepath, text, { encoding: "utf-8", flag: "wx" });
     } catch (error) {
@@ -79,6 +95,7 @@ export async function persistToolResult(content, sessionsDir, sessionId, toolUse
     return {
         filepath,
         originalSize: text.length,
+        isJson,
         preview,
         hasMore,
     };
@@ -97,9 +114,11 @@ export async function maybePersistLargeToolResult(
         sessionId,
     },
 ) {
-    const body = ensureNonEmptyToolContent(content, toolName);
+    const isBlockArray = Array.isArray(content);
+    const body = isBlockArray ? content : ensureNonEmptyToolContent(content, toolName);
+    const size = isBlockArray ? JSON.stringify(content).length : body.length;
     const threshold = resolveMaxResultSizeChars(maxResultSizeChars);
-    if (threshold === Infinity || body.length <= threshold || !sessionsDir || !sessionId || !toolUseId) {
+    if (threshold === Infinity || size <= threshold || !sessionsDir || !sessionId || !toolUseId) {
         return body;
     }
     const persisted = await persistToolResult(body, sessionsDir, sessionId, toolUseId);

@@ -104,6 +104,8 @@ function makeHarnessWithHooks(projectRoot, options = {}) {
                 updateTodos: (sid, todos, merge, runId) =>
                     runtime.updateTodos(sid, todos, merge, runId),
                 runSubAgent: (args) => runtime.runSubAgent(args),
+                runSubAgentInBackground: (args) => runtime.runSubAgentInBackground(args),
+                readSubAgentOutput: (args) => runtime.readSubAgentOutput(args),
             }),
             {
                 name: "read_file",

@@ -110,6 +110,8 @@ function makeRuntimeHarness(options = {}) {
             updateTodos: (sessionId, todos, merge, runId) =>
                 runtime.updateTodos(sessionId, todos, merge, runId),
             runSubAgent: (args) => runtime.runSubAgent(args),
+            runSubAgentInBackground: (args) => runtime.runSubAgentInBackground(args),
+            readSubAgentOutput: (args) => runtime.readSubAgentOutput(args),
         });
         return meta;
     });
@@ -143,6 +145,20 @@ function makeRuntimeHarness(options = {}) {
         llmCompleteCalls,
         toolRegistry,
     };
+}
+
+async function waitForFileContent(filePath, pattern, timeoutMs = 1000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+        if (fs.existsSync(filePath)) {
+            const content = fs.readFileSync(filePath, "utf-8");
+            if (pattern.test(content)) {
+                return content;
+            }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Timed out waiting for ${pattern} in ${filePath}`);
 }
 
 test("ConfigStore.resolveModelChain includes session model and configured fallbacks", () => {
@@ -259,6 +275,24 @@ test("Task tool is hidden unless allow_sub_agents is enabled", () => {
     assert.ok(namesDisabled.includes("TodoWrite"));
 });
 
+test("Task tool exposes background execution and TaskOutput when sub-agents are enabled", () => {
+    const enabled = makeRuntimeHarness();
+    const task = enabled.toolRegistry.activeTools().find((tool) => tool.name === "Task");
+    const taskOutput = enabled.toolRegistry.activeTools().find((tool) => tool.name === "TaskOutput");
+
+    assert.ok(task);
+    assert.ok(taskOutput);
+    assert.equal(
+        task.schema.function.parameters.properties.run_in_background.type,
+        "boolean",
+    );
+
+    const disabled = makeRuntimeHarness();
+    disabled.configStore.get().agents.list[0].tools.allow_sub_agents = false;
+    const namesDisabled = disabled.toolRegistry.activeTools().map((tool) => tool.name);
+    assert.ok(!namesDisabled.includes("TaskOutput"));
+});
+
 test("runSubAgent returns isolated result without polluting main session history", async () => {
     const { session, runtime, sessionStore } = makeRuntimeHarness({
         chatImpl: () => ({
@@ -283,6 +317,75 @@ test("runSubAgent returns isolated result without polluting main session history
     assert.match(result, /explored codebase structure/);
     const after = sessionStore.get(session.meta.id);
     assert.equal(after.messages.length, beforeCount);
+});
+
+test("Task can launch a background sub-agent and TaskOutput reads its output file", async () => {
+    let resolveChat;
+    const chatReady = new Promise((resolve) => {
+        resolveChat = resolve;
+    });
+    const { session, runtime } = makeRuntimeHarness({
+        chatImpl: async () => {
+            await chatReady;
+            return {
+                message: {
+                    id: "sub-background-assistant",
+                    role: "assistant",
+                    content: "background complete",
+                    createdAt: new Date().toISOString(),
+                },
+            };
+        },
+    });
+
+    const launched = await runtime.toolRegistry.execute(
+        {
+            id: "call-bg-task",
+            function: {
+                name: "Task",
+                arguments: JSON.stringify({
+                    description: "background scan",
+                    prompt: "Scan in background",
+                    subagent_type: "explore",
+                    run_in_background: true,
+                }),
+            },
+        },
+        { sessionId: session.meta.id, runId: "parent-run" },
+    );
+
+    const payload = JSON.parse(launched);
+    assert.equal(payload.status, "async_launched");
+    assert.match(payload.agentId, /^[a-zA-Z0-9-]+$/);
+    assert.ok(fs.existsSync(payload.outputFile));
+
+    const pending = await runtime.toolRegistry.execute(
+        {
+            id: "call-bg-output-pending",
+            function: {
+                name: "TaskOutput",
+                arguments: JSON.stringify({ agent_id: payload.agentId }),
+            },
+        },
+        { sessionId: session.meta.id },
+    );
+    assert.match(pending, /status: running/);
+
+    resolveChat();
+    const completed = await waitForFileContent(payload.outputFile, /background complete/);
+    assert.match(completed, /Sub-agent "background scan" completed/);
+
+    const output = await runtime.toolRegistry.execute(
+        {
+            id: "call-bg-output-done",
+            function: {
+                name: "TaskOutput",
+                arguments: JSON.stringify({ agent_id: payload.agentId }),
+            },
+        },
+        { sessionId: session.meta.id },
+    );
+    assert.match(output, /background complete/);
 });
 
 test("runSubAgent compacts local transcript and retries after context overflow", async () => {

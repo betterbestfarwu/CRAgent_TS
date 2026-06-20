@@ -5,7 +5,13 @@ function fnSchema(name, description, parameters) {
     };
 }
 
-export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
+export function createMetaTools({
+  getAgentTools,
+  updateTodos,
+  runSubAgent,
+  runSubAgentInBackground,
+  readSubAgentOutput,
+}) {
   return [
     {
       name: "TodoWrite",
@@ -91,6 +97,11 @@ export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
               type: "string",
               description: "Optional model override in provider/modelId form",
             },
+            run_in_background: {
+              type: "boolean",
+              description:
+                "If true, launch the sub-agent asynchronously and return an output file for polling with TaskOutput.",
+            },
           },
           required: ["description", "prompt"],
         },
@@ -105,13 +116,52 @@ export function createMetaTools({ getAgentTools, updateTodos, runSubAgent }) {
         if (!prompt) {
           throw new Error("'prompt' is required");
         }
-        return runSubAgent({
+        const payload = {
           sessionId,
           parentRunId,
           description: String(args.description || "sub-agent task").trim(),
           prompt,
           subagentType: args.subagent_type || "generalPurpose",
           modelOverride: args.model || null,
+        };
+        if (args.run_in_background === true) {
+          if (!runSubAgentInBackground) {
+            throw new Error("background sub-agents are not available");
+          }
+          return runSubAgentInBackground(payload);
+        }
+        return runSubAgent(payload);
+      },
+    },
+    {
+      name: "TaskOutput",
+      requiresConfirmation: false,
+      enabled: () => getAgentTools().allow_sub_agents === true,
+      schema: fnSchema(
+        "TaskOutput",
+        "Read the output file for a background sub-agent launched with Task(run_in_background=true).",
+        {
+          type: "object",
+          properties: {
+            agent_id: {
+              type: "string",
+              description: "Background sub-agent id returned by Task",
+            },
+          },
+          required: ["agent_id"],
+        },
+      ),
+      async execute(args, context) {
+        const sessionId = context?.sessionId;
+        if (!sessionId) {
+          throw new Error("TaskOutput requires an active session");
+        }
+        if (!readSubAgentOutput) {
+          throw new Error("TaskOutput is not available");
+        }
+        return readSubAgentOutput({
+          sessionId,
+          agentId: String(args.agent_id || "").trim(),
         });
       },
     },

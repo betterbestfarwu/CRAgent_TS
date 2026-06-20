@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
 import {
     CONTEXT_COMPACT_DIVIDER_LABEL,
@@ -109,6 +110,7 @@ import {
 } from "./toolResultStorage.js";
 
 const HOOK_LOG_LIMIT = 80;
+const SUB_AGENT_OUTPUTS_DIR = "sub-agent-outputs";
 
 export class AgentRuntime {
     constructor(sessionStore, configStore, llmClient, toolRegistry, workspaceMemory, skillLoader, mainWindowGetter) {
@@ -901,6 +903,107 @@ export class AgentRuntime {
             { matchQuery: subagentType },
         );
         return `Sub-agent "${description}" reached tool round limit before finishing.`;
+    }
+
+    subAgentOutputPath(sessionId, agentId) {
+        const sessionsDir = this.sessionStore.locateSessionStorage(sessionId);
+        const safeId = String(agentId || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+        return path.join(sessionsDir, sessionId, SUB_AGENT_OUTPUTS_DIR, `${safeId}.txt`);
+    }
+
+    async writeSubAgentOutput(sessionId, agentId, content) {
+        const outputFile = this.subAgentOutputPath(sessionId, agentId);
+        await fsPromises.mkdir(path.dirname(outputFile), { recursive: true });
+        await fsPromises.writeFile(outputFile, content, "utf-8");
+        return outputFile;
+    }
+
+    async runSubAgentInBackground({
+        sessionId,
+        parentRunId,
+        description,
+        prompt,
+        subagentType = "generalPurpose",
+        modelOverride = null,
+    }) {
+        const agentId = randomUUID();
+        const startedAt = new Date().toISOString();
+        const pending = [
+            "status: running",
+            `agent_id: ${agentId}`,
+            `description: ${description}`,
+            `started_at: ${startedAt}`,
+            "",
+            "Background sub-agent is still running.",
+        ].join("\n");
+        const outputFile = await this.writeSubAgentOutput(sessionId, agentId, pending);
+
+        void (async () => {
+            try {
+                const result = await this.runSubAgent({
+                    sessionId,
+                    parentRunId,
+                    description,
+                    prompt,
+                    subagentType,
+                    modelOverride,
+                });
+                await this.writeSubAgentOutput(
+                    sessionId,
+                    agentId,
+                    [
+                        "status: completed",
+                        `agent_id: ${agentId}`,
+                        `description: ${description}`,
+                        `started_at: ${startedAt}`,
+                        `completed_at: ${new Date().toISOString()}`,
+                        "",
+                        result,
+                    ].join("\n"),
+                );
+            } catch (error) {
+                await this.writeSubAgentOutput(
+                    sessionId,
+                    agentId,
+                    [
+                        "status: error",
+                        `agent_id: ${agentId}`,
+                        `description: ${description}`,
+                        `started_at: ${startedAt}`,
+                        `completed_at: ${new Date().toISOString()}`,
+                        "",
+                        `Error: ${error?.message || error}`,
+                    ].join("\n"),
+                );
+            }
+        })();
+
+        return JSON.stringify(
+            {
+                status: "async_launched",
+                agentId,
+                description,
+                outputFile,
+                canReadOutputFile: true,
+            },
+            null,
+            2,
+        );
+    }
+
+    async readSubAgentOutput({ sessionId, agentId }) {
+        if (!agentId) {
+            throw new Error("'agent_id' is required");
+        }
+        const outputFile = this.subAgentOutputPath(sessionId, agentId);
+        try {
+            return await fsPromises.readFile(outputFile, "utf-8");
+        } catch (error) {
+            if (error?.code === "ENOENT") {
+                return `TaskOutput: no background sub-agent output found for ${agentId}`;
+            }
+            throw error;
+        }
     }
 
     async sendUserMessage(

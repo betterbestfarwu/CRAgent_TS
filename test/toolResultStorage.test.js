@@ -62,6 +62,50 @@ test("maybePersistLargeToolResult persists large content to session tool-results
     assert.equal(fs.readFileSync(filePath, "utf-8").length, large.length);
 });
 
+test("persistToolResult stores text block arrays as json", async () => {
+    const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-toolres-json-"));
+    const sessionId = "sess-json";
+    const blocks = [
+        { type: "text", text: "first" },
+        { type: "text", text: "second" },
+    ];
+    const result = await persistToolResult(blocks, sessionsDir, sessionId, "call-json");
+
+    assert.equal(result.error, undefined);
+    assert.equal(result.isJson, true);
+    assert.match(result.filepath, /\.json$/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(result.filepath, "utf-8")), blocks);
+});
+
+test("persistToolResult rejects non-text block arrays", async () => {
+    const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-toolres-image-"));
+    const result = await persistToolResult(
+        [{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } }],
+        sessionsDir,
+        "sess-image",
+        "call-image",
+    );
+
+    assert.equal(result.error, "Cannot persist tool results containing non-text content");
+});
+
+test("maybePersistLargeToolResult falls back inline for non-text block arrays", async () => {
+    const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-toolres-inline-"));
+    const blocks = [
+        { type: "text", text: "x".repeat(DEFAULT_MAX_RESULT_SIZE_CHARS + 100) },
+        { type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+    ];
+    const out = await maybePersistLargeToolResult(blocks, {
+        toolName: "mcp__vision__capture",
+        toolUseId: "call-mixed",
+        maxResultSizeChars: DEFAULT_MAX_RESULT_SIZE_CHARS,
+        sessionsDir,
+        sessionId: "sess-inline",
+    });
+
+    assert.equal(out, blocks);
+});
+
 test("maybePersistLargeToolResult skips persistence for Infinity threshold", async () => {
     const large = "y".repeat(DEFAULT_MAX_RESULT_SIZE_CHARS + 50);
     const out = await maybePersistLargeToolResult(large, {

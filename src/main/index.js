@@ -561,6 +561,8 @@ function bootstrap() {
                 updateTodos: (sessionId, todos, merge, runId) =>
                     runtime.updateTodos(sessionId, todos, merge, runId),
                 runSubAgent: (args) => runtime.runSubAgent(args),
+                runSubAgentInBackground: (args) => runtime.runSubAgentInBackground(args),
+                readSubAgentOutput: (args) => runtime.readSubAgentOutput(args),
             });
             const planTools = createPlanModeTools({
                 sessionStore,
