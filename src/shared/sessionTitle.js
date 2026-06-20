@@ -37,3 +37,22 @@ export function titleFromFirstUserMessage(content) {
     }
     return trimmed.slice(0, 40);
 }
+
+export function titleFromAssistantReply(content) {
+    const trimmed = String(content || "").trim();
+    if (!trimmed) {
+        return null;
+    }
+    const firstSentence = trimmed.split(/[\r\n。！？.!?]+/u)[0]?.trim();
+    return (firstSentence || trimmed.replace(/\n/g, " ").trim()).slice(0, 40);
+}
+
+export function titleFromDefaultSessionMessage(message) {
+    if (message?.role === "user") {
+        return titleFromFirstUserMessage(message.userText || message.content);
+    }
+    if (message?.role === "assistant") {
+        return titleFromAssistantReply(message.content);
+    }
+    return null;
+}

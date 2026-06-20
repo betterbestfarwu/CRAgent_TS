@@ -5,7 +5,7 @@ import { DEFAULT_UI_MESSAGE_PAGE } from "@shared/sessionPaging.js";
 import {
     isDefaultSessionTitle,
     pickPlaceholderSession,
-    titleFromFirstUserMessage,
+    titleFromDefaultSessionMessage,
 } from "@shared/sessionTitle";
 import {
     appendMessageLine,
@@ -662,8 +662,8 @@ export class SessionStore {
             messageCount: (meta.messageCount ?? 0) + 1,
             hasUserMessages: meta.hasUserMessages || message.role === "user",
         };
-        if (message.role === "user" && isDefaultSessionTitle(meta.title)) {
-            const derived = titleFromFirstUserMessage(message.userText || message.content);
+        if (isDefaultSessionTitle(meta.title)) {
+            const derived = titleFromDefaultSessionMessage(message);
             if (derived) {
                 meta.title = derived;
             }

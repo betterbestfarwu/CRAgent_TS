@@ -87,6 +87,44 @@ describe("SessionStore.removeProject", () => {
         assert.equal(projectsOnDisk[0].sessions[0].name, "hello world");
     });
 
+    it("uses the first assistant sentence for image-only session titles", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-project-assistant-title-"));
+        const sessionsDir = path.join(dir, "sessions");
+        const projectsDir = path.join(dir, "Projects");
+        const projectsFile = path.join(dir, "projects.json");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+
+        const store = new SessionStore(
+            sessionsDir,
+            { providerKey: "openai", modelId: "gpt-4o-mini" },
+            projectsFile,
+            projectsDir,
+        );
+        const projectPath = path.join(dir, "proj");
+        fs.mkdirSync(projectPath, { recursive: true });
+        const project = store.addProject(projectPath);
+        const session = store.newSession({ projectId: project.id });
+        store.appendMessage(session.meta.id, {
+            id: "u1",
+            role: "user",
+            content: "",
+            userText: "",
+            images: [{ id: "img1", mimeType: "image/png", dataUrl: "data:image/png;base64,QUJD" }],
+            createdAt: new Date().toISOString(),
+        });
+
+        const afterAssistant = store.appendMessage(session.meta.id, {
+            id: "a1",
+            role: "assistant",
+            content: "这张图显示了登录错误。建议先检查账号状态。",
+            createdAt: new Date().toISOString(),
+        });
+
+        const projectsOnDisk = JSON.parse(fs.readFileSync(projectsFile, "utf-8"));
+        assert.equal(afterAssistant.meta.title, "这张图显示了登录错误");
+        assert.equal(projectsOnDisk[0].sessions[0].name, "这张图显示了登录错误");
+    });
+
     it("migrates legacy project sessions out of the global sessions dir", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-migrate-project-sessions-"));
         const sessionsDir = path.join(dir, "sessions");

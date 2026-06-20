@@ -1,7 +1,7 @@
 import {
   isDefaultSessionTitle,
   pickPlaceholderSession,
-  titleFromFirstUserMessage,
+  titleFromDefaultSessionMessage,
 } from "@shared/sessionTitle";
 import { DEFAULT_CONTEXT_CONFIG } from "@shared/contextConfig";
 import { formatHelpText, matchChatCommand } from "@shared/chatCommands";
@@ -587,7 +587,7 @@ export function installWebBridge() {
         const sessions = state.sessions.map((item) => {
           if (item.meta.id !== sessionId) return item;
           const title = isDefaultSessionTitle(item.meta.title)
-            ? titleFromFirstUserMessage(trimmed) || item.meta.title
+            ? titleFromDefaultSessionMessage(userMessage) || item.meta.title
             : item.meta.title;
           return {
             ...item,
@@ -616,9 +616,12 @@ export function installWebBridge() {
         updateState((state) => {
           const sessions = state.sessions.map((item) => {
             if (item.meta.id !== sessionId) return item;
+            const title = isDefaultSessionTitle(item.meta.title)
+              ? titleFromDefaultSessionMessage(assistantMessage) || item.meta.title
+              : item.meta.title;
             return {
               ...item,
-              meta: { ...item.meta, updatedAt: assistantMessage.createdAt },
+              meta: { ...item.meta, title, updatedAt: assistantMessage.createdAt },
               messages: [...item.messages, assistantMessage],
             };
           });

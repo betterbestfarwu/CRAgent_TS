@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+    titleFromAssistantReply,
     pickPlaceholderSession,
     titleFromFirstUserMessage,
 } from "../src/shared/sessionTitle.js";
@@ -22,6 +23,13 @@ test("titleFromFirstUserMessage trims and clips to 40 chars", () => {
 
 test("titleFromFirstUserMessage returns null for empty input", () => {
     assert.equal(titleFromFirstUserMessage("   "), null);
+});
+
+test("titleFromAssistantReply uses the first reply sentence", () => {
+    assert.equal(
+        titleFromAssistantReply("可以的。下面是分析内容。\n\n第二段"),
+        "可以的",
+    );
 });
 
 test("pickPlaceholderSession ignores default-title sessions with user messages", () => {

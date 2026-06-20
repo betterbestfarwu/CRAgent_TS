@@ -55,7 +55,7 @@ import { displayTitle } from "./sidebarUtils.js";
 import {
   isDefaultSessionTitle,
   sessionHasUserMessages,
-  titleFromFirstUserMessage,
+  titleFromDefaultSessionMessage,
 } from "@shared/sessionTitle";
 import { parseActiveSlashCommand, isActiveManualSlashCommand, isSlashKey } from "@shared/chatCommands.js";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
@@ -520,9 +520,8 @@ export function App() {
                   ...meta,
                   updatedAt: message.createdAt,
                   title:
-                    isDefaultSessionTitle(meta.title) &&
-                    message.role === "user"
-                      ? titleFromFirstUserMessage(message.content) || meta.title
+                    isDefaultSessionTitle(meta.title)
+                      ? titleFromDefaultSessionMessage(message) || meta.title
                       : meta.title,
                 }
               : meta,
