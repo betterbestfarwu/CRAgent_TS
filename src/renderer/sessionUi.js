@@ -4,7 +4,5 @@ export function sessionHasActiveSurface({ session, busy } = {}) {
 
 export function sessionShowsLoadOlder(session) {
   if (!session?.messages?.length) return false;
-  const loadedCount = session.messages.length;
-  const totalCount = session.meta?.messageCount ?? loadedCount;
-  return totalCount > loadedCount;
+  return session.meta?.hasMoreMessages === true;
 }

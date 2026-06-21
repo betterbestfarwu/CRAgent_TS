@@ -546,7 +546,8 @@ export function App() {
           ) {
             const messageCount =
               session.meta.messageCount ?? prev.meta.messageCount ?? mergedMessages.length;
-            const hasMoreMessages = messageCount > mergedMessages.length;
+            const hasMoreMessages =
+              session.meta.hasMoreMessages ?? prev.meta.hasMoreMessages ?? false;
             if (
               prev.meta.hasMoreMessages === hasMoreMessages &&
               prev.meta.messageCount === messageCount
@@ -560,13 +561,14 @@ export function App() {
           }
           const messageCount =
             session.meta.messageCount ?? mergedMessages.length;
+          const hasMoreMessages = session.meta.hasMoreMessages ?? false;
           return {
             ...session,
             messages: mergedMessages,
             meta: {
               ...session.meta,
               messageCount,
-              hasMoreMessages: messageCount > mergedMessages.length,
+              hasMoreMessages,
             },
           };
         });

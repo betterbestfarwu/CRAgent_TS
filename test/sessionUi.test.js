@@ -9,8 +9,18 @@ describe("sessionShowsLoadOlder", () => {
   it("hides the control when all messages are loaded", () => {
     assert.equal(
       sessionShowsLoadOlder({
-        meta: { messageCount: 2, hasMoreMessages: true },
+        meta: { messageCount: 2, hasMoreMessages: false },
         messages: [{ id: "m1" }, { id: "m2" }],
+      }),
+      false,
+    );
+  });
+
+  it("hides the control when the current page has no older cursor even if counts differ", () => {
+    assert.equal(
+      sessionShowsLoadOlder({
+        meta: { messageCount: 120, hasMoreMessages: false },
+        messages: Array.from({ length: 100 }, (_v, index) => ({ id: `m${index}` })),
       }),
       false,
     );
