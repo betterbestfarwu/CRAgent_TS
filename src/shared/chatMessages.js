@@ -179,6 +179,25 @@ function hasConversationMessages(messages) {
     return (messages || []).some((message) => !isContextDividerMessage(message));
 }
 
+function pruneContextDividersWithoutBothSides(messages) {
+    if (!messages?.length) {
+        return messages || [];
+    }
+
+    return messages.filter((message, index) => {
+        if (!isContextDividerMessage(message)) {
+            return true;
+        }
+        const hasConversationBefore = messages
+            .slice(0, index)
+            .some((item) => !isContextDividerMessage(item));
+        const hasConversationAfter = messages
+            .slice(index + 1)
+            .some((item) => !isContextDividerMessage(item));
+        return hasConversationBefore && hasConversationAfter;
+    });
+}
+
 function clearLlmContextMeta(meta) {
     delete meta.llmContextDividerId;
     delete meta.llmContextFromIndex;
@@ -248,7 +267,9 @@ export function reconcileLlmContextAfterMessageRemoval(session) {
         return session;
     }
 
-    messages = removeAdjacentDuplicateContextDividers(messages);
+    messages = pruneContextDividersWithoutBothSides(
+        removeAdjacentDuplicateContextDividers(messages),
+    );
     session.messages = messages;
 
     if (

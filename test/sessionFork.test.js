@@ -123,7 +123,7 @@ describe("SessionStore.forkSession", () => {
 });
 
 describe("SessionStore.removeMessages", () => {
-    it("keeps llmContextDividerId when deleting messages before divider", () => {
+    it("removes llmContextDividerId when deleting all messages before divider", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-remove-msg-"));
         const store = new SessionStore(dir, { providerKey: "openai", modelId: "gpt-4o-mini" });
         const source = store.newSession();
@@ -153,9 +153,9 @@ describe("SessionStore.removeMessages", () => {
         });
 
         const updated = store.removeMessages(source.meta.id, ["u0"]);
-        assert.equal(updated.messages.length, 2);
-        assert.equal(updated.messages[0].id, "d1");
-        assert.equal(updated.meta.llmContextDividerId, "d1");
+        assert.equal(updated.messages.length, 1);
+        assert.equal(updated.messages[0].id, "u1");
+        assert.equal(updated.meta.llmContextDividerId, undefined);
         assert.equal(updated.meta.llmContextFromIndex, undefined);
 
         const lines = fs
@@ -163,10 +163,11 @@ describe("SessionStore.removeMessages", () => {
             .trim()
             .split("\n")
             .map((line) => JSON.parse(line));
+        assert.equal(lines[0].id, "u1");
         assert.equal(lines[0].llmContextFromIndex, undefined);
     });
 
-    it("persists meta.llmContextDividerId to meta.json after deletion", () => {
+    it("removes meta.llmContextDividerId from meta.json after deleting all messages before divider", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-meta-sync-"));
         const store = new SessionStore(dir, { providerKey: "openai", modelId: "gpt-4o-mini" });
         const source = store.newSession();
@@ -203,11 +204,11 @@ describe("SessionStore.removeMessages", () => {
         });
 
         const updated = store.removeMessages(source.meta.id, ["u0", "u1"]);
-        assert.equal(updated.messages[0].id, "d1");
-        assert.equal(updated.meta.llmContextDividerId, "d1");
+        assert.equal(updated.messages[0].id, "u2");
+        assert.equal(updated.meta.llmContextDividerId, undefined);
 
         const metaOnDisk = JSON.parse(fs.readFileSync(metaFile(dir, source.meta.id), "utf-8"));
-        assert.equal(metaOnDisk.llmContextDividerId, "d1");
+        assert.equal(metaOnDisk.llmContextDividerId, undefined);
         assert.equal(metaOnDisk.llmContextFromIndex, undefined);
     });
 

@@ -187,7 +187,7 @@ test("collectMessagesUpToTurn keeps only prefix through selected turn", () => {
     );
 });
 
-test("reconcileLlmContextAfterMessageRemoval keeps llmContextDividerId when deleting before divider", () => {
+test("reconcileLlmContextAfterMessageRemoval removes divider when deleting all messages before it", () => {
     const dividerMessage = {
         id: "d1",
         role: CONTEXT_DIVIDER_ROLE,
@@ -203,9 +203,12 @@ test("reconcileLlmContextAfterMessageRemoval keeps llmContextDividerId when dele
     };
     session.messages = session.messages.filter((message) => message.id !== "u1");
     reconcileLlmContextAfterMessageRemoval(session);
-    assert.equal(session.meta.llmContextDividerId, "d1");
-    assert.equal(getActiveLlmContextStartIndex(session), 1);
-    assert.equal(dividerMessage.llmContextFromIndex, undefined);
+    assert.deepEqual(
+        session.messages.map((message) => message.id),
+        ["u2"],
+    );
+    assert.equal(session.meta.llmContextDividerId, undefined);
+    assert.equal(getActiveLlmContextStartIndex(session), 0);
 });
 
 test("reconcileLlmContextAfterMessageRemoval clears meta when dividers removed", () => {
