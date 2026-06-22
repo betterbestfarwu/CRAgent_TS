@@ -156,6 +156,19 @@ export function shouldComposerBackspaceRemoveChip(normalizedBefore, normalizedNo
 }
 
 /**
+ * Whether ArrowLeft should jump before a chip instead of moving one character left.
+ * @param {Node} textNode
+ * @param {number} offset
+ * @returns {boolean}
+ */
+export function shouldComposerArrowLeftJumpBeforeChip(textNode, offset) {
+    if (textNode.nodeType !== Node.TEXT_NODE) return false;
+    if (offset === 0) return true;
+    const raw = textNode.nodeValue ?? "";
+    return normalizeComposerEditorText(raw).length === 0;
+}
+
+/**
  * @param {Node} textNode
  * @param {number} offset
  * @template T
@@ -211,7 +224,26 @@ export function moveComposerCaretBeforeChipBeforeSelection(root) {
     if (!root) return false;
     const chip = findComposerChipNodeBeforeSelection(root);
     if (!chip) return false;
+    return placeComposerSelectionBeforeChip(root, chip);
+}
 
+/**
+ * @param {HTMLElement | null} root
+ * @returns {boolean}
+ */
+export function moveComposerCaretLeftBeforeChipIfNeeded(root) {
+    if (!root) return false;
+    const chip = findComposerChipNodeBeforeSelectionForArrowLeft(root);
+    if (!chip) return false;
+    return placeComposerSelectionBeforeChip(root, chip);
+}
+
+/**
+ * @param {HTMLElement} root
+ * @param {HTMLElement} chip
+ * @returns {boolean}
+ */
+function placeComposerSelectionBeforeChip(root, chip) {
     const range = document.createRange();
     range.setStartBefore(chip);
     range.collapse(true);
@@ -263,6 +295,70 @@ function findComposerChipNodeBeforeSelection(root) {
     if (node === root && offset > 0) {
         const previous = root.childNodes[offset - 1];
         return findComposerChipOnNode(skipEmptyComposerTextSiblings(previous));
+    }
+
+    return null;
+}
+
+/**
+ * @param {HTMLElement | null} root
+ * @returns {HTMLElement | null}
+ */
+function findComposerChipNodeBeforeSelectionForArrowLeft(root) {
+    if (!root) return null;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed || !root.contains(range.startContainer)) return null;
+
+    let node = range.startContainer;
+    let offset = range.startOffset;
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = /** @type {HTMLElement} */ (node);
+        if (offset > 0) {
+            const previous = element.childNodes[offset - 1];
+            const chip = findComposerChipOnNode(skipEmptyComposerTextSiblings(previous));
+            if (chip) return chip;
+        }
+        if (offset === 0 && element.classList?.contains("composer-at-chip")) {
+            return element;
+        }
+    }
+
+    if (node.nodeType === Node.TEXT_NODE && offset === 0) {
+        return findComposerChipBeforeTextCursorForArrowLeft(node, 0, findComposerChipOnNode);
+    }
+
+    if (node.nodeType === Node.TEXT_NODE && offset > 0) {
+        return findComposerChipBeforeTextCursorForArrowLeft(node, offset, findComposerChipOnNode);
+    }
+
+    if (node === root && offset > 0) {
+        const previous = root.childNodes[offset - 1];
+        return findComposerChipOnNode(skipEmptyComposerTextSiblings(previous));
+    }
+
+    return null;
+}
+
+/**
+ * @param {Node} textNode
+ * @param {number} offset
+ * @template T
+ * @param {(node: Node | null | undefined) => T | null} findIdOnNode
+ * @returns {T | null}
+ */
+function findComposerChipBeforeTextCursorForArrowLeft(textNode, offset, findIdOnNode) {
+    if (textNode.nodeType !== Node.TEXT_NODE) return null;
+
+    if (offset === 0) {
+        return findIdOnNode(skipEmptyComposerTextSiblings(textNode.previousSibling));
+    }
+
+    if (offset > 0 && shouldComposerArrowLeftJumpBeforeChip(textNode, offset)) {
+        return findIdOnNode(skipEmptyComposerTextSiblings(textNode.previousSibling));
     }
 
     return null;

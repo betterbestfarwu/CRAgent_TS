@@ -21,7 +21,9 @@ import {
     COMPOSER_CARET_ZWSP,
     getComposerChipAfterSelection,
     moveComposerCaretBeforeChipBeforeSelection,
+    moveComposerCaretLeftBeforeChipIfNeeded,
     normalizeComposerEditorText,
+    shouldComposerArrowLeftJumpBeforeChip,
     shouldComposerBackspaceRemoveChip,
 } from "@shared/composerEditor.js";
 
@@ -350,6 +352,40 @@ describe("shouldComposerBackspaceRemoveChip", () => {
     });
 });
 
+describe("shouldComposerArrowLeftJumpBeforeChip", () => {
+    function withFakeDom(testBody) {
+        const originalNode = globalThis.Node;
+        try {
+            globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 };
+            testBody();
+        } finally {
+            globalThis.Node = originalNode;
+        }
+    }
+
+    it("jumps before chip at the start of trailing text", () => {
+        withFakeDom(() => {
+            assert.equal(shouldComposerArrowLeftJumpBeforeChip({ nodeType: 3, nodeValue: " hello" }, 0), true);
+        });
+    });
+
+    it("does not jump when visible text remains to the left inside the node", () => {
+        withFakeDom(() => {
+            assert.equal(shouldComposerArrowLeftJumpBeforeChip({ nodeType: 3, nodeValue: " hello" }, 1), false);
+            assert.equal(shouldComposerArrowLeftJumpBeforeChip({ nodeType: 3, nodeValue: "hello" }, 3), false);
+        });
+    });
+
+    it("jumps from zwsp-only caret anchor after chip", () => {
+        withFakeDom(() => {
+            assert.equal(
+                shouldComposerArrowLeftJumpBeforeChip({ nodeType: 3, nodeValue: COMPOSER_CARET_ZWSP }, 1),
+                true,
+            );
+        });
+    });
+});
+
 describe("moveComposerCaretBeforeChipBeforeSelection", () => {
     function withFakeDom(testBody) {
         const originalNode = globalThis.Node;
@@ -461,6 +497,113 @@ describe("moveComposerCaretBeforeChipBeforeSelection", () => {
             };
             assert.equal(moveComposerCaretBeforeChipBeforeSelection(root), true);
             assert.equal(selection.addedRange.before, first);
+        });
+    });
+});
+
+describe("moveComposerCaretLeftBeforeChipIfNeeded", () => {
+    function withFakeDom(testBody) {
+        const originalNode = globalThis.Node;
+        const originalWindow = globalThis.window;
+        const originalDocument = globalThis.document;
+        try {
+            globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 };
+            testBody();
+        } finally {
+            globalThis.Node = originalNode;
+            globalThis.window = originalWindow;
+            globalThis.document = originalDocument;
+        }
+    }
+
+    function createFakeChip(id) {
+        return {
+            nodeType: 1,
+            classList: { contains: (name) => name === "composer-at-chip" },
+            dataset: { mentionId: id },
+        };
+    }
+
+    function installFakeSelection(range) {
+        const selection = {
+            rangeCount: 1,
+            range,
+            removed: false,
+            addedRange: null,
+            getRangeAt() {
+                return this.range;
+            },
+            removeAllRanges() {
+                this.removed = true;
+            },
+            addRange(nextRange) {
+                this.addedRange = nextRange;
+            },
+        };
+        globalThis.window = { getSelection: () => selection };
+        globalThis.document = {
+            createRange: () => ({
+                before: null,
+                collapsed: false,
+                setStartBefore(node) {
+                    this.before = node;
+                },
+                collapse(value) {
+                    this.collapsed = value;
+                },
+            }),
+        };
+        return selection;
+    }
+
+    it("places the selection before the chip behind the caret", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("m1");
+            const anchor = {
+                nodeType: 3,
+                nodeValue: COMPOSER_CARET_ZWSP,
+                textContent: COMPOSER_CARET_ZWSP,
+                previousSibling: chip,
+            };
+            const root = {
+                nodeType: 1,
+                childNodes: [chip, anchor],
+                contains: (node) => node === root || node === chip || node === anchor,
+                focus() {},
+            };
+            const selection = installFakeSelection({
+                collapsed: true,
+                startContainer: anchor,
+                startOffset: 1,
+            });
+
+            assert.equal(moveComposerCaretLeftBeforeChipIfNeeded(root), true);
+            assert.equal(selection.addedRange.before, chip);
+        });
+    });
+
+    it("does not skip visible text when moving left inside trailing text", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("m1");
+            const trailing = {
+                nodeType: 3,
+                nodeValue: " hello",
+                textContent: " hello",
+                previousSibling: chip,
+            };
+            const root = {
+                nodeType: 1,
+                childNodes: [chip, trailing],
+                contains: (node) => node === root || node === chip || node === trailing,
+                focus() {},
+            };
+            installFakeSelection({
+                collapsed: true,
+                startContainer: trailing,
+                startOffset: 1,
+            });
+
+            assert.equal(moveComposerCaretLeftBeforeChipIfNeeded(root), false);
         });
     });
 });

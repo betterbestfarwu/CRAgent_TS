@@ -30,6 +30,7 @@ import {
   getComposerChipAfterSelection,
   getComposerEditorCaretOffset,
   moveComposerCaretBeforeChipBeforeSelection,
+  moveComposerCaretLeftBeforeChipIfNeeded,
   placeComposerCaretAtEnd,
   placeComposerCaretAtOffset,
 } from "@shared/composerEditor.js";
@@ -2184,6 +2185,18 @@ export function App() {
                       if (chipAfter?.fileId) {
                         e.preventDefault();
                         removePendingFile(chipAfter.fileId);
+                        return;
+                      }
+                    }
+                    if (
+                      e.key === "ArrowLeft" &&
+                      segment?.contentEditable &&
+                      !(showAtMenu && atNavItems.length && atBrowseRelativePath)
+                    ) {
+                      const editor = e.currentTarget;
+                      if (moveComposerCaretLeftBeforeChipIfNeeded(editor)) {
+                        e.preventDefault();
+                        setComposerCaret(getComposerEditorCaretOffset(editor));
                         return;
                       }
                     }
