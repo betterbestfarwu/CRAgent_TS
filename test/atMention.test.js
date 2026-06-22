@@ -11,6 +11,7 @@ import {
     buildInputWithAtMentions,
     isActiveManualAtMention,
     isAtSignKey,
+    normalizeAtMentions,
     parentRelativePath,
     parseActiveAtMention,
     splitAtQueryPath,
@@ -228,6 +229,21 @@ describe("buildInputWithAtMentions", () => {
         assert.equal(
             buildInputWithAtMentions("", [{ name: "App.jsx", relativePath: "src/App.jsx" }]),
             "@src/App.jsx",
+        );
+    });
+});
+
+describe("normalizeAtMentions", () => {
+    it("preserves insertAt so history bubbles can match composer order", () => {
+        assert.deepEqual(
+            normalizeAtMentions([
+                { name: "AirStreamClient.cs", relativePath: "AirStreamClient.cs", insertAt: 5 },
+                { name: "RTCStatistics.cs", relativePath: "RTCStatistics.cs", insertAt: 9 },
+            ]),
+            [
+                { name: "AirStreamClient.cs", relativePath: "AirStreamClient.cs", insertAt: 5 },
+                { name: "RTCStatistics.cs", relativePath: "RTCStatistics.cs", insertAt: 9 },
+            ],
         );
     });
 });

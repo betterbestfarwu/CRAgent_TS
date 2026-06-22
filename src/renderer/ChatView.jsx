@@ -128,6 +128,7 @@ function toWireMessage(message, planContext, sessionId) {
                 at_mentions: message.atMentions.map((mention) => ({
                   name: mention.name,
                   relative_path: mention.relativePath,
+                  ...(typeof mention.insertAt === "number" ? { insert_at: mention.insertAt } : {}),
                 })),
               }
             : {}),

@@ -441,7 +441,12 @@ export function normalizeAtMentions(mentions) {
             const relativePath = String(mention?.relativePath ?? mention?.relative_path ?? "").trim();
             if (!relativePath) return null;
             const name = String(mention?.name ?? "").trim() || atMentionFileName(relativePath);
-            return { name, relativePath };
+            const rawInsertAt = mention?.insertAt ?? mention?.insert_at;
+            const normalized = { name, relativePath };
+            if (typeof rawInsertAt === "number" && Number.isFinite(rawInsertAt)) {
+                normalized.insertAt = Math.max(0, rawInsertAt);
+            }
+            return normalized;
         })
         .filter(Boolean);
 }

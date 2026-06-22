@@ -1276,6 +1276,22 @@
     }
   }
 
+  function resolveMentionInsertAt(mention, textLength) {
+    var raw = mention && (typeof mention.insert_at === 'number' ? mention.insert_at : mention.insertAt);
+    if (typeof raw === 'number' && isFinite(raw)) {
+      return Math.max(0, Math.min(raw, textLength));
+    }
+    return textLength;
+  }
+
+  function appendUserMentionChip(parent, mention) {
+    var chip = document.createElement('span');
+    chip.className = 'msg-at-chip';
+    chip.title = mention.relative_path || mention.name || '';
+    chip.textContent = String(mention.name || '').replace(/^@+/, '');
+    parent.appendChild(chip);
+  }
+
   function appendUserBubbleContent(bubble, msg) {
     var mentions = msg.at_mentions || [];
     var userText = String(msg.user_text || msg.content || '').trim();
@@ -1284,22 +1300,35 @@
     if (mentions.length) {
       var body = document.createElement('div');
       body.className = 'msg-user-body';
-      if (userText) {
-        var text = document.createElement('span');
-        text.className = 'msg-text msg-text--plain';
-        text.textContent = userText;
-        body.appendChild(text);
-      }
-      var chips = document.createElement('div');
-      chips.className = 'msg-at-chips';
-      mentions.forEach(function (mention) {
-        var chip = document.createElement('span');
-        chip.className = 'msg-at-chip';
-        chip.title = mention.relative_path || mention.name || '';
-        chip.textContent = String(mention.name || '').replace(/^@+/, '');
-        chips.appendChild(chip);
+      var textLength = userText.length;
+      var sortedMentions = mentions
+        .map(function (mention, index) {
+          return {
+            mention: mention,
+            insertAt: resolveMentionInsertAt(mention, textLength),
+            index: index,
+          };
+        })
+        .sort(function (a, b) {
+          return a.insertAt - b.insertAt || a.index - b.index;
+        });
+      var cursor = 0;
+      sortedMentions.forEach(function (item) {
+        if (item.insertAt > cursor) {
+          var text = document.createElement('span');
+          text.className = 'msg-text msg-text--plain';
+          text.textContent = userText.slice(cursor, item.insertAt);
+          body.appendChild(text);
+          cursor = item.insertAt;
+        }
+        appendUserMentionChip(body, item.mention);
       });
-      body.appendChild(chips);
+      if (cursor < textLength) {
+        var suffix = document.createElement('span');
+        suffix.className = 'msg-text msg-text--plain';
+        suffix.textContent = userText.slice(cursor);
+        body.appendChild(suffix);
+      }
       bubble.appendChild(body);
       appendSystemHintBlock(bubble, systemHint);
       appendMessageImages(bubble, msg);

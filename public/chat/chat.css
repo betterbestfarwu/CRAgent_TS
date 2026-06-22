@@ -1171,8 +1171,10 @@ html[data-theme="dark"] .plan-preview-expand-btn:hover {
 
 .msg-user-body {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 6px;
   min-width: 0;
 }
 
