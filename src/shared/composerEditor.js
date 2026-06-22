@@ -187,6 +187,23 @@ export function getComposerMentionBeforeSelection(root) {
 }
 
 /**
+ * Non-editable mention/file chip immediately after the collapsed selection.
+ * @param {HTMLElement | null} root
+ * @returns {{ mentionId?: string, fileId?: string } | null}
+ */
+export function getComposerChipAfterSelection(root) {
+    const chip = findComposerChipNodeAfterSelection(root);
+    if (!chip) return null;
+    if (chip.dataset?.mentionId) {
+        return { mentionId: chip.dataset.mentionId };
+    }
+    if (chip.dataset?.fileId) {
+        return { fileId: chip.dataset.fileId };
+    }
+    return null;
+}
+
+/**
  * @param {HTMLElement | null} root
  * @returns {boolean}
  */
@@ -246,6 +263,42 @@ function findComposerChipNodeBeforeSelection(root) {
     if (node === root && offset > 0) {
         const previous = root.childNodes[offset - 1];
         return findComposerChipOnNode(skipEmptyComposerTextSiblings(previous));
+    }
+
+    return null;
+}
+
+/**
+ * @param {HTMLElement | null} root
+ * @returns {HTMLElement | null}
+ */
+function findComposerChipNodeAfterSelection(root) {
+    if (!root) return null;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed || !root.contains(range.startContainer)) return null;
+
+    const node = range.startContainer;
+    const offset = range.startOffset;
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = /** @type {HTMLElement} */ (node);
+        return findComposerChipOnNode(element.childNodes[offset]);
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+        const raw = node.nodeValue ?? "";
+        if (offset < raw.length) return null;
+
+        let next = node.nextSibling;
+        while (next?.nodeType === Node.TEXT_NODE && !normalizeComposerEditorText(next.textContent ?? "").length) {
+            const chip = findComposerChipOnNode(next.nextSibling);
+            if (chip) return chip;
+            next = next.nextSibling;
+        }
+        return findComposerChipOnNode(next);
     }
 
     return null;
@@ -427,10 +480,15 @@ export function placeComposerCaretAtOffset(root, targetOffset) {
         if (node.nodeType !== Node.ELEMENT_NODE) return;
 
         const el = /** @type {HTMLElement} */ (node);
-        if (el.dataset?.fileId && el.classList.contains("composer-file-chip")) {
-            return;
-        }
-        if (el.dataset?.mentionId && el.classList.contains("composer-at-chip")) {
+        if (
+            (el.dataset?.fileId && el.classList.contains("composer-file-chip")) ||
+            (el.dataset?.mentionId && el.classList.contains("composer-at-chip"))
+        ) {
+            if (goal <= cursor) {
+                range.setStartBefore(node);
+                range.collapse(true);
+                placed = true;
+            }
             return;
         }
 
@@ -458,8 +516,14 @@ export function placeComposerCaretAtOffset(root, targetOffset) {
 
     const children = Array.from(root.childNodes);
     for (let index = 0; index < children.length; index += 1) {
-        visit(children[index], index < children.length - 1);
         if (placed) break;
+        if (goal <= cursor) {
+            range.setStart(root, index);
+            range.collapse(true);
+            placed = true;
+            break;
+        }
+        visit(children[index], index < children.length - 1);
     }
 
     if (!placed) {

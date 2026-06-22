@@ -19,6 +19,7 @@ import {
 import { expandAtMentionsToAbsolute } from "../src/main/atMentionExpand.js";
 import {
     COMPOSER_CARET_ZWSP,
+    getComposerChipAfterSelection,
     moveComposerCaretBeforeChipBeforeSelection,
     normalizeComposerEditorText,
     shouldComposerBackspaceRemoveChip,
@@ -460,6 +461,103 @@ describe("moveComposerCaretBeforeChipBeforeSelection", () => {
             };
             assert.equal(moveComposerCaretBeforeChipBeforeSelection(root), true);
             assert.equal(selection.addedRange.before, first);
+        });
+    });
+});
+
+describe("getComposerChipAfterSelection", () => {
+    function withFakeDom(testBody) {
+        const originalNode = globalThis.Node;
+        const originalWindow = globalThis.window;
+        try {
+            globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 };
+            testBody();
+        } finally {
+            globalThis.Node = originalNode;
+            globalThis.window = originalWindow;
+        }
+    }
+
+    function createFakeChip(id, kind = "mention") {
+        return {
+            nodeType: 1,
+            classList: { contains: (name) => name === "composer-at-chip" },
+            dataset: kind === "file" ? { fileId: id } : { mentionId: id },
+        };
+    }
+
+    it("detects chip immediately after a collapsed root selection", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("m1");
+            const root = {
+                nodeType: 1,
+                childNodes: [chip],
+                contains: (node) => node === root || node === chip,
+            };
+            globalThis.window = {
+                getSelection: () => ({
+                    rangeCount: 1,
+                    getRangeAt: () => ({
+                        collapsed: true,
+                        startContainer: root,
+                        startOffset: 0,
+                    }),
+                }),
+            };
+
+            assert.deepEqual(getComposerChipAfterSelection(root), { mentionId: "m1" });
+        });
+    });
+
+    it("detects file chip after caret positioned before it", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("f1", "file");
+            const root = {
+                nodeType: 1,
+                childNodes: [chip],
+                contains: (node) => node === root || node === chip,
+            };
+            globalThis.window = {
+                getSelection: () => ({
+                    rangeCount: 1,
+                    getRangeAt: () => ({
+                        collapsed: true,
+                        startContainer: root,
+                        startOffset: 0,
+                    }),
+                }),
+            };
+
+            assert.deepEqual(getComposerChipAfterSelection(root), { fileId: "f1" });
+        });
+    });
+
+    it("returns null when caret is inside trailing text after chip", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("m1");
+            const anchor = {
+                nodeType: 3,
+                nodeValue: COMPOSER_CARET_ZWSP,
+                textContent: COMPOSER_CARET_ZWSP,
+                previousSibling: chip,
+                nextSibling: null,
+            };
+            const root = {
+                childNodes: [chip, anchor],
+                contains: (node) => node === chip || node === anchor,
+            };
+            globalThis.window = {
+                getSelection: () => ({
+                    rangeCount: 1,
+                    getRangeAt: () => ({
+                        collapsed: true,
+                        startContainer: anchor,
+                        startOffset: 0,
+                    }),
+                }),
+            };
+
+            assert.equal(getComposerChipAfterSelection(root), null);
         });
     });
 });

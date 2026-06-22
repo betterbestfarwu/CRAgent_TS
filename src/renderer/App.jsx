@@ -27,6 +27,7 @@ import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
 import { useFileIcons } from "./useFileIcons.js";
 import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
+  getComposerChipAfterSelection,
   getComposerEditorCaretOffset,
   moveComposerCaretBeforeChipBeforeSelection,
   placeComposerCaretAtEnd,
@@ -2168,9 +2169,21 @@ export function App() {
                     onKeyDown={(e, segment) => {
                     noteManualComposerTriggerStart(e, segment);
                     if (e.key === "Backspace" && segment?.contentEditable) {
-                      if (moveComposerCaretBeforeChipBeforeSelection(e.currentTarget)) {
+                      const editor = e.currentTarget;
+                      if (moveComposerCaretBeforeChipBeforeSelection(editor)) {
                         e.preventDefault();
-                        setComposerCaret(getComposerEditorCaretOffset(e.currentTarget));
+                        setComposerCaret(getComposerEditorCaretOffset(editor));
+                        return;
+                      }
+                      const chipAfter = getComposerChipAfterSelection(editor);
+                      if (chipAfter?.mentionId) {
+                        e.preventDefault();
+                        removePendingAtMention(chipAfter.mentionId);
+                        return;
+                      }
+                      if (chipAfter?.fileId) {
+                        e.preventDefault();
+                        removePendingFile(chipAfter.fileId);
                         return;
                       }
                     }
