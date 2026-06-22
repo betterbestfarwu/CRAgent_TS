@@ -194,9 +194,6 @@ export function shouldComposerBackspaceRemoveChip(normalizedBefore, normalizedNo
     if (!normalizedNode.length) {
         return true;
     }
-    if (!/^\s*$/.test(normalizedNode)) {
-        return false;
-    }
     return normalizedBefore.length === 0 || /^\s+$/.test(normalizedBefore);
 }
 

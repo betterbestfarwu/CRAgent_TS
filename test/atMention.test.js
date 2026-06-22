@@ -322,8 +322,13 @@ describe("shouldComposerBackspaceRemoveChip", () => {
     });
 
     it("does not remove chip when user typed visible text after mention", () => {
-        assert.equal(shouldComposerBackspaceRemoveChip(" ", " hello"), false);
+        assert.equal(shouldComposerBackspaceRemoveChip(" hello", " hello"), false);
         assert.equal(shouldComposerBackspaceRemoveChip("hello", "hello"), false);
+    });
+
+    it("removes chip when caret is between chip filler and later visible text", () => {
+        assert.equal(shouldComposerBackspaceRemoveChip("", "hello"), true);
+        assert.equal(shouldComposerBackspaceRemoveChip(" ", " hello"), true);
     });
 });
 
