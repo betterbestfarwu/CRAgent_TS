@@ -68,9 +68,18 @@ export function buildLlmRequestUrl(provider) {
     return `${baseUrl}/${api}`;
 }
 
-async function fetchLlmResponse(provider, body, { signal, timeoutMs }) {
+async function fetchLlmResponse(provider, body, { signal, timeoutMs, logger, kind, model }) {
     const url = buildLlmRequestUrl(provider);
     console.log(`[CRAgent][LLM] request url: ${url}`);
+    const startedAt = Date.now();
+    await logger?.info?.("llm.request.start", {
+        kind,
+        url,
+        model: model ? `${model.providerKey}/${model.modelId}` : body.model,
+        messageCount: body.messages?.length || 0,
+        toolCount: body.tools?.length || 0,
+        timeoutMs,
+    });
     const { signal: requestSignal, didTimeout, cleanup } = createLlmRequestSignal(
         signal,
         timeoutMs,
@@ -85,8 +94,25 @@ async function fetchLlmResponse(provider, body, { signal, timeoutMs }) {
             body: JSON.stringify(body),
             signal: requestSignal,
         });
+        await logger?.info?.("llm.request.finish", {
+            kind,
+            url,
+            model: model ? `${model.providerKey}/${model.modelId}` : body.model,
+            status: response.status,
+            ok: response.ok,
+            durationMs: Date.now() - startedAt,
+        });
         return response;
     } catch (error) {
+        await logger?.error?.("llm.request.error", {
+            kind,
+            url,
+            model: model ? `${model.providerKey}/${model.modelId}` : body.model,
+            name: error?.name,
+            message: error instanceof Error ? error.message : String(error),
+            didTimeout: didTimeout(),
+            durationMs: Date.now() - startedAt,
+        });
         if (error?.name === "AbortError" && didTimeout() && !signal?.aborted) {
             throw new Error(`模型请求超时（${Math.round(timeoutMs / 1000)}秒）`);
         }
@@ -320,7 +346,7 @@ function sanitizeForLog(value) {
     return value;
 }
 
-function logOutgoingMessages(kind, model, messages, extra = {}) {
+function logOutgoingMessages(kind, model, messages, extra = {}, logger = null) {
     const payload = {
         kind,
         model: `${model.providerKey}/${model.modelId}`,
@@ -329,6 +355,7 @@ function logOutgoingMessages(kind, model, messages, extra = {}) {
         ...extra,
     };
     console.log("[CRAgent][LLM] outgoing messages\n" + JSON.stringify(payload, null, 2));
+    void logger?.info?.("llm.request.payload", payload);
 }
 
 function extractTokenUsage(data) {
@@ -362,6 +389,7 @@ export class LlmClient {
         this.onTokenUsage = options.onTokenUsage;
         this.resolveRequestTimeoutMs = options.resolveRequestTimeoutMs;
         this.resolveTemperature = options.resolveTemperature;
+        this.diagnosticLogger = options.diagnosticLogger;
         this.requestTimeoutMs =
             options.requestTimeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
         this.temperature = options.temperature ?? DEFAULT_LLM_TEMPERATURE;
@@ -410,11 +438,14 @@ export class LlmClient {
         logOutgoingMessages("complete", model, body.messages, {
             url,
             temperature: body.temperature,
-        });
+        }, this.diagnosticLogger);
 
         const response = await fetchLlmResponse(provider, body, {
             signal,
             timeoutMs: this.getRequestTimeoutMs(),
+            logger: this.diagnosticLogger,
+            kind: "complete",
+            model,
         });
 
         if (!response.ok) {
@@ -504,11 +535,14 @@ export class LlmClient {
             url,
             toolCount: tools.length,
             temperature: body.temperature,
-        });
+        }, this.diagnosticLogger);
 
         const response = await fetchLlmResponse(provider, body, {
             signal,
             timeoutMs: this.getRequestTimeoutMs(),
+            logger: this.diagnosticLogger,
+            kind: "chat",
+            model,
         });
 
         if (!response.ok) {

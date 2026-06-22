@@ -73,6 +73,12 @@ function makeRuntimeHarness(options = {}) {
 
     const llmCalls = [];
     const llmCompleteCalls = [];
+    const diagnosticEvents = [];
+    const diagnosticLogger = {
+        info: async (event, fields) => diagnosticEvents.push({ level: "info", event, ...fields }),
+        warn: async (event, fields) => diagnosticEvents.push({ level: "warn", event, ...fields }),
+        error: async (event, fields) => diagnosticEvents.push({ level: "error", event, ...fields }),
+    };
     const llmClient = {
         chat: async (args) => {
             llmCalls.push(args);
@@ -124,6 +130,7 @@ function makeRuntimeHarness(options = {}) {
         { bootstrapSystemContent: () => "" },
         { systemPromptSection: () => "", listSummaries: () => [], reload: () => {} },
         () => null,
+        diagnosticLogger,
     );
 
     runtime.emit = (channel, payload) => {
@@ -144,6 +151,7 @@ function makeRuntimeHarness(options = {}) {
         llmCalls,
         llmCompleteCalls,
         toolRegistry,
+        diagnosticEvents,
     };
 }
 
@@ -1129,4 +1137,43 @@ test("cancelRun does not block the next user message from running the LLM", asyn
     );
 
     releaseFirst();
+});
+
+test("runLoop emits diagnostic logs for run progress", async () => {
+    const { session, runtime, diagnosticEvents } = makeRuntimeHarness();
+
+    await runtime.sendUserMessage(session.meta.id, "hello");
+
+    assert.ok(
+        diagnosticEvents.some(
+            (entry) =>
+                entry.event === "agent.run.start" &&
+                entry.sessionId === session.meta.id &&
+                entry.runId,
+        ),
+    );
+    assert.ok(
+        diagnosticEvents.some(
+            (entry) =>
+                entry.event === "agent.run.round.start" &&
+                entry.sessionId === session.meta.id &&
+                entry.round === 1,
+        ),
+    );
+    assert.ok(
+        diagnosticEvents.some(
+            (entry) =>
+                entry.event === "agent.llm.response" &&
+                entry.sessionId === session.meta.id &&
+                entry.assistantMessageId === "assistant-1",
+        ),
+    );
+    assert.ok(
+        diagnosticEvents.some(
+            (entry) =>
+                entry.event === "agent.run.finish" &&
+                entry.sessionId === session.meta.id &&
+                entry.reason === "assistant_message",
+        ),
+    );
 });

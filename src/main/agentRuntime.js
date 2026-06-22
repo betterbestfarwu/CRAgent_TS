@@ -113,7 +113,16 @@ const HOOK_LOG_LIMIT = 80;
 const SUB_AGENT_OUTPUTS_DIR = "sub-agent-outputs";
 
 export class AgentRuntime {
-    constructor(sessionStore, configStore, llmClient, toolRegistry, workspaceMemory, skillLoader, mainWindowGetter) {
+    constructor(
+        sessionStore,
+        configStore,
+        llmClient,
+        toolRegistry,
+        workspaceMemory,
+        skillLoader,
+        mainWindowGetter,
+        diagnosticLogger = null,
+    ) {
         this.sessionStore = sessionStore;
         this.configStore = configStore;
         this.llmClient = llmClient;
@@ -121,6 +130,7 @@ export class AgentRuntime {
         this.workspaceMemory = workspaceMemory;
         this.skillLoader = skillLoader;
         this.mainWindowGetter = mainWindowGetter;
+        this.diagnosticLogger = diagnosticLogger;
         this.busyBySession = new Map();
         this.compactingSessions = new Set();
         this.autoCompactTimers = new Map();
@@ -165,6 +175,30 @@ export class AgentRuntime {
 
     emit(channel, payload) {
         this.mainWindowGetter()?.webContents.send(channel, ipcPayloadForRenderer(channel, payload));
+    }
+
+    async logDiagnostic(level, event, fields = {}) {
+        const writer = this.diagnosticLogger?.[level];
+        if (typeof writer !== "function") {
+            return;
+        }
+        try {
+            await writer(event, fields);
+        } catch (error) {
+            console.warn("[CRAgent][Log] diagnostic logger failed:", error);
+        }
+    }
+
+    logInfo(event, fields = {}) {
+        return this.logDiagnostic("info", event, fields);
+    }
+
+    logWarn(event, fields = {}) {
+        return this.logDiagnostic("warn", event, fields);
+    }
+
+    logError(event, fields = {}) {
+        return this.logDiagnostic("error", event, fields);
     }
 
     getHookLogs(sessionId) {
@@ -520,6 +554,7 @@ export class AgentRuntime {
 
     cancelRun(sessionId) {
         const runId = this.activeRunIdBySession.get(sessionId);
+        void this.logWarn("agent.run.cancel", { sessionId, runId });
         if (runId) {
             this.cancelledRunIds.add(runId);
         }
@@ -651,8 +686,22 @@ export class AgentRuntime {
         const toolName = call.function.name;
         let toolInput = this.parseToolCallArguments(call);
         if (toolInput === null) {
+            await this.logWarn("agent.tool.invalid_arguments", {
+                sessionId,
+                runId: context.runId,
+                toolName,
+                toolCallId: call.id,
+            });
             return `Error: invalid tool arguments`;
         }
+        const startedAt = Date.now();
+        await this.logInfo("agent.tool.start", {
+            sessionId,
+            runId: context.runId,
+            toolName,
+            toolCallId: call.id,
+            isSubAgent: Boolean(context.isSubAgent),
+        });
 
         if (context.planMode) {
             const { filePath: planFilePath, workspace } = this.resolveSessionPlan(sessionId);
@@ -664,6 +713,15 @@ export class AgentRuntime {
                 sessionId,
             );
             if (planError) {
+                await this.logWarn("agent.tool.finish", {
+                    sessionId,
+                    runId: context.runId,
+                    toolName,
+                    toolCallId: call.id,
+                    status: "blocked",
+                    reason: "plan_mode_policy",
+                    durationMs: Date.now() - startedAt,
+                });
                 return planError;
             }
         }
@@ -680,6 +738,15 @@ export class AgentRuntime {
                 { matchQuery: String(toolInput.command), signal },
             );
             if (shellHook.blocked) {
+                await this.logWarn("agent.tool.finish", {
+                    sessionId,
+                    runId: context.runId,
+                    toolName,
+                    toolCallId: call.id,
+                    status: "blocked",
+                    reason: "shell_hook",
+                    durationMs: Date.now() - startedAt,
+                });
                 return `Error: ${shellHook.reason || "Blocked by shell hook"}`;
             }
         }
@@ -695,6 +762,15 @@ export class AgentRuntime {
             { matchQuery: toolName, signal },
         );
         if (preHook.blocked) {
+            await this.logWarn("agent.tool.finish", {
+                sessionId,
+                runId: context.runId,
+                toolName,
+                toolCallId: call.id,
+                status: "blocked",
+                reason: "pre_tool_hook",
+                durationMs: Date.now() - startedAt,
+            });
             return `Error: ${preHook.reason || "Blocked by hook"}`;
         }
         if (preHook.updatedInput) {
@@ -708,11 +784,35 @@ export class AgentRuntime {
             };
         }
 
-        let result = await this.toolRegistry.execute(call, context);
+        let result;
+        try {
+            result = await this.toolRegistry.execute(call, context);
+        } catch (error) {
+            await this.logError("agent.tool.finish", {
+                sessionId,
+                runId: context.runId,
+                toolName,
+                toolCallId: call.id,
+                status: "exception",
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+                durationMs: Date.now() - startedAt,
+            });
+            throw error;
+        }
         let normalized = normalizeToolResult(result);
         const failed = normalized.content.startsWith("Error:");
 
         if (failed) {
+            await this.logWarn("agent.tool.finish", {
+                sessionId,
+                runId: context.runId,
+                toolName,
+                toolCallId: call.id,
+                status: "error",
+                durationMs: Date.now() - startedAt,
+                resultChars: normalized.content.length,
+            });
             const failHook = await this.hookRunner.run(
                 "PostToolUseFailure",
                 this.hookRunner.buildBaseInput(sessionId, "PostToolUseFailure", {
@@ -765,6 +865,15 @@ export class AgentRuntime {
             );
         }
 
+        await this.logInfo("agent.tool.finish", {
+            sessionId,
+            runId: context.runId,
+            toolName,
+            toolCallId: call.id,
+            status: "success",
+            durationMs: Date.now() - startedAt,
+            resultChars: normalized.content.length,
+        });
         return normalized;
     }
 
@@ -1904,6 +2013,7 @@ export class AgentRuntime {
         this.setBusy(sessionId, true);
         const abortController = this.createAbortSignal(sessionId);
         const signal = abortController.signal;
+        const runStartedAt = Date.now();
         try {
             const agent = this.defaultAgent();
             const maxRounds = Math.max(1, agent?.max_tool_rounds ?? 8);
@@ -1911,6 +2021,14 @@ export class AgentRuntime {
             const unlockedToolNames = new Set();
             let round = 0;
             const computerActionHistory = [];
+            await this.logInfo("agent.run.start", {
+                sessionId,
+                runId,
+                maxRounds,
+                toolsEnabled,
+                providerKey: session.meta.providerKey,
+                modelId: session.meta.modelId,
+            });
 
             while (round < maxRounds) {
                 if (this.wasRunCancelled(runId)) {
@@ -1950,6 +2068,16 @@ export class AgentRuntime {
                         });
                     }
                 }
+                await this.logInfo("agent.run.round.start", {
+                    sessionId,
+                    runId,
+                    round: round + 1,
+                    maxRounds,
+                    planMode,
+                    toolSchemaCount: toolSchemas.length,
+                    providerKey: model.providerKey,
+                    modelId: model.modelId,
+                });
                 const chatResult = await this.requestAgentChat(
                     sessionId,
                     () => {
@@ -1969,6 +2097,13 @@ export class AgentRuntime {
                     return;
                 }
                 if (chatResult.blocked) {
+                    await this.logWarn("agent.run.finish", {
+                        sessionId,
+                        runId,
+                        reason: "context_blocked",
+                        percent: chatResult.state?.percent,
+                        durationMs: Date.now() - runStartedAt,
+                    });
                     const blockedMessage = withAssistantModel(
                         {
                             id: randomUUID(),
@@ -1990,6 +2125,18 @@ export class AgentRuntime {
                 const choice = chatResult.choice;
                 const usedModel = choice.usedModel || model;
                 let assistant = withAssistantModel({ ...choice.message, runId }, usedModel);
+                await this.logInfo("agent.llm.response", {
+                    sessionId,
+                    runId,
+                    round: round + 1,
+                    assistantMessageId: assistant.id,
+                    toolCallCount: assistant.toolCalls?.length || 0,
+                    contentChars: String(assistant.content || "").length,
+                    usedFallback: Boolean(choice.usedFallback),
+                    usedProviderKey: usedModel.providerKey,
+                    usedModelId: usedModel.modelId,
+                    usage: choice.usage,
+                });
                 if (choice.usedFallback && choice.usedModel) {
                     const note = `(已自动切换至备用模型 ${choice.usedModel.providerKey}/${choice.usedModel.modelId})\n\n`;
                     assistant = { ...assistant, content: `${note}${assistant.content || ""}` };
@@ -2020,6 +2167,13 @@ export class AgentRuntime {
                         this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: notice });
                         this.emit(IPC_CHANNELS.onSessionChanged, session);
                     }
+                    await this.logInfo("agent.run.finish", {
+                        sessionId,
+                        runId,
+                        reason: "assistant_message",
+                        rounds: round + 1,
+                        durationMs: Date.now() - runStartedAt,
+                    });
                     void this.refreshSessionMemory(sessionId);
                     return;
                 }
@@ -2111,11 +2265,31 @@ export class AgentRuntime {
             session = this.sessionStore.appendMessage(sessionId, limitMessage);
             this.emit(IPC_CHANNELS.onMessageAppended, { sessionId, message: limitMessage });
             this.emit(IPC_CHANNELS.onSessionChanged, session);
+            await this.logWarn("agent.run.finish", {
+                sessionId,
+                runId,
+                reason: "tool_round_limit",
+                rounds: maxRounds,
+                durationMs: Date.now() - runStartedAt,
+            });
         } catch (error) {
             if (error?.name === "AbortError" || this.isRunCancelled(runId)) {
                 this.cancelledRunIds.delete(runId);
+                await this.logWarn("agent.run.finish", {
+                    sessionId,
+                    runId,
+                    reason: "aborted",
+                    durationMs: Date.now() - runStartedAt,
+                });
                 return;
             }
+            await this.logError("agent.run.error", {
+                sessionId,
+                runId,
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+                durationMs: Date.now() - runStartedAt,
+            });
             this.emit(IPC_CHANNELS.onError, {
                 sessionId,
                 message: error instanceof Error ? error.message : String(error),

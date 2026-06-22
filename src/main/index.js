@@ -39,6 +39,7 @@ import {
     registerSessionImageProtocol,
     registerSessionImageScheme,
 } from "./sessionImageProtocol.js";
+import { createDiagnosticLogger } from "./diagnosticLogger.js";
 
 const devServerUrl = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL;
 /** Packaged builds must always load bundled renderer, even if shell env has NODE_ENV=development. */
@@ -52,6 +53,7 @@ let sessionStore;
 let runtime;
 let skillLoader;
 let mcpManager;
+let diagnosticLogger;
 
 function windowChromeOptions() {
     if (process.platform === "darwin") {
@@ -501,6 +503,13 @@ function bootstrap() {
     registerConfirmBridge();
     registerPlanApprovalBridge();
     const appPaths = getAppPaths();
+    diagnosticLogger = createDiagnosticLogger(appPaths.logDir);
+    void diagnosticLogger.info("app.bootstrap", {
+        root: appPaths.root,
+        logDir: appPaths.logDir,
+        isPackaged: app.isPackaged,
+        isDev,
+    });
     configStore = new ConfigStore(appPaths.configFile);
     const getDefaultWorkspace = () => resolveWorkspace(configStore);
     const getAgentWorkspace = (sessionId) =>
@@ -587,6 +596,7 @@ function bootstrap() {
         resolveRequestTimeoutMs: () =>
             resolveLlmRequestTimeoutMs(configStore.get().ui),
         resolveTemperature: () => resolveLlmTemperature(configStore.get().ui),
+        diagnosticLogger,
     });
     runtime = new AgentRuntime(
         sessionStore,
@@ -596,6 +606,7 @@ function bootstrap() {
         workspaceMemory,
         skillLoader,
         () => mainWindow,
+        diagnosticLogger,
     );
     registerIpc();
 }

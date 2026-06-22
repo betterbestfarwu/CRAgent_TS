@@ -12,10 +12,11 @@ export function getAppPaths() {
     const projectsFile = path.join(root, "projects.json");
     const skillsDir = path.join(root, "skills");
     const memoryDir = path.join(root, "memory");
-    for (const p of [root, sessionsDir, projectsDir, skillsDir, memoryDir]) {
+    const logDir = path.join(root, "Log");
+    for (const p of [root, sessionsDir, projectsDir, skillsDir, memoryDir, logDir]) {
         if (!fs.existsSync(p)) {
             fs.mkdirSync(p, { recursive: true });
         }
     }
-    return { root, sessionsDir, projectsDir, configFile, projectsFile, skillsDir, memoryDir };
+    return { root, sessionsDir, projectsDir, configFile, projectsFile, skillsDir, memoryDir, logDir };
 }
