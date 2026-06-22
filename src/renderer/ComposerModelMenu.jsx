@@ -70,6 +70,7 @@ export function ComposerModelMenu({ config, currentModel, onChange }) {
                 type="button"
                 role="menuitemradio"
                 aria-checked={selected}
+                title={model.ref}
                 className={`composer-model-item${selected ? " active" : ""}`}
                 onClick={() => {
                   onChange(model.ref);
