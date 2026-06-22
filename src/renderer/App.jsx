@@ -28,8 +28,7 @@ import { useFileIcons } from "./useFileIcons.js";
 import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
   getComposerEditorCaretOffset,
-  getComposerFileBeforeSelection,
-  getComposerMentionBeforeSelection,
+  moveComposerCaretBeforeChipBeforeSelection,
   placeComposerCaretAtEnd,
   placeComposerCaretAtOffset,
 } from "@shared/composerEditor.js";
@@ -2169,16 +2168,9 @@ export function App() {
                     onKeyDown={(e, segment) => {
                     noteManualComposerTriggerStart(e, segment);
                     if (e.key === "Backspace" && segment?.contentEditable) {
-                      const fileId = getComposerFileBeforeSelection(e.currentTarget);
-                      if (fileId) {
+                      if (moveComposerCaretBeforeChipBeforeSelection(e.currentTarget)) {
                         e.preventDefault();
-                        removePendingFile(fileId);
-                        return;
-                      }
-                      const mentionId = getComposerMentionBeforeSelection(e.currentTarget);
-                      if (mentionId) {
-                        e.preventDefault();
-                        removePendingAtMention(mentionId);
+                        setComposerCaret(getComposerEditorCaretOffset(e.currentTarget));
                         return;
                       }
                     }

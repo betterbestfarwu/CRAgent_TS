@@ -19,6 +19,7 @@ import {
 import { expandAtMentionsToAbsolute } from "../src/main/atMentionExpand.js";
 import {
     COMPOSER_CARET_ZWSP,
+    moveComposerCaretBeforeChipBeforeSelection,
     normalizeComposerEditorText,
     shouldComposerBackspaceRemoveChip,
 } from "@shared/composerEditor.js";
@@ -345,6 +346,121 @@ describe("shouldComposerBackspaceRemoveChip", () => {
     it("removes chip when caret is between chip filler and later visible text", () => {
         assert.equal(shouldComposerBackspaceRemoveChip("", "hello"), true);
         assert.equal(shouldComposerBackspaceRemoveChip(" ", " hello"), true);
+    });
+});
+
+describe("moveComposerCaretBeforeChipBeforeSelection", () => {
+    function withFakeDom(testBody) {
+        const originalNode = globalThis.Node;
+        const originalWindow = globalThis.window;
+        const originalDocument = globalThis.document;
+        try {
+            globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 };
+            testBody();
+        } finally {
+            globalThis.Node = originalNode;
+            globalThis.window = originalWindow;
+            globalThis.document = originalDocument;
+        }
+    }
+
+    function createFakeChip(id) {
+        return {
+            nodeType: 1,
+            classList: { contains: (name) => name === "composer-at-chip" },
+            dataset: { mentionId: id },
+        };
+    }
+
+    function installFakeSelection(range) {
+        const selection = {
+            rangeCount: 1,
+            range,
+            removed: false,
+            addedRange: null,
+            getRangeAt() {
+                return this.range;
+            },
+            removeAllRanges() {
+                this.removed = true;
+            },
+            addRange(nextRange) {
+                this.addedRange = nextRange;
+            },
+        };
+        globalThis.window = { getSelection: () => selection };
+        globalThis.document = {
+            createRange: () => ({
+                before: null,
+                collapsed: false,
+                setStartBefore(node) {
+                    this.before = node;
+                },
+                collapse(value) {
+                    this.collapsed = value;
+                },
+            }),
+        };
+        return selection;
+    }
+
+    it("places the contenteditable selection before the chip behind the caret", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("m1");
+            const anchor = {
+                nodeType: 3,
+                nodeValue: COMPOSER_CARET_ZWSP,
+                textContent: COMPOSER_CARET_ZWSP,
+                previousSibling: chip,
+            };
+            const root = {
+                childNodes: [chip, anchor],
+                contains: (node) => node === chip || node === anchor,
+                focusCalled: false,
+                focus() {
+                    this.focusCalled = true;
+                },
+            };
+            const selection = installFakeSelection({
+                collapsed: true,
+                startContainer: anchor,
+                startOffset: 1,
+            });
+
+            assert.equal(moveComposerCaretBeforeChipBeforeSelection(root), true);
+            assert.equal(selection.removed, true);
+            assert.equal(selection.addedRange.before, chip);
+            assert.equal(selection.addedRange.collapsed, true);
+            assert.equal(root.focusCalled, true);
+        });
+    });
+
+    it("steps backward across adjacent chips instead of deleting them", () => {
+        withFakeDom(() => {
+            const first = createFakeChip("m1");
+            const second = createFakeChip("m2");
+            const root = {
+                childNodes: [first, second],
+                contains: (node) => node === root || node === first || node === second,
+                focus() {},
+            };
+            const selection = installFakeSelection({
+                collapsed: true,
+                startContainer: root,
+                startOffset: 2,
+            });
+
+            assert.equal(moveComposerCaretBeforeChipBeforeSelection(root), true);
+            assert.equal(selection.addedRange.before, second);
+
+            selection.range = {
+                collapsed: true,
+                startContainer: root,
+                startOffset: 1,
+            };
+            assert.equal(moveComposerCaretBeforeChipBeforeSelection(root), true);
+            assert.equal(selection.addedRange.before, first);
+        });
     });
 });
 
