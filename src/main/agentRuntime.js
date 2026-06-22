@@ -257,7 +257,7 @@ export class AgentRuntime {
                 `<session_workspace path="${sessionWorkspace}">\n` +
                     "This session belongs to a project. File tools and shell commands use this directory as the working directory.\n" +
                     "Do not write agent task files under .cragent/ in the project tree. " +
-                    "Use write_file with plan.md or paths relative to session storage (stored under ~/.CRAgent/Projects/<projectId>/sessions/<sessionId>/).\n" +
+                    "Use write_file with plan.md or paths relative to session storage (stored under ~/.CRAgent/sessions/<projectsRootGuid>/<projectId>/<sessionId>/).\n" +
                     "</session_workspace>",
             );
         }

@@ -264,7 +264,7 @@
 | 侧栏只读 meta | 有 | `meta.json` + `messageCount` | ✅ |
 | 大 session 渐进加载 | 有 | tail read + load older | 🟡 |
 | Session fork | fork 命令 | 消息级 fork + context 边界 | ✅ |
-| 项目级 session 目录 | project dir | `.CRAgent/Projects/{id}/sessions/` | ✅ |
+| 项目级 session 目录 | project dir | `.CRAgent/sessions/<projectsRootGuid>/{id}/` | ✅ |
 | Tool results / images 分目录 | 有 | `tool-results/`、`_images/` | ✅ |
 | Remote / WebSocket 会话 | 有 | ❌ | ➖ |
 

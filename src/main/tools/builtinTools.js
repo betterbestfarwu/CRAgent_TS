@@ -151,7 +151,7 @@ export function createBuiltinTools({
             enabled: () => getAgentTools().enable_file_tools !== false,
             schema: fnSchema(
                 "write_file",
-                "Create or overwrite a UTF-8 text file. Use it for text-only files; plan.md and .cragent/... paths are redirected to the session storage directory (Projects/<projectId>/sessions/<sessionId>/).",
+                "Create or overwrite a UTF-8 text file. Use it for text-only files; plan.md and .cragent/... paths are redirected to the session storage directory (~/.CRAgent/sessions/<sessionsRootGuid>/<sessionId>/ or ~/.CRAgent/sessions/<projectsRootGuid>/<projectId>/<sessionId>/).",
                 {
                 type: "object",
                 properties: {

@@ -98,6 +98,7 @@ export function goalModeBashBlocksWorkspaceCragent(command) {
     }
     return (
         "Goal 模式禁止向工作区 .cragent 目录写入。请使用 write_file，路径使用 plan.md " +
-        "或相对会话数据目录的文件名（实际保存在 Projects/<projectId>/sessions/<sessionId>/ 下）。"
+        "或相对会话数据目录的文件名（普通会话实际保存在 ~/.CRAgent/sessions/<sessionsRootGuid>/<sessionId>/ 下，" +
+        "项目会话实际保存在 ~/.CRAgent/sessions/<projectsRootGuid>/<projectId>/<sessionId>/ 下）。"
     );
 }
