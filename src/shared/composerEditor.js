@@ -257,6 +257,33 @@ export function moveComposerCaretLeftBeforeChipIfNeeded(root) {
 }
 
 /**
+ * @param {HTMLElement | null} root
+ * @param {{ mentionId?: string, fileId?: string }} chipRef
+ * @returns {boolean}
+ */
+export function placeComposerCaretAfterChip(root, chipRef) {
+    if (!root) return false;
+    const chip = findComposerChipByRef(root, chipRef);
+    if (!chip) return false;
+
+    const range = document.createRange();
+    const next = chip.nextSibling;
+    if (next?.nodeType === Node.TEXT_NODE) {
+        const raw = next.nodeValue ?? "";
+        const offset = normalizeComposerEditorText(raw).length === 0 ? raw.length : 0;
+        range.setStart(next, offset);
+    } else {
+        range.setStartAfter(chip);
+    }
+    range.collapse(true);
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return true;
+}
+
+/**
  * @param {HTMLElement} root
  * @param {HTMLElement} chip
  * @returns {boolean}
@@ -434,7 +461,26 @@ function findComposerChipNodeAfterSelection(root) {
 function findComposerChipOnNode(node) {
     if (!node || node.nodeType !== Node.ELEMENT_NODE) return null;
     const element = /** @type {HTMLElement} */ (node);
-    if (element.classList.contains("composer-at-chip")) return element;
+    if (element.classList?.contains("composer-at-chip")) return element;
+    return null;
+}
+
+/**
+ * @param {Node} node
+ * @param {{ mentionId?: string, fileId?: string }} chipRef
+ * @returns {HTMLElement | null}
+ */
+function findComposerChipByRef(node, chipRef) {
+    const chip = findComposerChipOnNode(node);
+    if (chip) {
+        if (chipRef.mentionId && chip.dataset?.mentionId === chipRef.mentionId) return chip;
+        if (chipRef.fileId && chip.dataset?.fileId === chipRef.fileId) return chip;
+    }
+    const children = Array.from(node.childNodes || []);
+    for (const child of children) {
+        const found = findComposerChipByRef(child, chipRef);
+        if (found) return found;
+    }
     return null;
 }
 

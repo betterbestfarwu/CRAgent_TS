@@ -1162,7 +1162,8 @@ export function App() {
     const mentionStart = activeAt.mentionStart;
     let nextInput = `${sourceInput.slice(0, activeAt.mentionStart)}${sourceInput.slice(activeAt.mentionEnd)}`;
     const name = atMentionFileName(cleanPath);
-    const nextMentions = pendingAtMentions.some((mention) => mention.relativePath === cleanPath)
+    const mentionAlreadyPending = pendingAtMentions.some((mention) => mention.relativePath === cleanPath);
+    const nextMentions = mentionAlreadyPending
       ? pendingAtMentions
       : [
           ...pendingAtMentions,
@@ -1170,7 +1171,9 @@ export function App() {
         ];
     updateComposerInput(nextInput, nextMentions);
     atPickContextRef.current = null;
-    requestComposerFocusAtEnd();
+    if (mentionAlreadyPending) {
+      requestComposerFocusAtEnd();
+    }
   }
 
   function enterAtDirectory(relativePath) {

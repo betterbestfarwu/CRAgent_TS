@@ -24,6 +24,7 @@ import {
     moveComposerCaretBeforeChipBeforeSelection,
     moveComposerCaretLeftBeforeChipIfNeeded,
     normalizeComposerEditorText,
+    placeComposerCaretAfterChip,
     shouldComposerArrowLeftJumpBeforeChip,
     shouldComposerBackspaceRemoveChip,
 } from "@shared/composerEditor.js";
@@ -714,6 +715,113 @@ describe("moveComposerCaretLeftBeforeChipIfNeeded", () => {
             });
 
             assert.equal(moveComposerCaretLeftBeforeChipIfNeeded(root), false);
+        });
+    });
+});
+
+describe("placeComposerCaretAfterChip", () => {
+    function withFakeDom(testBody) {
+        const originalNode = globalThis.Node;
+        const originalWindow = globalThis.window;
+        const originalDocument = globalThis.document;
+        try {
+            globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 };
+            testBody();
+        } finally {
+            globalThis.Node = originalNode;
+            globalThis.window = originalWindow;
+            globalThis.document = originalDocument;
+        }
+    }
+
+    function createFakeChip(id, kind = "mention") {
+        return {
+            nodeType: 1,
+            classList: { contains: (name) => name === "composer-at-chip" },
+            dataset: kind === "file" ? { fileId: id } : { mentionId: id },
+            childNodes: [],
+        };
+    }
+
+    function installFakeSelection() {
+        const selection = {
+            removed: false,
+            addedRange: null,
+            removeAllRanges() {
+                this.removed = true;
+            },
+            addRange(nextRange) {
+                this.addedRange = nextRange;
+            },
+        };
+        globalThis.window = { getSelection: () => selection };
+        globalThis.document = {
+            createRange: () => ({
+                startNode: null,
+                startOffset: null,
+                after: null,
+                collapsed: false,
+                setStart(node, offset) {
+                    this.startNode = node;
+                    this.startOffset = offset;
+                },
+                setStartAfter(node) {
+                    this.after = node;
+                },
+                collapse(value) {
+                    this.collapsed = value;
+                },
+            }),
+        };
+        return selection;
+    }
+
+    it("places caret at the start of visible text after a mention chip", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("m1");
+            const trailing = {
+                nodeType: 3,
+                nodeValue: " world",
+                textContent: " world",
+                childNodes: [],
+            };
+            chip.nextSibling = trailing;
+            const root = {
+                nodeType: 1,
+                childNodes: [chip, trailing],
+                contains: (node) => node === root || node === chip || node === trailing,
+            };
+            const selection = installFakeSelection();
+
+            assert.equal(placeComposerCaretAfterChip(root, { mentionId: "m1" }), true);
+            assert.equal(selection.removed, true);
+            assert.equal(selection.addedRange.startNode, trailing);
+            assert.equal(selection.addedRange.startOffset, 0);
+            assert.equal(selection.addedRange.collapsed, true);
+        });
+    });
+
+    it("places caret at the end of the invisible anchor after a trailing file chip", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("f1", "file");
+            const anchor = {
+                nodeType: 3,
+                nodeValue: COMPOSER_CARET_ZWSP,
+                textContent: COMPOSER_CARET_ZWSP,
+                childNodes: [],
+            };
+            chip.nextSibling = anchor;
+            const root = {
+                nodeType: 1,
+                childNodes: [chip, anchor],
+                contains: (node) => node === root || node === chip || node === anchor,
+            };
+            const selection = installFakeSelection();
+
+            assert.equal(placeComposerCaretAfterChip(root, { fileId: "f1" }), true);
+            assert.equal(selection.addedRange.startNode, anchor);
+            assert.equal(selection.addedRange.startOffset, 1);
+            assert.equal(selection.addedRange.collapsed, true);
         });
     });
 });

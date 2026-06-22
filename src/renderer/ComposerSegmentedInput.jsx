@@ -5,7 +5,7 @@ import {
   ensureComposerCaretAnchor,
   getComposerEditorCaretOffset,
   parseComposerEditorDom,
-  restoreComposerEditorCaret,
+  placeComposerCaretAfterChip,
   restoreComposerEditorCaretAtOffset,
 } from "@shared/composerEditor.js";
 import { applyComposerEditShortcut } from "@shared/composerEditShortcuts.js";
@@ -100,6 +100,8 @@ function ComposerInlineEditor({
   const lastProjectDirectoryPathRef = useRef(projectDirectoryPath);
   const prevMentionCountRef = useRef(mentions.length);
   const prevFileCountRef = useRef(files.length);
+  const prevMentionIdsRef = useRef(new Set(mentions.map((mention) => mention.id)));
+  const prevFileIdsRef = useRef(new Set(files.map((file) => file.id)));
 
   const syncFromState = useCallback(() => {
     const root = rootRef.current;
@@ -124,16 +126,33 @@ function ComposerInlineEditor({
     const inputChangedExternally = input !== lastSyncedInputRef.current;
     if (!structureChanged && !inputChangedExternally) return;
 
-    const mentionAdded = mentions.length > prevMentionCountRef.current;
-    const fileAdded = files.length > prevFileCountRef.current;
+    const previousMentionIds = prevMentionIdsRef.current;
+    const previousFileIds = prevFileIdsRef.current;
+    const addedChips = [
+      ...mentions
+        .filter((mention) => !previousMentionIds.has(mention.id))
+        .map((mention) => ({
+          mentionId: mention.id,
+          attachSeq: typeof mention.attachSeq === "number" ? mention.attachSeq : Number.MAX_SAFE_INTEGER,
+        })),
+      ...files
+        .filter((file) => !previousFileIds.has(file.id))
+        .map((file) => ({
+          fileId: file.id,
+          attachSeq: typeof file.attachSeq === "number" ? file.attachSeq : Number.MAX_SAFE_INTEGER,
+        })),
+    ].sort((a, b) => a.attachSeq - b.attachSeq);
+    const addedChip = addedChips[addedChips.length - 1] ?? null;
     const mentionRemoved = mentions.length < prevMentionCountRef.current;
     const fileRemoved = files.length < prevFileCountRef.current;
     prevMentionCountRef.current = mentions.length;
     prevFileCountRef.current = files.length;
+    prevMentionIdsRef.current = new Set(mentions.map((mention) => mention.id));
+    prevFileIdsRef.current = new Set(files.map((file) => file.id));
     lastProjectDirectoryPathRef.current = projectDirectoryPath;
     syncFromState();
-    if (mentionAdded || fileAdded) {
-      restoreComposerEditorCaret(rootRef.current);
+    if (addedChip) {
+      restoreCaretAfterChip(addedChip);
     } else if (mentionRemoved || fileRemoved) {
       restoreComposerEditorCaretAtOffset(rootRef.current, composerCaret);
     }
@@ -153,6 +172,19 @@ function ComposerInlineEditor({
   useLayoutEffect(() => {
     updateComposerChipIconsInDom(rootRef.current, fileIcons);
   }, [fileIcons]);
+
+  function restoreCaretAfterChip(chipRef) {
+    const root = rootRef.current;
+    if (!root) return;
+    const apply = () => {
+      if (placeComposerCaretAfterChip(root, chipRef) && typeof root.focus === "function") {
+        root.focus({ preventScroll: true });
+      }
+    };
+    apply();
+    requestAnimationFrame(apply);
+    window.setTimeout(apply, 0);
+  }
 
   useLayoutEffect(() => {
     const root = rootRef.current;
