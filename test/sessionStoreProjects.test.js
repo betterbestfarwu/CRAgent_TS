@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { SessionStore } from "../src/main/sessionStore.js";
 import { sessionDir, writeMeta } from "../src/main/sessionStorage.js";
-import { projectSessionsDir, projectStorageRoot } from "../src/shared/projectStoragePaths.js";
 
 describe("SessionStore.removeProject", () => {
     it("deletes project sessions and session data instead of detaching", () => {
@@ -27,13 +26,15 @@ describe("SessionStore.removeProject", () => {
         const project = store.addProject(projectPath);
         const projectSession = store.newSession({ projectId: project.id });
         const globalSession = store.newSession();
-        const projectSessionsRoot = projectSessionsDir(projectsDir, project.id);
+        const layout = store.sessionTreeLayout;
+        const projectSessionsRoot = path.join(sessionsDir, layout.projectsRootId, project.id);
+        const standaloneRoot = path.join(sessionsDir, layout.sessionsRootId);
         assert.equal(
             fs.existsSync(sessionDir(projectSessionsRoot, projectSession.meta.id)),
             true,
         );
         assert.equal(
-            fs.existsSync(sessionDir(sessionsDir, globalSession.meta.id)),
+            fs.existsSync(sessionDir(standaloneRoot, globalSession.meta.id)),
             true,
         );
 
@@ -51,7 +52,7 @@ describe("SessionStore.removeProject", () => {
             store.listMetas().some((meta) => meta.id === projectSession.meta.id),
             false,
         );
-        assert.equal(fs.existsSync(projectStorageRoot(projectsDir, project.id)), false);
+        assert.equal(fs.existsSync(path.join(sessionsDir, layout.projectsRootId, project.id)), false);
         assert.equal(
             store.listMetas().some((meta) => meta.id === globalSession.meta.id),
             true,
@@ -170,10 +171,71 @@ describe("SessionStore.removeProject", () => {
             projectsFile,
             projectsDir,
         );
-        void migratedStore;
-        const projectSessionsRoot = projectSessionsDir(projectsDir, "pending-project-id");
+        const layout = migratedStore.sessionTreeLayout;
+        const projectSessionsRoot = path.join(
+            sessionsDir,
+            layout.projectsRootId,
+            "pending-project-id",
+        );
 
         assert.equal(fs.existsSync(sessionDir(sessionsDir, legacySessionId)), false);
+        assert.equal(
+            fs.existsSync(sessionDir(projectSessionsRoot, legacySessionId)),
+            true,
+        );
+    });
+
+    it("migrates legacy project tree sessions into the GUID project root", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-migrate-project-tree-"));
+        const sessionsDir = path.join(dir, "sessions");
+        const projectsDir = path.join(dir, "Projects");
+        const projectsFile = path.join(dir, "projects.json");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+
+        const projectPath = path.join(dir, "workspace");
+        fs.mkdirSync(projectPath, { recursive: true });
+        const projectId = "pending-project-id";
+        const legacySessionId = "legacy-project-session";
+        const timestamp = new Date().toISOString();
+        const legacyProjectSessionsRoot = path.join(projectsDir, projectId, "sessions");
+        writeMeta(legacyProjectSessionsRoot, {
+            id: legacySessionId,
+            title: "新会话",
+            providerKey: "openai",
+            modelId: "gpt-4o-mini",
+            projectId,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            todos: [],
+        });
+        fs.writeFileSync(
+            projectsFile,
+            JSON.stringify(
+                [
+                    {
+                        id: projectId,
+                        name: "workspace",
+                        directoryPath: projectPath,
+                        createdAt: timestamp,
+                        updatedAt: timestamp,
+                        sessions: [{ sessionId: legacySessionId, name: "新会话" }],
+                    },
+                ],
+                null,
+                2,
+            ),
+        );
+
+        const migratedStore = new SessionStore(
+            sessionsDir,
+            { providerKey: "openai", modelId: "gpt-4o-mini" },
+            projectsFile,
+            projectsDir,
+        );
+        const layout = migratedStore.sessionTreeLayout;
+        const projectSessionsRoot = path.join(sessionsDir, layout.projectsRootId, projectId);
+
+        assert.equal(fs.existsSync(sessionDir(legacyProjectSessionsRoot, legacySessionId)), false);
         assert.equal(
             fs.existsSync(sessionDir(projectSessionsRoot, legacySessionId)),
             true,

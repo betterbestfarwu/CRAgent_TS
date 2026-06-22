@@ -8,12 +8,14 @@ import { SessionStore } from "../src/main/sessionStore.js";
 import {
     isSplitSession,
     legacySessionFile,
+    listSessionEntries,
     messagesFile,
     metaFile,
     migrateLegacySessionIfNeeded,
     moveSessionStorage,
     readMessages,
     sessionDir,
+    writeMeta,
     writeSplitSession,
 } from "../src/main/sessionStorage.js";
 
@@ -123,6 +125,15 @@ describe("sessionStorage", () => {
         );
         assert.equal(fs.existsSync(legacyImages), false);
     });
+
+    it("ignores reserved underscore directories when listing sessions", () => {
+        const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-reserved-"));
+        const reservedDir = path.join(sessionsDir, "_layout");
+        fs.mkdirSync(reservedDir, { recursive: true });
+        fs.writeFileSync(path.join(reservedDir, "meta.json"), "{}", "utf-8");
+
+        assert.deepEqual(listSessionEntries(sessionsDir), []);
+    });
 });
 
 describe("SessionStore split layout", () => {
@@ -195,9 +206,40 @@ describe("SessionStore split layout", () => {
             createdAt: new Date().toISOString(),
         });
 
-        const raw = fs.readFileSync(messagesFile(sessionsDir, created.meta.id), "utf-8");
+        const locatedDir = store.locateSessionStorage(created.meta.id);
+        const raw = fs.readFileSync(messagesFile(locatedDir, created.meta.id), "utf-8");
         assert.equal(raw.trim().split("\n").length, 1);
-        assert.equal(fs.existsSync(metaFile(sessionsDir, created.meta.id)), true);
+        assert.equal(fs.existsSync(metaFile(locatedDir, created.meta.id)), true);
+    });
+
+    it("migrates direct standalone sessions into the GUID session root", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cragent-standalone-migrate-"));
+        const sessionsDir = path.join(dir, "sessions");
+        fs.mkdirSync(sessionsDir, { recursive: true });
+        const sessionId = "legacy-standalone";
+        const timestamp = new Date().toISOString();
+        writeMeta(sessionsDir, {
+            id: sessionId,
+            title: "新会话",
+            providerKey: "openai",
+            modelId: "gpt-4o-mini",
+            projectId: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            todos: [],
+        });
+
+        const store = new SessionStore(
+            sessionsDir,
+            { providerKey: "openai", modelId: "gpt-4o-mini" },
+            null,
+        );
+        const layout = store.sessionTreeLayout;
+        const standaloneRoot = path.join(sessionsDir, layout.sessionsRootId);
+
+        assert.equal(fs.existsSync(sessionDir(sessionsDir, sessionId)), false);
+        assert.equal(fs.existsSync(sessionDir(standaloneRoot, sessionId)), true);
+        assert.equal(store.locateSessionStorage(sessionId), standaloneRoot);
     });
 
     it("returns paginated messages for UI get", () => {

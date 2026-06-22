@@ -177,8 +177,9 @@ describe("SessionStore image migration", () => {
         const uiSession = store.get(sessionId, { hydrateImages: false });
         assert.equal(sessionHasInlineImages(uiSession), false);
 
-        assert.equal(fs.existsSync(metaFile(sessionsDir, sessionId)), true);
-        const raw = fs.readFileSync(messagesFile(sessionsDir, sessionId), "utf-8");
+        const locatedDir = store.locateSessionStorage(sessionId);
+        assert.equal(fs.existsSync(metaFile(locatedDir, sessionId)), true);
+        const raw = fs.readFileSync(messagesFile(locatedDir, sessionId), "utf-8");
         assert.equal(raw.includes("dataUrl"), false);
         assert.equal(raw.includes("imageFile"), true);
     });

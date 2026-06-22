@@ -329,7 +329,7 @@ export function listSessionEntries(sessionsDir) {
     }
     const entries = [];
     for (const name of fs.readdirSync(sessionsDir)) {
-        if (name === "_images") {
+        if (name.startsWith("_")) {
             continue;
         }
         const fullPath = path.join(sessionsDir, name);

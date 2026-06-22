@@ -25,10 +25,12 @@ import {
     writeSplitSession,
 } from "./sessionStorage.js";
 import {
+    ensureSessionTreeLayout,
+    legacyProjectsStorageRoot,
     projectSessionsDir as resolveProjectSessionsDir,
-    projectStorageRoot,
-    projectsStorageRoot,
-} from "@shared/projectStoragePaths.js";
+    projectTreeRootDir,
+    standaloneSessionsDir,
+} from "@shared/sessionTreeStoragePaths.js";
 import {
     deleteSessionImages,
     externalizeSessionImages,
@@ -102,14 +104,24 @@ function normalizeDefaultModel(model) {
 export class SessionStore {
     constructor(sessionsDir, defaultModel, projectsFile, projectsDir = null) {
         this.sessionsDir = sessionsDir;
-        this.projectsDir =
-            projectsDir ?? projectsStorageRoot(path.dirname(sessionsDir));
+        this.sessionTreeLayout = ensureSessionTreeLayout(this.sessionsDir);
+        this.legacyProjectsDir =
+            projectsDir ?? legacyProjectsStorageRoot(this.sessionsDir);
+        this.projectsDir = projectTreeRootDir(
+            this.sessionsDir,
+            this.sessionTreeLayout,
+        );
         this.defaultModel = defaultModel;
         this.projectsFile = projectsFile;
         fs.mkdirSync(this.sessionsDir, { recursive: true });
+        fs.mkdirSync(standaloneSessionsDir(this.sessionsDir, this.sessionTreeLayout), {
+            recursive: true,
+        });
         fs.mkdirSync(this.projectsDir, { recursive: true });
         this.ensureAllProjectLayouts();
+        this.migrateLegacyProjectTreeSessions();
         this.migrateGlobalProjectSessions();
+        this.migrateStandaloneSessions();
         this.repairProjectsFile();
     }
 
@@ -122,7 +134,11 @@ export class SessionStore {
     }
 
     projectSessionsDir(projectId) {
-        return resolveProjectSessionsDir(this.projectsDir, projectId);
+        return resolveProjectSessionsDir(
+            this.sessionsDir,
+            this.sessionTreeLayout,
+            projectId,
+        );
     }
 
     ensureProjectLayout(projectId) {
@@ -130,7 +146,6 @@ export class SessionStore {
         if (!id) {
             return;
         }
-        fs.mkdirSync(projectStorageRoot(this.projectsDir, id), { recursive: true });
         fs.mkdirSync(this.projectSessionsDir(id), { recursive: true });
     }
 
@@ -145,11 +160,24 @@ export class SessionStore {
         if (!cleanSessionId) {
             throw new Error("缺少 sessionId");
         }
+        const standaloneDir = standaloneSessionsDir(
+            this.sessionsDir,
+            this.sessionTreeLayout,
+        );
+        if (sessionExistsInDir(standaloneDir, cleanSessionId)) {
+            return standaloneDir;
+        }
+        for (const project of this.readRawProjects()) {
+            const dir = this.projectSessionsDir(project.id);
+            if (sessionExistsInDir(dir, cleanSessionId)) {
+                return dir;
+            }
+        }
         if (sessionExistsInDir(this.sessionsDir, cleanSessionId)) {
             return this.sessionsDir;
         }
         for (const project of this.readRawProjects()) {
-            const dir = this.projectSessionsDir(project.id);
+            const dir = path.join(this.legacyProjectsDir, project.id, "sessions");
             if (sessionExistsInDir(dir, cleanSessionId)) {
                 return dir;
             }
@@ -163,7 +191,9 @@ export class SessionStore {
             this.ensureProjectLayout(normalized);
             return this.projectSessionsDir(normalized);
         }
-        return this.sessionsDir;
+        const dir = standaloneSessionsDir(this.sessionsDir, this.sessionTreeLayout);
+        fs.mkdirSync(dir, { recursive: true });
+        return dir;
     }
 
     collectMetasFromDir(sessionsDir, { expectedProjectId = undefined } = {}) {
@@ -217,8 +247,52 @@ export class SessionStore {
         }
     }
 
+    migrateLegacyProjectTreeSessions() {
+        for (const project of this.readRawProjects()) {
+            const legacyDir = path.join(
+                this.legacyProjectsDir,
+                project.id,
+                "sessions",
+            );
+            if (!fs.existsSync(legacyDir)) {
+                continue;
+            }
+            this.ensureProjectLayout(project.id);
+            const targetDir = this.projectSessionsDir(project.id);
+            for (const entry of listSessionEntries(legacyDir)) {
+                moveSessionStorage(legacyDir, targetDir, entry.id);
+            }
+        }
+    }
+
+    migrateStandaloneSessions() {
+        const standaloneDir = standaloneSessionsDir(
+            this.sessionsDir,
+            this.sessionTreeLayout,
+        );
+        fs.mkdirSync(standaloneDir, { recursive: true });
+        for (const entry of listSessionEntries(this.sessionsDir)) {
+            let meta;
+            if (entry.kind === "split") {
+                meta = readMeta(this.sessionsDir, entry.id);
+            } else {
+                meta = readLegacyMeta(this.sessionsDir, entry.id);
+                if (!meta) {
+                    continue;
+                }
+            }
+            if (normalizeProjectId(meta.projectId)) {
+                continue;
+            }
+            moveSessionStorage(this.sessionsDir, standaloneDir, entry.id);
+        }
+    }
+
     listMetasOnDisk() {
-        const metas = this.collectMetasFromDir(this.sessionsDir, { expectedProjectId: null });
+        const metas = this.collectMetasFromDir(
+            standaloneSessionsDir(this.sessionsDir, this.sessionTreeLayout),
+            { expectedProjectId: null },
+        );
         for (const project of this.readRawProjects()) {
             this.ensureProjectLayout(project.id);
             metas.push(
@@ -404,7 +478,7 @@ export class SessionStore {
             (item) => item.sessionId,
         );
         this.persistProjects(projects.filter((item) => item.id !== id));
-        const projectRoot = projectStorageRoot(this.projectsDir, id);
+        const projectRoot = this.projectSessionsDir(id);
         if (fs.existsSync(projectRoot)) {
             fs.rmSync(projectRoot, { recursive: true, force: true });
         }
