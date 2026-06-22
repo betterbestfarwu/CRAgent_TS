@@ -27,6 +27,7 @@ import {
     placeComposerCaretAfterChip,
     shouldComposerArrowLeftJumpBeforeChip,
     shouldComposerBackspaceRemoveChip,
+    syncComposerEditorRefsAfterInternalEdit,
 } from "@shared/composerEditor.js";
 
 describe("parseActiveAtMention", () => {
@@ -823,6 +824,41 @@ describe("placeComposerCaretAfterChip", () => {
             assert.equal(selection.addedRange.startOffset, 1);
             assert.equal(selection.addedRange.collapsed, true);
         });
+    });
+});
+
+describe("syncComposerEditorRefsAfterInternalEdit", () => {
+    it("marks text and chip structure as synced after typing before a mention", () => {
+        const refs = {
+            internalEditRef: { current: true },
+            lastSyncedInputRef: { current: "aa" },
+            lastMentionSignatureRef: { current: "m1:1" },
+            lastFilesSignatureRef: { current: "" },
+            lastProjectDirectoryPathRef: { current: "/project" },
+            prevMentionCountRef: { current: 1 },
+            prevFileCountRef: { current: 0 },
+            prevMentionIdsRef: { current: new Set(["m1"]) },
+            prevFileIdsRef: { current: new Set() },
+        };
+
+        syncComposerEditorRefsAfterInternalEdit(refs, {
+            input: "axa",
+            mentionSignature: "m1:2",
+            filesSignature: "",
+            projectDirectoryPath: "/project",
+            mentions: [{ id: "m1", insertAt: 2 }],
+            files: [],
+        });
+
+        assert.equal(refs.internalEditRef.current, false);
+        assert.equal(refs.lastSyncedInputRef.current, "axa");
+        assert.equal(refs.lastMentionSignatureRef.current, "m1:2");
+        assert.equal(refs.lastFilesSignatureRef.current, "");
+        assert.equal(refs.lastProjectDirectoryPathRef.current, "/project");
+        assert.equal(refs.prevMentionCountRef.current, 1);
+        assert.equal(refs.prevFileCountRef.current, 0);
+        assert.deepEqual([...refs.prevMentionIdsRef.current], ["m1"]);
+        assert.deepEqual([...refs.prevFileIdsRef.current], []);
     });
 });
 

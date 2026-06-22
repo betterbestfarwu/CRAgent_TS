@@ -7,6 +7,7 @@ import {
   parseComposerEditorDom,
   placeComposerCaretAfterChip,
   restoreComposerEditorCaretAtOffset,
+  syncComposerEditorRefsAfterInternalEdit,
 } from "@shared/composerEditor.js";
 import { applyComposerEditShortcut } from "@shared/composerEditShortcuts.js";
 import {
@@ -114,8 +115,27 @@ function ComposerInlineEditor({
 
   useLayoutEffect(() => {
     if (internalEditRef.current) {
-      internalEditRef.current = false;
-      lastSyncedInputRef.current = input;
+      syncComposerEditorRefsAfterInternalEdit(
+        {
+          internalEditRef,
+          lastSyncedInputRef,
+          lastMentionSignatureRef,
+          lastFilesSignatureRef,
+          lastProjectDirectoryPathRef,
+          prevMentionCountRef,
+          prevFileCountRef,
+          prevMentionIdsRef,
+          prevFileIdsRef,
+        },
+        {
+          input,
+          mentionSignature,
+          filesSignature,
+          projectDirectoryPath,
+          mentions,
+          files,
+        },
+      );
       return;
     }
 

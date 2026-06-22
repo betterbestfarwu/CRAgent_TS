@@ -24,6 +24,42 @@ export function composerEditorSnapshotKey(text, mentions) {
 }
 
 /**
+ * Keep the contenteditable sync bookkeeping aligned after a browser-native edit.
+ * The DOM already contains the edit, so the next render must not rebuild it and
+ * discard the live selection just because chip insert positions changed.
+ * @param {{
+ *   internalEditRef: { current: boolean },
+ *   lastSyncedInputRef: { current: string | null },
+ *   lastMentionSignatureRef: { current: string | null },
+ *   lastFilesSignatureRef: { current: string | null },
+ *   lastProjectDirectoryPathRef: { current: string | null },
+ *   prevMentionCountRef: { current: number },
+ *   prevFileCountRef: { current: number },
+ *   prevMentionIdsRef: { current: Set<string> },
+ *   prevFileIdsRef: { current: Set<string> },
+ * }} refs
+ * @param {{
+ *   input: string,
+ *   mentionSignature: string,
+ *   filesSignature: string,
+ *   projectDirectoryPath: string,
+ *   mentions: Array<{ id: string }>,
+ *   files: Array<{ id: string }>,
+ * }} state
+ */
+export function syncComposerEditorRefsAfterInternalEdit(refs, state) {
+    refs.internalEditRef.current = false;
+    refs.lastSyncedInputRef.current = state.input;
+    refs.lastMentionSignatureRef.current = state.mentionSignature;
+    refs.lastFilesSignatureRef.current = state.filesSignature;
+    refs.lastProjectDirectoryPathRef.current = state.projectDirectoryPath;
+    refs.prevMentionCountRef.current = state.mentions.length;
+    refs.prevFileCountRef.current = state.files.length;
+    refs.prevMentionIdsRef.current = new Set(state.mentions.map((mention) => mention.id));
+    refs.prevFileIdsRef.current = new Set(state.files.map((file) => file.id));
+}
+
+/**
  * @param {HTMLElement} root
  * @param {Map<string, { id: string, name: string, relativePath: string }>} mentionById
  * @returns {{ text: string, mentions: ComposerEditorMention[], files: ComposerEditorFileRef[] }}
