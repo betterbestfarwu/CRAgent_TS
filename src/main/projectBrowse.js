@@ -32,10 +32,39 @@ function resolveInsideProject(projectRoot, relativePath) {
 }
 
 /**
+ * @param {string} basePath
+ * @param {string} baseRelativePath
+ * @param {string} needle
+ * @param {import("@shared/atMention.js").ProjectDirEntry[]} entries
+ */
+async function collectMatchingEntries(basePath, baseRelativePath, needle, entries) {
+    const dirents = await fs.readdir(basePath, { withFileTypes: true });
+    for (const dirent of dirents) {
+        if (dirent.name === "." || dirent.name === "..") continue;
+        const isDir = dirent.isDirectory();
+        if (isDir && SKIP_DIR_NAMES.has(dirent.name)) continue;
+
+        const childRel = baseRelativePath ? `${baseRelativePath}/${dirent.name}` : dirent.name;
+        if (dirent.name.toLowerCase().includes(needle)) {
+            entries.push({
+                name: dirent.name,
+                kind: isDir ? "dir" : "file",
+                relativePath: childRel,
+            });
+        }
+
+        if (isDir) {
+            await collectMatchingEntries(path.join(basePath, dirent.name), childRel, needle, entries);
+        }
+    }
+}
+
+/**
  * @param {string} projectRoot
  * @param {string} [relativePath]
+ * @param {string} [searchFilter]
  */
-export async function listProjectDirectory(projectRoot, relativePath = "") {
+export async function listProjectDirectory(projectRoot, relativePath = "", searchFilter = "") {
     const { root, target, relativePath: rel } = resolveInsideProject(projectRoot, relativePath);
     let stat;
     try {
@@ -48,6 +77,16 @@ export async function listProjectDirectory(projectRoot, relativePath = "") {
     }
     if (!stat.isDirectory()) {
         throw new Error("不是目录");
+    }
+
+    const needle = String(searchFilter ?? "").trim().toLowerCase();
+    if (needle) {
+        const entries = [];
+        await collectMatchingEntries(target, rel, needle, entries);
+        return {
+            relativePath: rel,
+            entries: sortDirectoryEntries(entries),
+        };
     }
 
     const dirents = await fs.readdir(target, { withFileTypes: true });

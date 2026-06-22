@@ -245,6 +245,7 @@ function registerIpc() {
     ipcMain.handle(IPC_CHANNELS.listProjectDirectory, async (_event, args = {}) => {
         const projectId = String(args.projectId || "").trim();
         const relativePath = String(args.relativePath || "");
+        const searchFilter = String(args.searchFilter || "");
         if (!projectId) {
             throw new Error("缺少 projectId");
         }
@@ -252,7 +253,7 @@ function registerIpc() {
         if (!project?.directoryPath) {
             throw new Error("未找到项目");
         }
-        return listProjectDirectory(project.directoryPath, relativePath);
+        return listProjectDirectory(project.directoryPath, relativePath, searchFilter);
     });
     ipcMain.handle(IPC_CHANNELS.getSession, (_event, sessionId, options = {}) =>
         sessionForRenderer(

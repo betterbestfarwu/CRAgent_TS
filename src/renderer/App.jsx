@@ -1007,6 +1007,7 @@ export function App() {
       .listProjectDirectory({
         projectId: activeProject.id,
         relativePath: atBrowseRelativePath,
+        searchFilter: atSearchFilter,
       })
       .then((result) => {
         if (cancelled) return;
@@ -1024,7 +1025,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [atMention, activeProject?.id, atBrowseRelativePath]);
+  }, [atMention, activeProject?.id, atBrowseRelativePath, atSearchFilter]);
 
   const atFilteredEntries = useMemo(
     () => filterDirectoryEntries(atDirEntries, atPathParts.filter, atSearchFilter),
