@@ -148,6 +148,18 @@ describe("filterDirectoryEntries", () => {
         assert.equal(filtered.length, 1);
         assert.equal(filtered[0].name, "App.jsx");
     });
+
+    it("requires every provided filter to match the entry name", () => {
+        const entries = [
+            { name: "ComposerAtMenu.jsx", kind: "file", relativePath: "ComposerAtMenu.jsx" },
+            { name: "ComposerSlashMenu.jsx", kind: "file", relativePath: "ComposerSlashMenu.jsx" },
+            { name: "Sidebar.jsx", kind: "file", relativePath: "Sidebar.jsx" },
+        ];
+
+        const filtered = filterDirectoryEntries(entries, "composer", "at");
+
+        assert.deepEqual(filtered.map((entry) => entry.name), ["ComposerAtMenu.jsx"]);
+    });
 });
 
 describe("parentRelativePath", () => {

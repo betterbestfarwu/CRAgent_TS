@@ -114,13 +114,18 @@ export function splitAtQueryPath(query) {
 
 /**
  * @param {ProjectDirEntry[]} entries
- * @param {string} filter
+ * @param {...string} filters
  * @returns {ProjectDirEntry[]}
  */
-export function filterDirectoryEntries(entries, filter) {
-    const needle = String(filter ?? "").trim().toLowerCase();
-    if (!needle) return entries;
-    return entries.filter((entry) => entry.name.toLowerCase().includes(needle));
+export function filterDirectoryEntries(entries, ...filters) {
+    const needles = filters
+        .map((filter) => String(filter ?? "").trim().toLowerCase())
+        .filter(Boolean);
+    if (!needles.length) return entries;
+    return entries.filter((entry) => {
+        const name = entry.name.toLowerCase();
+        return needles.every((needle) => name.includes(needle));
+    });
 }
 
 /**

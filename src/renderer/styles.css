@@ -2146,6 +2146,37 @@ body.app-sidebar-resizing {
   background: var(--sidebar-hover);
 }
 
+.at-menu-search {
+  position: sticky;
+  bottom: -6px;
+  margin: 6px -8px -6px;
+  padding: 7px 8px 8px;
+  border-top: 1px solid var(--slash-menu-border);
+  background: var(--slash-menu-bg);
+}
+
+.at-menu-search input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--slash-menu-border);
+  border-radius: 8px;
+  background: var(--app-bg);
+  color: var(--app-fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.at-menu-search input::placeholder {
+  color: var(--sidebar-muted);
+}
+
+.at-menu-search input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
 .at-menu-empty {
   padding: 10px 12px;
   font-size: var(--cursor-font-size-sm);

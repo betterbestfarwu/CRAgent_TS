@@ -938,6 +938,7 @@ export function App() {
   const [atDirError, setAtDirError] = useState("");
   const [atMenuIndex, setAtMenuIndex] = useState(0);
   const [atMenuExpanded, setAtMenuExpanded] = useState(false);
+  const [atSearchFilter, setAtSearchFilter] = useState("");
   const atMentionWasActiveRef = useRef(false);
   const atPickContextRef = useRef(null);
 
@@ -969,6 +970,7 @@ export function App() {
       setAtBrowseRelativePath("");
       setAtDirEntries([]);
       setAtDirError("");
+      setAtSearchFilter("");
       atMentionWasActiveRef.current = false;
       return;
     }
@@ -988,6 +990,7 @@ export function App() {
   useEffect(() => {
     setAtMenuIndex(0);
     setAtMenuExpanded(false);
+    setAtSearchFilter("");
   }, [atMention?.query, atBrowseRelativePath]);
 
   useEffect(() => {
@@ -1024,8 +1027,8 @@ export function App() {
   }, [atMention, activeProject?.id, atBrowseRelativePath]);
 
   const atFilteredEntries = useMemo(
-    () => filterDirectoryEntries(atDirEntries, atPathParts.filter),
-    [atDirEntries, atPathParts.filter],
+    () => filterDirectoryEntries(atDirEntries, atPathParts.filter, atSearchFilter),
+    [atDirEntries, atPathParts.filter, atSearchFilter],
   );
 
   const atNavItems = useMemo(() => {
@@ -2056,12 +2059,14 @@ export function App() {
                     browseRelativePath={atBrowseRelativePath}
                     entries={atDirEntries}
                     filter={atPathParts.filter}
+                    searchFilter={atSearchFilter}
                     loading={atDirLoading}
                     error={atDirError}
                     selectedIndex={atMenuIndex}
                     expanded={atMenuExpanded}
                     onExpandedChange={setAtMenuExpanded}
                     onHoverIndex={setAtMenuIndex}
+                    onSearchFilterChange={setAtSearchFilter}
                     onEnterDirectory={enterAtDirectory}
                     onGoParent={goAtParentDirectory}
                     onPickFile={applyAtFilePick}

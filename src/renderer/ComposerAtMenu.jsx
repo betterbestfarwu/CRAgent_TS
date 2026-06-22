@@ -160,19 +160,21 @@ export function ComposerAtMenu({
     browseRelativePath,
     entries,
     filter,
+    searchFilter,
     loading,
     error,
     selectedIndex,
     expanded,
     onExpandedChange,
     onHoverIndex,
+    onSearchFilterChange,
     onEnterDirectory,
     onGoParent,
     onPickFile,
 }) {
     const filtered = useMemo(
-        () => filterDirectoryEntries(entries, filter),
-        [entries, filter],
+        () => filterDirectoryEntries(entries, filter, searchFilter),
+        [entries, filter, searchFilter],
     );
     const navItems = useMemo(
         () => buildAtNavItems(filtered, browseRelativePath, Boolean(browseRelativePath)),
@@ -208,22 +210,13 @@ export function ComposerAtMenu({
         );
     }
 
-    if (!navItems.length) {
-        return (
-            <div className="at-menu-wrap">
-                <div className="at-menu" role="listbox" aria-label="文件与目录">
-                    <div className="at-menu-empty">无匹配项</div>
-                </div>
-            </div>
-        );
-    }
-
     let rowIndex = -1;
 
     return (
         <div className="at-menu-wrap">
             <div className="at-menu" role="listbox" aria-label="文件与目录">
                 <div className="at-menu-section-label">Files & Folders</div>
+                {!navItems.length ? <div className="at-menu-empty">无匹配项</div> : null}
                 {visibleItems.map((item) => {
                     rowIndex += 1;
                     const index = rowIndex;
@@ -359,6 +352,24 @@ export function ComposerAtMenu({
                         Show {hiddenCount} more
                     </button>
                 ) : null}
+                <div className="at-menu-search">
+                    <input
+                        type="search"
+                        value={searchFilter}
+                        placeholder="Search files and folders"
+                        aria-label="搜索当前目录文件和文件夹"
+                        onChange={(event) => {
+                            onSearchFilterChange(event.target.value);
+                            onHoverIndex(0);
+                        }}
+                        onMouseDown={(event) => {
+                            event.stopPropagation();
+                        }}
+                        onKeyDown={(event) => {
+                            event.stopPropagation();
+                        }}
+                    />
+                </div>
             </div>
             {pathTree ? (
                 <PathTreePopover projectName={projectName} segments={pathTree.segments} />
