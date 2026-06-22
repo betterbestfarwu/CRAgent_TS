@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 
+export const FRAME_POINTER_DOWN_EVENT = "cragent:frame-pointer-down";
+
 function eventTargetsRef(event, ref) {
   const element = ref?.current;
   if (!element) return false;
@@ -17,6 +19,10 @@ export function useOutsidePointerDown(open, refs, onOutsidePointerDown) {
     };
 
     window.addEventListener("pointerdown", handlePointerDown, true);
-    return () => window.removeEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener(FRAME_POINTER_DOWN_EVENT, handlePointerDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener(FRAME_POINTER_DOWN_EVENT, handlePointerDown);
+    };
   }, [open, refs, onOutsidePointerDown]);
 }

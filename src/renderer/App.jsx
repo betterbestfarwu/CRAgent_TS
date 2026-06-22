@@ -11,6 +11,7 @@ import { ComposerAuthMenu, ComposerMenuCheckIcon } from "./ComposerAuthMenu.jsx"
 import { ComposerModelMenu } from "./ComposerModelMenu.jsx";
 import { ComposerContextRing } from "./ComposerContextRing.jsx";
 import { ComposerContextPopup } from "./ComposerContextPopup.jsx";
+import { useOutsidePointerDown } from "./useOutsidePointerDown.js";
 import { ComposerQueuePanel } from "./ComposerQueuePanel.jsx";
 import { ComposerTaskStatus } from "./ComposerTaskStatus.jsx";
 import { ComposerHookLog } from "./ComposerHookLog.jsx";
@@ -458,15 +459,9 @@ export function App() {
     resizeComposer();
   }, [input, page, pendingImages.length, pendingFiles.length, pendingAtMentions.length]);
 
-  useEffect(() => {
-    if (!composerQuickMenuOpen) return;
-    const onPointerDown = (event) => {
-      if (composerQuickMenuRef.current?.contains(event.target)) return;
-      setComposerQuickMenuOpen(false);
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [composerQuickMenuOpen]);
+  useOutsidePointerDown(composerQuickMenuOpen, [composerQuickMenuRef], () => {
+    setComposerQuickMenuOpen(false);
+  });
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 834px)");

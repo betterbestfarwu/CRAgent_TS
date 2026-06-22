@@ -21,6 +21,7 @@ import {
   storeChatFontScale,
 } from "@shared/chatFontScale.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
+import { FRAME_POINTER_DOWN_EVENT } from "./useOutsidePointerDown.js";
 
 function wireMessageRunId(message) {
   return message?.run_id || "";
@@ -283,6 +284,11 @@ export function ChatView({
         const queue = pendingRef.current;
         pendingRef.current = [];
         queue.forEach((run) => run());
+        return;
+      }
+
+      if (data.action === "framePointerDown") {
+        window.dispatchEvent(new Event(FRAME_POINTER_DOWN_EVENT));
         return;
       }
 

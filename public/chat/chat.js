@@ -1934,6 +1934,12 @@
     }
   }
 
+  document.addEventListener('pointerdown', function () {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ action: 'framePointerDown' }, '*');
+    }
+  }, true);
+
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeMermaidModal();
   });
