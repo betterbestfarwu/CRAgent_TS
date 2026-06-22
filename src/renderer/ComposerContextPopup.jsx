@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { formatTokens } from "@shared/tokenEstimator.js";
+import { useOutsidePointerDown } from "./useOutsidePointerDown.js";
 
 const EMPTY_PREVIEW = "(无内容)";
 
@@ -13,21 +14,7 @@ export function ComposerContextPopup({ open, usage, anchorRef, onClose }) {
     }
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (event) => {
-      const anchor = anchorRef?.current;
-      if (
-        panelRef.current?.contains(event.target) ||
-        anchor?.contains(event.target)
-      ) {
-        return;
-      }
-      onClose?.();
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open, anchorRef, onClose]);
+  useOutsidePointerDown(open, [panelRef, anchorRef], () => onClose?.());
 
   if (!open || !usage) {
     return null;

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { AUTH_MODES, normalizeAuthMode } from "@shared/authMode.js";
+import { useOutsidePointerDown } from "./useOutsidePointerDown.js";
 
 export function ComposerMenuCheckIcon() {
   return (
@@ -20,16 +21,7 @@ export function ComposerAuthMenu({ authMode, onChange }) {
   const wrapRef = useRef(null);
   const current = AUTH_MODES[normalizeAuthMode(authMode)];
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (event) => {
-      if (!wrapRef.current?.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+  useOutsidePointerDown(open, [wrapRef], () => setOpen(false));
 
   return (
     <div className={`composer-auth-wrap composer-auth-wrap--${current.id}`} ref={wrapRef}>

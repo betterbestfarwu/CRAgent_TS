@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { formatModelRef, modelRefLabel } from "@shared/modelRef.js";
 import { ComposerMenuCheckIcon } from "./ComposerAuthMenu.jsx";
+import { useOutsidePointerDown } from "./useOutsidePointerDown.js";
 
 export function ComposerModelMenu({ config, currentModel, onChange }) {
   const [open, setOpen] = useState(false);
@@ -22,16 +23,7 @@ export function ComposerModelMenu({ config, currentModel, onChange }) {
     );
   }, [config, currentModel]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (event) => {
-      if (!wrapRef.current?.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+  useOutsidePointerDown(open, [wrapRef], () => setOpen(false));
 
   return (
     <div className="composer-model-wrap" ref={wrapRef}>

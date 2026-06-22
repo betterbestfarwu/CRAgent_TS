@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useOutsidePointerDown } from "./useOutsidePointerDown.js";
 
 const ICON_FOLDER = (
   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
@@ -92,16 +93,7 @@ export function ComposerProjectPicker({
     }
   }, [highlightIndex, menuItems.length]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (event) => {
-      if (!wrapRef.current?.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+  useOutsidePointerDown(open, [wrapRef], () => setOpen(false));
 
   function activateItem(item) {
     if (!item) return;
