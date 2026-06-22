@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
     buildAtNavItems,
     buildPathTreeSegments,
@@ -183,6 +183,8 @@ export function ComposerAtMenu({
     const visibleItems = expanded ? navItems : navItems.slice(0, VISIBLE_LIMIT);
     const hiddenCount = navItems.length - visibleItems.length;
     const [hoveredEntry, setHoveredEntry] = useState(null);
+    const searchInputRef = useRef(null);
+    const keepSearchFocusRef = useRef(false);
 
     const pathTree = useMemo(() => {
         if (!hoveredEntry) return null;
@@ -190,25 +192,14 @@ export function ComposerAtMenu({
         return { segments, leaf: hoveredEntry.name };
     }, [hoveredEntry]);
 
-    if (loading) {
-        return (
-            <div className="at-menu-wrap">
-                <div className="at-menu" role="listbox" aria-label="文件与目录">
-                    <div className="at-menu-empty">加载中…</div>
-                </div>
-            </div>
-        );
-    }
-
-    if (error) {
-        return (
-            <div className="at-menu-wrap">
-                <div className="at-menu" role="listbox" aria-label="文件与目录">
-                    <div className="at-menu-empty">{error}</div>
-                </div>
-            </div>
-        );
-    }
+    useLayoutEffect(() => {
+        if (!keepSearchFocusRef.current) return;
+        const input = searchInputRef.current;
+        if (!input || document.activeElement === input) return;
+        input.focus();
+        const pos = input.value.length;
+        input.setSelectionRange(pos, pos);
+    }, [loading, error, searchFilter, navItems.length]);
 
     let rowIndex = -1;
 
@@ -216,8 +207,13 @@ export function ComposerAtMenu({
         <div className="at-menu-wrap">
             <div className="at-menu" role="listbox" aria-label="文件与目录">
                 <div className="at-menu-section-label">Files & Folders</div>
-                {!navItems.length ? <div className="at-menu-empty">无匹配项</div> : null}
-                {visibleItems.map((item) => {
+                {loading ? <div className="at-menu-empty">加载中…</div> : null}
+                {!loading && error ? <div className="at-menu-empty">{error}</div> : null}
+                {!loading && !error && !navItems.length ? (
+                    <div className="at-menu-empty">无匹配项</div>
+                ) : null}
+                {!loading && !error
+                    ? visibleItems.map((item) => {
                     rowIndex += 1;
                     const index = rowIndex;
                     const active = index === selectedIndex;
@@ -341,8 +337,9 @@ export function ComposerAtMenu({
                             </button>
                         </div>
                     );
-                })}
-                {hiddenCount > 0 && !expanded ? (
+                })
+                    : null}
+                {!loading && !error && hiddenCount > 0 && !expanded ? (
                     <button
                         type="button"
                         className="at-menu-more"
@@ -354,13 +351,22 @@ export function ComposerAtMenu({
                 ) : null}
                 <div className="at-menu-search">
                     <input
-                        type="search"
+                        ref={searchInputRef}
+                        type="text"
+                        role="searchbox"
                         value={searchFilter}
                         placeholder="Search files and folders"
                         aria-label="搜索当前目录文件和文件夹"
                         onChange={(event) => {
+                            keepSearchFocusRef.current = true;
                             onSearchFilterChange(event.target.value);
                             onHoverIndex(0);
+                        }}
+                        onFocus={() => {
+                            keepSearchFocusRef.current = true;
+                        }}
+                        onBlur={() => {
+                            keepSearchFocusRef.current = false;
                         }}
                         onMouseDown={(event) => {
                             event.stopPropagation();
