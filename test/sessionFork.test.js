@@ -158,8 +158,9 @@ describe("SessionStore.removeMessages", () => {
         assert.equal(updated.meta.llmContextDividerId, undefined);
         assert.equal(updated.meta.llmContextFromIndex, undefined);
 
+        const locatedDir = store.locateSessionStorage(source.meta.id);
         const lines = fs
-            .readFileSync(messagesFile(dir, source.meta.id), "utf-8")
+            .readFileSync(messagesFile(locatedDir, source.meta.id), "utf-8")
             .trim()
             .split("\n")
             .map((line) => JSON.parse(line));
@@ -207,7 +208,10 @@ describe("SessionStore.removeMessages", () => {
         assert.equal(updated.messages[0].id, "u2");
         assert.equal(updated.meta.llmContextDividerId, undefined);
 
-        const metaOnDisk = JSON.parse(fs.readFileSync(metaFile(dir, source.meta.id), "utf-8"));
+        const locatedDir = store.locateSessionStorage(source.meta.id);
+        const metaOnDisk = JSON.parse(
+            fs.readFileSync(metaFile(locatedDir, source.meta.id), "utf-8"),
+        );
         assert.equal(metaOnDisk.llmContextDividerId, undefined);
         assert.equal(metaOnDisk.llmContextFromIndex, undefined);
     });
@@ -242,7 +246,8 @@ describe("SessionStore.removeMessages", () => {
         assert.deepEqual(updated.messages, []);
         assert.equal(updated.meta.llmContextDividerId, undefined);
         assert.equal(updated.meta.contextSummary, undefined);
-        assert.equal(fs.existsSync(messagesFile(dir, source.meta.id)), false);
+        const locatedDir = store.locateSessionStorage(source.meta.id);
+        assert.equal(fs.existsSync(messagesFile(locatedDir, source.meta.id)), false);
     });
 
     it("removes adjacent divider after deletion between dividers", () => {
@@ -300,8 +305,9 @@ describe("SessionStore.removeMessages", () => {
         assert.equal(updated.meta.llmContextDividerId, "d1");
         assert.equal(updated.meta.contextSummary, undefined);
 
+        const locatedDir = store.locateSessionStorage(source.meta.id);
         const lines = fs
-            .readFileSync(messagesFile(dir, source.meta.id), "utf-8")
+            .readFileSync(messagesFile(locatedDir, source.meta.id), "utf-8")
             .trim()
             .split("\n")
             .map((line) => JSON.parse(line));
