@@ -20,6 +20,7 @@ import { expandAtMentionsToAbsolute } from "../src/main/atMentionExpand.js";
 import {
     COMPOSER_CARET_ZWSP,
     getComposerChipAfterSelection,
+    getComposerChipBeforeSelection,
     moveComposerCaretBeforeChipBeforeSelection,
     moveComposerCaretLeftBeforeChipIfNeeded,
     normalizeComposerEditorText,
@@ -501,6 +502,84 @@ describe("moveComposerCaretBeforeChipBeforeSelection", () => {
     });
 });
 
+describe("getComposerChipBeforeSelection", () => {
+    function withFakeDom(testBody) {
+        const originalNode = globalThis.Node;
+        const originalWindow = globalThis.window;
+        try {
+            globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 };
+            testBody();
+        } finally {
+            globalThis.Node = originalNode;
+            globalThis.window = originalWindow;
+        }
+    }
+
+    function createFakeChip(id, kind = "mention") {
+        return {
+            nodeType: 1,
+            classList: { contains: (name) => name === "composer-at-chip" },
+            dataset: kind === "file" ? { fileId: id } : { mentionId: id },
+        };
+    }
+
+    it("detects mention chip immediately before the caret", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("m1");
+            const anchor = {
+                nodeType: 3,
+                nodeValue: COMPOSER_CARET_ZWSP,
+                textContent: COMPOSER_CARET_ZWSP,
+                previousSibling: chip,
+            };
+            const root = {
+                childNodes: [chip, anchor],
+                contains: (node) => node === root || node === chip || node === anchor,
+            };
+            globalThis.window = {
+                getSelection: () => ({
+                    rangeCount: 1,
+                    getRangeAt: () => ({
+                        collapsed: true,
+                        startContainer: anchor,
+                        startOffset: 1,
+                    }),
+                }),
+            };
+
+            assert.deepEqual(getComposerChipBeforeSelection(root), { mentionId: "m1" });
+        });
+    });
+
+    it("detects file chip immediately before the caret", () => {
+        withFakeDom(() => {
+            const chip = createFakeChip("f1", "file");
+            const anchor = {
+                nodeType: 3,
+                nodeValue: COMPOSER_CARET_ZWSP,
+                textContent: COMPOSER_CARET_ZWSP,
+                previousSibling: chip,
+            };
+            const root = {
+                childNodes: [chip, anchor],
+                contains: (node) => node === root || node === chip || node === anchor,
+            };
+            globalThis.window = {
+                getSelection: () => ({
+                    rangeCount: 1,
+                    getRangeAt: () => ({
+                        collapsed: true,
+                        startContainer: anchor,
+                        startOffset: 1,
+                    }),
+                }),
+            };
+
+            assert.deepEqual(getComposerChipBeforeSelection(root), { fileId: "f1" });
+        });
+    });
+});
+
 describe("moveComposerCaretLeftBeforeChipIfNeeded", () => {
     function withFakeDom(testBody) {
         const originalNode = globalThis.Node;
@@ -558,6 +637,38 @@ describe("moveComposerCaretLeftBeforeChipIfNeeded", () => {
 
     it("places the selection before the chip behind the caret", () => {
         withFakeDom(() => {
+            const leading = {
+                nodeType: 3,
+                nodeValue: "x",
+                textContent: "x",
+            };
+            const chip = createFakeChip("m1");
+            const anchor = {
+                nodeType: 3,
+                nodeValue: COMPOSER_CARET_ZWSP,
+                textContent: COMPOSER_CARET_ZWSP,
+                previousSibling: chip,
+            };
+            chip.previousSibling = leading;
+            const root = {
+                nodeType: 1,
+                childNodes: [leading, chip, anchor],
+                contains: (node) => node === root || node === leading || node === chip || node === anchor,
+                focus() {},
+            };
+            const selection = installFakeSelection({
+                collapsed: true,
+                startContainer: anchor,
+                startOffset: 1,
+            });
+
+            assert.equal(moveComposerCaretLeftBeforeChipIfNeeded(root), true);
+            assert.equal(selection.addedRange.before, chip);
+        });
+    });
+
+    it("does not move before a leading chip where the caret becomes invisible", () => {
+        withFakeDom(() => {
             const chip = createFakeChip("m1");
             const anchor = {
                 nodeType: 3,
@@ -571,14 +682,13 @@ describe("moveComposerCaretLeftBeforeChipIfNeeded", () => {
                 contains: (node) => node === root || node === chip || node === anchor,
                 focus() {},
             };
-            const selection = installFakeSelection({
+            installFakeSelection({
                 collapsed: true,
                 startContainer: anchor,
                 startOffset: 1,
             });
 
-            assert.equal(moveComposerCaretLeftBeforeChipIfNeeded(root), true);
-            assert.equal(selection.addedRange.before, chip);
+            assert.equal(moveComposerCaretLeftBeforeChipIfNeeded(root), false);
         });
     });
 

@@ -28,8 +28,8 @@ import { useFileIcons } from "./useFileIcons.js";
 import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
   getComposerChipAfterSelection,
+  getComposerChipBeforeSelection,
   getComposerEditorCaretOffset,
-  moveComposerCaretBeforeChipBeforeSelection,
   moveComposerCaretLeftBeforeChipIfNeeded,
   placeComposerCaretAtEnd,
   placeComposerCaretAtOffset,
@@ -2171,9 +2171,15 @@ export function App() {
                     noteManualComposerTriggerStart(e, segment);
                     if (e.key === "Backspace" && segment?.contentEditable) {
                       const editor = e.currentTarget;
-                      if (moveComposerCaretBeforeChipBeforeSelection(editor)) {
+                      const chipBefore = getComposerChipBeforeSelection(editor);
+                      if (chipBefore?.mentionId) {
                         e.preventDefault();
-                        setComposerCaret(getComposerEditorCaretOffset(editor));
+                        removePendingAtMention(chipBefore.mentionId);
+                        return;
+                      }
+                      if (chipBefore?.fileId) {
+                        e.preventDefault();
+                        removePendingFile(chipBefore.fileId);
                         return;
                       }
                       const chipAfter = getComposerChipAfterSelection(editor);

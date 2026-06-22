@@ -200,6 +200,23 @@ export function getComposerMentionBeforeSelection(root) {
 }
 
 /**
+ * Non-editable mention/file chip immediately before the collapsed selection.
+ * @param {HTMLElement | null} root
+ * @returns {{ mentionId?: string, fileId?: string } | null}
+ */
+export function getComposerChipBeforeSelection(root) {
+    const chip = findComposerChipNodeBeforeSelection(root);
+    if (!chip) return null;
+    if (chip.dataset?.mentionId) {
+        return { mentionId: chip.dataset.mentionId };
+    }
+    if (chip.dataset?.fileId) {
+        return { fileId: chip.dataset.fileId };
+    }
+    return null;
+}
+
+/**
  * Non-editable mention/file chip immediately after the collapsed selection.
  * @param {HTMLElement | null} root
  * @returns {{ mentionId?: string, fileId?: string } | null}
@@ -235,6 +252,7 @@ export function moveComposerCaretLeftBeforeChipIfNeeded(root) {
     if (!root) return false;
     const chip = findComposerChipNodeBeforeSelectionForArrowLeft(root);
     if (!chip) return false;
+    if (!hasComposerContentBeforeChip(chip)) return false;
     return placeComposerSelectionBeforeChip(root, chip);
 }
 
@@ -362,6 +380,15 @@ function findComposerChipBeforeTextCursorForArrowLeft(textNode, offset, findIdOn
     }
 
     return null;
+}
+
+/**
+ * Moving the DOM selection before a leading chip can render no visible caret.
+ * @param {HTMLElement} chip
+ * @returns {boolean}
+ */
+function hasComposerContentBeforeChip(chip) {
+    return Boolean(skipEmptyComposerTextSiblings(chip.previousSibling));
 }
 
 /**
