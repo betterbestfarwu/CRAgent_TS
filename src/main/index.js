@@ -29,6 +29,7 @@ import { registerPlanApprovalBridge, requestPlanApproval } from "./planApprovalB
 import { readPlanApprovalDraft, getPlanDisplayPath, readPlanFile, writePlanFile } from "./planMode.js";
 import { createPlanModeTools } from "./tools/planModeTools.js";
 import { createComputerUseTools } from "./tools/computerUseTools.js";
+import { createWebSearchTools } from "./tools/webSearchTools.js";
 import fs from "node:fs";
 import { normalizeAuthMode } from "@shared/authMode.js";
 import { resolveWindowChrome } from "@shared/windowChrome.js";
@@ -584,7 +585,26 @@ function bootstrap() {
                 confirmToolExecution: baseConfirm,
                 getAuthMode,
             });
-            return [...builtin, ...buildMcpTools(), ...meta, ...planTools, ...computerTools];
+            const webSearchTools = createWebSearchTools({
+                getAgentTools,
+                getConfig: () => configStore.get(),
+                getSessionModel: (sessionId) => {
+                    try {
+                        const session = sessionStore.get(sessionId);
+                        return {
+                            providerKey: session.meta.providerKey,
+                            modelId: session.meta.modelId,
+                        };
+                    } catch {
+                        return null;
+                    }
+                },
+                confirmToolExecution: baseConfirm,
+                getAuthMode,
+                resolveRequestTimeoutMs: () =>
+                    resolveLlmRequestTimeoutMs(configStore.get().ui),
+            });
+            return [...builtin, ...buildMcpTools(), ...meta, ...planTools, ...computerTools, ...webSearchTools];
         },
         baseConfirm,
         getAuthMode,

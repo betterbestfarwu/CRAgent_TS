@@ -4,7 +4,7 @@ const READ_TOOLS = new Set(["read_file", "memory_get"]);
 const LIST_TOOLS = new Set(["list_dir"]);
 const SEARCH_TOOLS = new Set(["memory_search"]);
 const SHELL_TOOLS = new Set(["bash"]);
-const WEB_TOOLS = new Set(["web_fetch"]);
+const WEB_TOOLS = new Set(["web_fetch", "web_search"]);
 const WRITE_TOOLS = new Set(["write_file"]);
 
 /** Tools whose parallel uses in one assistant turn can collapse in the thinking UI. */

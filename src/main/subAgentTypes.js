@@ -21,6 +21,7 @@ export const SUB_AGENT_TYPES = {
             "read_file",
             "list_dir",
             "web_fetch",
+            "web_search",
             "memory_get",
             "memory_search",
             "load_skill",

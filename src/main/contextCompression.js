@@ -27,6 +27,7 @@ export const COMPACTABLE_TOOLS = new Set([
     "bash",
     "list_dir",
     "web_fetch",
+    "web_search",
     "memory_get",
     "memory_search",
     "write_file",

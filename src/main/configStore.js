@@ -162,6 +162,7 @@ export class ConfigStore {
                             enable_skills: true,
                             enable_mcp: true,
                             enable_computer_use: false,
+                            enable_web_search: false,
                             allow_sub_agents: false,
                         },
                     },

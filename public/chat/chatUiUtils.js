@@ -34,7 +34,7 @@ var CRAgentChatUtils = (() => {
   var LIST_TOOLS = /* @__PURE__ */ new Set(["list_dir"]);
   var SEARCH_TOOLS = /* @__PURE__ */ new Set(["memory_search"]);
   var SHELL_TOOLS = /* @__PURE__ */ new Set(["bash"]);
-  var WEB_TOOLS = /* @__PURE__ */ new Set(["web_fetch"]);
+  var WEB_TOOLS = /* @__PURE__ */ new Set(["web_fetch", "web_search"]);
   var WRITE_TOOLS = /* @__PURE__ */ new Set(["write_file"]);
   var GROUPABLE_TOOLS = /* @__PURE__ */ new Set([
     ...READ_TOOLS,
@@ -97,8 +97,11 @@ var CRAgentChatUtils = (() => {
   function isProcessAssistantWithTools(msg) {
     return msg?.role === "assistant" && Boolean(msg.tool_calls?.length);
   }
+  function assistantVisibleText(msg) {
+    return String(msg?.content || "").trim() || String(msg?.reasoningContent || msg?.reasoning_content || "").trim();
+  }
   function hasVisibleAssistantContent(msg) {
-    return msg?.role === "assistant" && String(msg.content || "").trim().length > 0;
+    return msg?.role === "assistant" && Boolean(assistantVisibleText(msg));
   }
   function recordToolCallStats(call, stats) {
     const category = categorizeToolName(call.name);
@@ -295,7 +298,7 @@ var CRAgentChatUtils = (() => {
         stats.assistantText += 1;
         items.push({
           kind: "assistant-text",
-          content: msg.content || ""
+          content: msg.content || msg.reasoningContent || msg.reasoning_content || ""
         });
       }
       if (msg?.role === "tool") {

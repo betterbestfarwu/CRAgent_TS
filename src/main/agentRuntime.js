@@ -98,6 +98,8 @@ import { ipcPayloadForRenderer } from "./rendererSession.js";
 import { normalizeExecutionMode } from "@shared/executionMode.js";
 import { normalizeToolResult, toolResultContent } from "@shared/toolResult.js";
 import { computerUseSystemPromptSection } from "./tools/computerUseTools.js";
+import { webSearchSystemPromptSection } from "./tools/webSearchTools.js";
+import { isWebSearchAvailable } from "./webSearchService.js";
 import { computerActionFingerprint, formatComputerLoopNudge } from "./computerUse.js";
 import { rejectAllPendingConfirms } from "./confirmBridge.js";
 import {
@@ -305,6 +307,16 @@ export class AgentRuntime {
         }
         if (agent?.tools?.enable_computer_use === true) {
             parts.push(computerUseSystemPromptSection());
+        }
+        if (
+            agent?.tools?.enable_web_search === true &&
+            isWebSearchAvailable(
+                this.configStore.get(),
+                session.meta.providerKey,
+                session.meta.modelId,
+            )
+        ) {
+            parts.push(webSearchSystemPromptSection());
         }
         if (this.sessionExecutionMode(session) === "plan") {
             const { filePath: planFilePath, sessionsDir, workspace } = this.resolveSessionPlan(

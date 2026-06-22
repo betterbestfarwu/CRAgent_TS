@@ -1374,6 +1374,14 @@ export function SettingsPage({ config, onBack, onSave, onPersistConfig, onSyncPr
                 }
               />
               <SettingsToggleRow
+                title="Enable web search"
+                description="允许 Agent 通过 Anthropic Web Search API 搜索网页（需配置 Anthropic 提供商及 Claude 4 模型）。"
+                checked={Boolean(defaultAgentListItem?.tools?.enable_web_search)}
+                onChange={(checked) =>
+                  updateDefaultAgentListItem({ tools: { enable_web_search: checked } })
+                }
+              />
+              <SettingsToggleRow
                 title="Allow sub-agents"
                 description="允许主 Agent 通过 Task 工具启动子 Agent。"
                 checked={Boolean(defaultAgentListItem?.tools?.allow_sub_agents)}

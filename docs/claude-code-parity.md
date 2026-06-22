@@ -248,7 +248,7 @@
 | Bash / Shell | Bash | `bash` + safety 分类 | ✅ |
 | Grep / Glob | 独立工具 | 通过 `bash` / 无原生 grep 工具 | 🟡 |
 | Web fetch | WebFetch | `web_fetch` | ✅ |
-| Web search | WebSearch | ❌ | ❌ |
+| Web search | WebSearch | `web_search` | ✅ |
 | MCP 工具 | ✅ | ✅ `buildMcpTools` | ✅ |
 | Skills | bundled + 用户 | `~/.CRAgent/skills` + URL 安装 | 🟡 |
 | Tool search（延迟加载） | 有 | `tool_search` | ✅ |

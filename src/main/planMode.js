@@ -26,6 +26,7 @@ export const PLAN_MODE_TOOL_NAMES = new Set([
     "memory_get",
     "memory_search",
     "web_fetch",
+    "web_search",
     "load_skill",
     "tool_search",
     "write_file",

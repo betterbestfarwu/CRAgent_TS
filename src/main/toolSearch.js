@@ -21,6 +21,7 @@ export const PINNED_TOOL_NAMES = new Set([
     "list_dir",
     "bash",
     "web_fetch",
+    "web_search",
     "memory_get",
     "memory_search",
     "load_skill",
