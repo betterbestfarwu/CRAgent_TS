@@ -61,7 +61,11 @@ import {
 import { parseActiveSlashCommand, isActiveManualSlashCommand, isSlashKey } from "@shared/chatCommands.js";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
 import { buildComposerRetryState } from "@shared/composerRetry.js";
-import { filesToImageAttachments, toStoredImages } from "@shared/chatImages";
+import {
+  filesToImageAttachments,
+  htmlImageDataUrlsToAttachments,
+  toStoredImages,
+} from "@shared/chatImages";
 import { isPlanRejectionMessage } from "@shared/planMessages.js";
 import {
   estimateSessionContextBreakdown,
@@ -1131,6 +1135,28 @@ export function App() {
     setSlashCommandManualStart(null);
   }
 
+  function insertComposerTextAtCaret(text, target) {
+    const pasted = String(text || "");
+    if (!pasted) return;
+    const el = target || textareaRef.current;
+    let start = composerCaret;
+    let end = composerCaret;
+    if (el?.isContentEditable) {
+      const offset = getComposerEditorCaretOffset(el);
+      start = offset;
+      end = offset;
+    } else if (el && typeof el.selectionStart === "number") {
+      start = el.selectionStart;
+      end = typeof el.selectionEnd === "number" ? el.selectionEnd : start;
+    }
+    const safeStart = Math.max(0, Math.min(start, input.length));
+    const safeEnd = Math.max(safeStart, Math.min(end, input.length));
+    const next = `${input.slice(0, safeStart)}${pasted}${input.slice(safeEnd)}`;
+    const caret = safeStart + pasted.length;
+    updateComposerInput(next, pendingAtMentions, caret);
+    requestComposerFocusAtCaret(caret);
+  }
+
   function replaceActiveAtMention(nextMentionBody) {
     if (!atMention) return;
     const prefix = input.slice(0, atMention.mentionStart);
@@ -2165,6 +2191,20 @@ export function App() {
                       if (files.length) {
                         e.preventDefault();
                         void addImagesFromFiles(files);
+                        return;
+                      }
+                      const html = e.clipboardData?.getData("text/html") || "";
+                      const pastedImages = htmlImageDataUrlsToAttachments(html, {
+                        existingCount: pendingImages.length,
+                      });
+                      if (pastedImages.length) {
+                        e.preventDefault();
+                        setPendingImages((prev) => [...prev, ...pastedImages]);
+                        insertComposerTextAtCaret(
+                          e.clipboardData?.getData("text/plain") || "",
+                          e.currentTarget,
+                        );
+                        noteComposerTextPaste();
                         return;
                       }
                       noteComposerTextPaste();

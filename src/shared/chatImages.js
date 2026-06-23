@@ -24,6 +24,68 @@ export function readFileAsDataUrl(file) {
     });
 }
 
+function decodeHtmlAttribute(value) {
+    return String(value || "")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">");
+}
+
+export function extractHtmlImageDataUrls(html) {
+    const value = String(html || "");
+    if (!value) {
+        return [];
+    }
+
+    const images = [];
+    const imgRe = /<img\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/gi;
+    let match;
+    while ((match = imgRe.exec(value))) {
+        const src = decodeHtmlAttribute(match[1] || match[2] || match[3] || "");
+        if (/^data:image\/[A-Za-z0-9.+-]+;base64,/i.test(src)) {
+            images.push(src);
+        }
+    }
+    return images;
+}
+
+function mimeTypeFromDataUrl(dataUrl) {
+    return (String(dataUrl || "").match(/^data:([^;,]+)[;,]/i) || [])[1] || "image/png";
+}
+
+function pastedImageName(mimeType) {
+    switch (String(mimeType || "").toLowerCase()) {
+        case "image/jpeg":
+        case "image/jpg":
+            return "pasted-image.jpg";
+        case "image/webp":
+            return "pasted-image.webp";
+        case "image/gif":
+            return "pasted-image.gif";
+        case "image/png":
+        default:
+            return "pasted-image.png";
+    }
+}
+
+export function htmlImageDataUrlsToAttachments(html, options = {}) {
+    const idFactory = options.idFactory || (() => crypto.randomUUID());
+    const available = Math.max(0, MAX_CHAT_IMAGES - (options.existingCount || 0));
+    return extractHtmlImageDataUrls(html)
+        .slice(0, available)
+        .map((dataUrl) => {
+            const mimeType = mimeTypeFromDataUrl(dataUrl);
+            return {
+                id: idFactory(),
+                mimeType,
+                dataUrl,
+                name: pastedImageName(mimeType),
+            };
+        });
+}
+
 export async function filesToImageAttachments(files, existingCount = 0) {
     const accepted = [];
     const errors = [];
