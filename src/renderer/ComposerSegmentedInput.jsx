@@ -256,6 +256,9 @@ function ComposerInlineEditor({
       className="composer-input composer-input-editor composer-input-primary"
       contentEditable
       suppressContentEditableWarning
+      spellCheck={false}
+      autoCorrect="off"
+      autoCapitalize="off"
       role="textbox"
       aria-multiline="true"
       data-placeholder={placeholder}
@@ -324,6 +327,9 @@ function ComposerPlainTextarea({
       value={segment.content}
       rows={1}
       placeholder={placeholder}
+      spellCheck={false}
+      autoCorrect="off"
+      autoCapitalize="off"
       onChange={(event) => handleSegmentChange(0, event.target.value, event)}
       onInput={onResize}
       onPaste={onPaste}
