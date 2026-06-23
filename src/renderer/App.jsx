@@ -27,7 +27,6 @@ import { ComposerSegmentedInput } from "./ComposerSegmentedInput.jsx";
 import { useFileIcons } from "./useFileIcons.js";
 import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
-  getComposerChipAfterSelection,
   getComposerChipBeforeSelection,
   getComposerEditorCaretOffset,
   moveComposerCaretLeftBeforeChipIfNeeded,
@@ -2183,17 +2182,6 @@ export function App() {
                       if (chipBefore?.fileId) {
                         e.preventDefault();
                         removePendingFile(chipBefore.fileId);
-                        return;
-                      }
-                      const chipAfter = getComposerChipAfterSelection(editor);
-                      if (chipAfter?.mentionId) {
-                        e.preventDefault();
-                        removePendingAtMention(chipAfter.mentionId);
-                        return;
-                      }
-                      if (chipAfter?.fileId) {
-                        e.preventDefault();
-                        removePendingFile(chipAfter.fileId);
                         return;
                       }
                     }

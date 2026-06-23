@@ -433,13 +433,24 @@ describe("moveComposerCaretBeforeChipBeforeSelection", () => {
         globalThis.document = {
             createRange: () => ({
                 before: null,
+                startNode: null,
+                startOffset: null,
                 collapsed: false,
+                setStart(node, offset) {
+                    this.startNode = node;
+                    this.startOffset = offset;
+                },
                 setStartBefore(node) {
                     this.before = node;
                 },
                 collapse(value) {
                     this.collapsed = value;
                 },
+            }),
+            createTextNode: (value) => ({
+                nodeType: 3,
+                nodeValue: value,
+                textContent: value,
             }),
         };
         return selection;
@@ -626,13 +637,24 @@ describe("moveComposerCaretLeftBeforeChipIfNeeded", () => {
         globalThis.document = {
             createRange: () => ({
                 before: null,
+                startNode: null,
+                startOffset: null,
                 collapsed: false,
+                setStart(node, offset) {
+                    this.startNode = node;
+                    this.startOffset = offset;
+                },
                 setStartBefore(node) {
                     this.before = node;
                 },
                 collapse(value) {
                     this.collapsed = value;
                 },
+            }),
+            createTextNode: (value) => ({
+                nodeType: 3,
+                nodeValue: value,
+                textContent: value,
             }),
         };
         return selection;
@@ -670,7 +692,7 @@ describe("moveComposerCaretLeftBeforeChipIfNeeded", () => {
         });
     });
 
-    it("does not move before a leading chip where the caret becomes invisible", () => {
+    it("places the selection in a leading caret anchor before a leading chip", () => {
         withFakeDom(() => {
             const chip = createFakeChip("m1");
             const anchor = {
@@ -683,6 +705,18 @@ describe("moveComposerCaretLeftBeforeChipIfNeeded", () => {
                 nodeType: 1,
                 childNodes: [chip, anchor],
                 contains: (node) => node === root || node === chip || node === anchor,
+                insertBefore(node, before) {
+                    const index = this.childNodes.indexOf(before);
+                    if (index === -1) {
+                        this.childNodes.push(node);
+                    } else {
+                        this.childNodes.splice(index, 0, node);
+                    }
+                    node.parentNode = this;
+                    node.nextSibling = before;
+                    before.previousSibling = node;
+                    return node;
+                },
                 focus() {},
             };
             installFakeSelection({
@@ -691,7 +725,8 @@ describe("moveComposerCaretLeftBeforeChipIfNeeded", () => {
                 startOffset: 1,
             });
 
-            assert.equal(moveComposerCaretLeftBeforeChipIfNeeded(root), false);
+            assert.equal(moveComposerCaretLeftBeforeChipIfNeeded(root), true);
+            assert.equal(root.childNodes[0].nodeValue, COMPOSER_CARET_ZWSP);
         });
     });
 

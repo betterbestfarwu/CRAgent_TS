@@ -314,7 +314,9 @@ export function moveComposerCaretLeftBeforeChipIfNeeded(root) {
     if (!root) return false;
     const chip = findComposerChipNodeBeforeSelectionForArrowLeft(root);
     if (!chip) return false;
-    if (!hasComposerContentBeforeChip(chip)) return false;
+    if (!hasComposerContentBeforeChip(chip)) {
+        return placeComposerSelectionInLeadingAnchorBeforeChip(root, chip);
+    }
     return placeComposerSelectionBeforeChip(root, chip);
 }
 
@@ -353,6 +355,34 @@ export function placeComposerCaretAfterChip(root, chipRef) {
 function placeComposerSelectionBeforeChip(root, chip) {
     const range = document.createRange();
     range.setStartBefore(chip);
+    range.collapse(true);
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    if (typeof root.focus === "function") {
+        root.focus({ preventScroll: true });
+    }
+    return true;
+}
+
+/**
+ * @param {HTMLElement} root
+ * @param {HTMLElement} chip
+ * @returns {boolean}
+ */
+function placeComposerSelectionInLeadingAnchorBeforeChip(root, chip) {
+    let anchor = chip.previousSibling;
+    if (anchor?.nodeType !== Node.TEXT_NODE || normalizeComposerEditorText(anchor.nodeValue ?? "").length > 0) {
+        anchor = document.createTextNode(COMPOSER_CARET_ZWSP);
+        const parent = chip.parentNode ?? root;
+        parent.insertBefore(anchor, chip);
+    } else if (!(anchor.nodeValue ?? "").includes(COMPOSER_CARET_ZWSP)) {
+        anchor.nodeValue = COMPOSER_CARET_ZWSP;
+    }
+
+    const range = document.createRange();
+    range.setStart(anchor, anchor.nodeValue?.length ?? 0);
     range.collapse(true);
 
     const selection = window.getSelection();
