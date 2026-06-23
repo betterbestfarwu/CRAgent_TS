@@ -60,6 +60,32 @@ export function syncComposerEditorRefsAfterInternalEdit(refs, state) {
 }
 
 /**
+ * @param {{
+ *   mentions: Array<{ id: string, attachSeq?: number }>,
+ *   files: Array<{ id: string, attachSeq?: number }>,
+ *   previousMentionIds: Set<string>,
+ *   previousFileIds: Set<string>,
+ * }} state
+ * @returns {Array<{ mentionId: string, attachSeq: number } | { fileId: string, attachSeq: number }>}
+ */
+export function collectComposerAddedChips(state) {
+    return [
+        ...(state.mentions || [])
+            .filter((mention) => !state.previousMentionIds.has(mention.id))
+            .map((mention) => ({
+                mentionId: mention.id,
+                attachSeq: typeof mention.attachSeq === "number" ? mention.attachSeq : Number.MAX_SAFE_INTEGER,
+            })),
+        ...(state.files || [])
+            .filter((file) => !state.previousFileIds.has(file.id))
+            .map((file) => ({
+                fileId: file.id,
+                attachSeq: typeof file.attachSeq === "number" ? file.attachSeq : Number.MAX_SAFE_INTEGER,
+            })),
+    ].sort((a, b) => a.attachSeq - b.attachSeq);
+}
+
+/**
  * @param {HTMLElement} root
  * @param {Map<string, { id: string, name: string, relativePath: string }>} mentionById
  * @returns {{ text: string, mentions: ComposerEditorMention[], files: ComposerEditorFileRef[] }}

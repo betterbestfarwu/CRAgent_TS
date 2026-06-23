@@ -19,6 +19,7 @@ import {
 import { expandAtMentionsToAbsolute } from "../src/main/atMentionExpand.js";
 import {
     COMPOSER_CARET_ZWSP,
+    collectComposerAddedChips,
     getComposerChipAfterSelection,
     getComposerChipBeforeSelection,
     moveComposerCaretBeforeChipBeforeSelection,
@@ -824,6 +825,35 @@ describe("placeComposerCaretAfterChip", () => {
             assert.equal(selection.addedRange.startOffset, 1);
             assert.equal(selection.addedRange.collapsed, true);
         });
+    });
+});
+
+describe("collectComposerAddedChips", () => {
+    it("treats existing chips as added on the first contenteditable mount", () => {
+        assert.deepEqual(
+            collectComposerAddedChips({
+                mentions: [{ id: "m1", attachSeq: 1 }],
+                files: [{ id: "f1", attachSeq: 2 }],
+                previousMentionIds: new Set(),
+                previousFileIds: new Set(),
+            }),
+            [
+                { mentionId: "m1", attachSeq: 1 },
+                { fileId: "f1", attachSeq: 2 },
+            ],
+        );
+    });
+
+    it("only returns chips that were not previously synced", () => {
+        assert.deepEqual(
+            collectComposerAddedChips({
+                mentions: [{ id: "m1", attachSeq: 1 }, { id: "m2", attachSeq: 3 }],
+                files: [{ id: "f1", attachSeq: 2 }],
+                previousMentionIds: new Set(["m1"]),
+                previousFileIds: new Set(["f1"]),
+            }),
+            [{ mentionId: "m2", attachSeq: 3 }],
+        );
     });
 });
 

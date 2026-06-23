@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { applyComposerTextSegmentEdit, buildComposerDisplaySegments, buildComposerSegments } from "@shared/atMention.js";
 import { resolveProjectFilePath } from "@shared/projectPaths.js";
 import {
+  collectComposerAddedChips,
   ensureComposerCaretAnchor,
   getComposerEditorCaretOffset,
   parseComposerEditorDom,
@@ -101,8 +102,8 @@ function ComposerInlineEditor({
   const lastProjectDirectoryPathRef = useRef(projectDirectoryPath);
   const prevMentionCountRef = useRef(mentions.length);
   const prevFileCountRef = useRef(files.length);
-  const prevMentionIdsRef = useRef(new Set(mentions.map((mention) => mention.id)));
-  const prevFileIdsRef = useRef(new Set(files.map((file) => file.id)));
+  const prevMentionIdsRef = useRef(new Set());
+  const prevFileIdsRef = useRef(new Set());
 
   const syncFromState = useCallback(() => {
     const root = rootRef.current;
@@ -148,20 +149,12 @@ function ComposerInlineEditor({
 
     const previousMentionIds = prevMentionIdsRef.current;
     const previousFileIds = prevFileIdsRef.current;
-    const addedChips = [
-      ...mentions
-        .filter((mention) => !previousMentionIds.has(mention.id))
-        .map((mention) => ({
-          mentionId: mention.id,
-          attachSeq: typeof mention.attachSeq === "number" ? mention.attachSeq : Number.MAX_SAFE_INTEGER,
-        })),
-      ...files
-        .filter((file) => !previousFileIds.has(file.id))
-        .map((file) => ({
-          fileId: file.id,
-          attachSeq: typeof file.attachSeq === "number" ? file.attachSeq : Number.MAX_SAFE_INTEGER,
-        })),
-    ].sort((a, b) => a.attachSeq - b.attachSeq);
+    const addedChips = collectComposerAddedChips({
+      mentions,
+      files,
+      previousMentionIds,
+      previousFileIds,
+    });
     const addedChip = addedChips[addedChips.length - 1] ?? null;
     const mentionRemoved = mentions.length < prevMentionCountRef.current;
     const fileRemoved = files.length < prevFileCountRef.current;
