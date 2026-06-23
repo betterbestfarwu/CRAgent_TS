@@ -633,6 +633,66 @@
     return clone.innerText.trim();
   }
 
+  function blobToDataUrl(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || '')); };
+      reader.onerror = function () { reject(new Error('Failed to read image')); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function fetchImageDataUrl(src) {
+    if (!src) return Promise.resolve('');
+    if (String(src).indexOf('data:') === 0) return Promise.resolve(String(src));
+    return fetch(src)
+      .then(function (response) {
+        if (!response.ok) throw new Error('Failed to fetch image');
+        return response.blob();
+      })
+      .then(blobToDataUrl)
+      .catch(function () { return ''; });
+  }
+
+  function copyableHtmlFromBubble(bubbleEl) {
+    if (!bubbleEl) return Promise.resolve('');
+    var clone = bubbleEl.cloneNode(true);
+    clone.querySelectorAll('.thinking-block, .thinking').forEach(function (node) {
+      node.remove();
+    });
+
+    var sourceImages = Array.prototype.slice.call(bubbleEl.querySelectorAll('img'));
+    var cloneImages = Array.prototype.slice.call(clone.querySelectorAll('img'));
+    if (!cloneImages.length) {
+      return Promise.resolve('<div>' + clone.innerHTML + '</div>');
+    }
+
+    return Promise.all(sourceImages.map(function (img) {
+      return fetchImageDataUrl(
+        img.dataset.dataUrl ||
+          img.dataset.imageSrc ||
+          img.currentSrc ||
+          img.src ||
+          '',
+      );
+    })).then(function (dataUrls) {
+      var copiedImageCount = 0;
+      cloneImages.forEach(function (img, index) {
+        var dataUrl = dataUrls[index];
+        if (dataUrl) {
+          img.setAttribute('src', dataUrl);
+          img.removeAttribute('data-blob-url');
+          img.removeAttribute('data-image-src');
+          img.removeAttribute('data-data-url');
+          copiedImageCount += 1;
+        } else {
+          img.remove();
+        }
+      });
+      return copiedImageCount > 0 ? '<div>' + clone.innerHTML + '</div>' : '';
+    });
+  }
+
   function isProcessMessage(msg) {
     if (!msg) return false;
     if (msg.role === 'tool') return true;
@@ -1831,6 +1891,30 @@
     navigator.clipboard.writeText(text).catch(function () {});
   }
 
+  function copyBubbleToClipboard(bubbleEl) {
+    var text = getCopyableTextFromBubble(bubbleEl);
+    if (!navigator.clipboard || !window.ClipboardItem) {
+      copyToClipboard(text);
+      return Promise.resolve();
+    }
+
+    return copyableHtmlFromBubble(bubbleEl)
+      .then(function (html) {
+        if (!html || html.indexOf('<img') < 0) {
+          return navigator.clipboard.writeText(text);
+        }
+        return navigator.clipboard.write([
+          new window.ClipboardItem({
+            'text/plain': new Blob([text], { type: 'text/plain' }),
+            'text/html': new Blob([html], { type: 'text/html' }),
+          }),
+        ]);
+      })
+      .catch(function () {
+        copyToClipboard(text);
+      });
+  }
+
   document.addEventListener('click', function (e) {
     var imageEl = e.target.closest && e.target.closest('.msg-image[data-data-url], .msg-image[data-image-src]');
     if (imageEl) {
@@ -1901,8 +1985,9 @@
       var group = btn.closest('.assistant-turn, .thinking-group-msg');
       var bubbleEl = group && group.querySelector('.bubble');
       if (bubbleEl) {
-        copyToClipboard(getCopyableTextFromBubble(bubbleEl));
-        flashCopied(btn, 3000);
+        copyBubbleToClipboard(bubbleEl).then(function () {
+          flashCopied(btn, 3000);
+        });
       }
       return;
     }
@@ -1910,8 +1995,9 @@
     var id = btn.dataset.id;
     var msgEl = container.querySelector('.msg[data-id="' + id + '"] .bubble');
     if (action === 'copy' && msgEl) {
-      copyToClipboard(getCopyableTextFromBubble(msgEl));
-      flashCopied(btn, 3000);
+      copyBubbleToClipboard(msgEl).then(function () {
+        flashCopied(btn, 3000);
+      });
       return;
     }
     if (action === 'fork' && id) {
