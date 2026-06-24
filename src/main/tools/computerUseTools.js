@@ -37,6 +37,38 @@ function computerEnabled(getAgentTools) {
 
 export { computerUseSystemPromptSection };
 
+const DEFAULT_COMPUTER_USE_TIMEOUT_MS = 60_000;
+
+async function runComputerActionWithTimeout(toolName, context, operation) {
+    const timeoutMs = Number(context.computerUseTimeoutMs ?? DEFAULT_COMPUTER_USE_TIMEOUT_MS);
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        return operation(context.signal);
+    }
+
+    const controller = new AbortController();
+    const abortFromParent = () => controller.abort(context.signal?.reason);
+    if (context.signal?.aborted) {
+        abortFromParent();
+    } else {
+        context.signal?.addEventListener?.("abort", abortFromParent, { once: true });
+    }
+
+    let timeoutId;
+    try {
+        return await new Promise((resolve, reject) => {
+            timeoutId = setTimeout(() => {
+                controller.abort(new Error(`${toolName} timed out after ${timeoutMs}ms`));
+                reject(new Error(`${toolName} timed out after ${timeoutMs}ms`));
+            }, timeoutMs);
+
+            Promise.resolve(operation(controller.signal)).then(resolve, reject);
+        });
+    } finally {
+        clearTimeout(timeoutId);
+        context.signal?.removeEventListener?.("abort", abortFromParent);
+    }
+}
+
 export function createComputerUseTools({ getAgentTools, confirmToolExecution, getAuthMode }) {
     const enabled = computerEnabled(getAgentTools);
 
@@ -172,102 +204,105 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                 },
             ),
             async execute(args, context = {}) {
-                const action = String(args.action || "").toLowerCase();
-                if (action === "screenshot") {
-                    const display = args.display ?? "main";
-                    await confirmComputerAction(
-                        "computer_action",
-                        `Capture desktop screenshot (display=${display})`,
-                        context.sessionId,
-                        args,
-                    );
-                    const { image, caption } = await captureScreenshot({ display });
-                    return {
-                        text: `${caption}\n\nInspect the attached image before clicking or typing.`,
-                        images: [image],
-                    };
-                }
-                if (action === "move") {
-                    await confirmComputerAction(
-                        "computer_action",
-                        `Move cursor to (${args.x}, ${args.y})`,
-                        context.sessionId,
-                    );
-                    return moveTo({ ...args, signal: context.signal });
-                }
-                if (action === "click" || action === "double_click") {
-                    const button = action === "double_click" ? "double" : args.button || "left";
-                    await confirmComputerAction(
-                        "computer_action",
-                        `${button} click at (${args.x}, ${args.y})`,
-                        context.sessionId,
-                    );
-                    return clickAt({ ...args, button, signal: context.signal });
-                }
-                if (action === "drag") {
-                    await confirmComputerAction(
-                        "computer_action",
-                        `Drag from (${args.x}, ${args.y}) to (${args.to_x}, ${args.to_y})`,
-                        context.sessionId,
-                    );
-                    return dragTo({ ...args, signal: context.signal });
-                }
-                if (action === "type") {
-                    const preview = String(args.text ?? "").slice(0, 120);
-                    await confirmComputerAction(
-                        "computer_action",
-                        `Type text${args.clear_first ? " (clear first)" : ""}: ${preview}${String(args.text ?? "").length > 120 ? "…" : ""}`,
-                        context.sessionId,
-                    );
-                    return typeText({
-                        text: args.text,
-                        clear_first: args.clear_first,
-                        signal: context.signal,
-                    });
-                }
-                if (action === "key") {
-                    await confirmComputerAction(
-                        "computer_action",
-                        `Press key: ${args.key}`,
-                        context.sessionId,
-                    );
-                    return pressKey({ key: args.key, signal: context.signal });
-                }
-                if (action === "scroll") {
-                    const direction = args.direction || "down";
-                    const amount = args.amount ?? 3;
-                    const coords = resolvePointerCoordinates(args);
-                    const at =
-                        Number.isFinite(coords.x) && Number.isFinite(coords.y)
-                            ? { x: coords.x, y: coords.y }
-                            : undefined;
-                    const atHint = at ? ` at (${at.x}, ${at.y})` : "";
-                    await confirmComputerAction(
-                        "computer_action",
-                        `Scroll ${direction} (${amount})${atHint}`,
-                        context.sessionId,
-                    );
-                    return scroll({ direction, amount, at, signal: context.signal });
-                }
-                if (action === "wait") {
-                    const ms = args.ms ?? 1000;
-                    await confirmComputerAction(
-                        "computer_action",
-                        `Wait ${ms}ms`,
-                        context.sessionId,
-                    );
-                    return waitForComputer({ ms, signal: context.signal });
-                }
-                if (action === "open_app") {
-                    const app = String(args.app ?? "").trim();
-                    await confirmComputerAction(
-                        "computer_action",
-                        `Open app: ${app}`,
-                        context.sessionId,
-                    );
-                    return openApp({ app, signal: context.signal });
-                }
-                throw new Error(`Unsupported computer_action action: ${args.action}`);
+                return runComputerActionWithTimeout("computer_action", context, async (signal) => {
+                    const action = String(args.action || "").toLowerCase();
+                    if (action === "screenshot") {
+                        const display = args.display ?? "main";
+                        await confirmComputerAction(
+                            "computer_action",
+                            `Capture desktop screenshot (display=${display})`,
+                            context.sessionId,
+                            args,
+                        );
+                        const { image, caption } = await captureScreenshot({ display, signal });
+                        return {
+                            text: `${caption}\n\nInspect the attached image before clicking or typing.`,
+                            images: [image],
+                        };
+                    }
+                    if (action === "move") {
+                        await confirmComputerAction(
+                            "computer_action",
+                            `Move cursor to (${args.x}, ${args.y})`,
+                            context.sessionId,
+                        );
+                        return moveTo({ ...args, signal });
+                    }
+                    if (action === "click" || action === "double_click") {
+                        const button =
+                            action === "double_click" ? "double" : args.button || "left";
+                        await confirmComputerAction(
+                            "computer_action",
+                            `${button} click at (${args.x}, ${args.y})`,
+                            context.sessionId,
+                        );
+                        return clickAt({ ...args, button, signal });
+                    }
+                    if (action === "drag") {
+                        await confirmComputerAction(
+                            "computer_action",
+                            `Drag from (${args.x}, ${args.y}) to (${args.to_x}, ${args.to_y})`,
+                            context.sessionId,
+                        );
+                        return dragTo({ ...args, signal });
+                    }
+                    if (action === "type") {
+                        const preview = String(args.text ?? "").slice(0, 120);
+                        await confirmComputerAction(
+                            "computer_action",
+                            `Type text${args.clear_first ? " (clear first)" : ""}: ${preview}${String(args.text ?? "").length > 120 ? "…" : ""}`,
+                            context.sessionId,
+                        );
+                        return typeText({
+                            text: args.text,
+                            clear_first: args.clear_first,
+                            signal,
+                        });
+                    }
+                    if (action === "key") {
+                        await confirmComputerAction(
+                            "computer_action",
+                            `Press key: ${args.key}`,
+                            context.sessionId,
+                        );
+                        return pressKey({ key: args.key, signal });
+                    }
+                    if (action === "scroll") {
+                        const direction = args.direction || "down";
+                        const amount = args.amount ?? 3;
+                        const coords = resolvePointerCoordinates(args);
+                        const at =
+                            Number.isFinite(coords.x) && Number.isFinite(coords.y)
+                                ? { x: coords.x, y: coords.y }
+                                : undefined;
+                        const atHint = at ? ` at (${at.x}, ${at.y})` : "";
+                        await confirmComputerAction(
+                            "computer_action",
+                            `Scroll ${direction} (${amount})${atHint}`,
+                            context.sessionId,
+                        );
+                        return scroll({ direction, amount, at, signal });
+                    }
+                    if (action === "wait") {
+                        const ms = args.ms ?? 1000;
+                        await confirmComputerAction(
+                            "computer_action",
+                            `Wait ${ms}ms`,
+                            context.sessionId,
+                        );
+                        return waitForComputer({ ms, signal });
+                    }
+                    if (action === "open_app") {
+                        const app = String(args.app ?? "").trim();
+                        await confirmComputerAction(
+                            "computer_action",
+                            `Open app: ${app}`,
+                            context.sessionId,
+                        );
+                        return openApp({ app, signal });
+                    }
+                    throw new Error(`Unsupported computer_action action: ${args.action}`);
+                });
             },
         },
         {
@@ -289,17 +324,23 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                 },
             ),
             async execute(args, context = {}) {
-                const display = args.display ?? "main";
-                await confirmComputerAction(
+                return runComputerActionWithTimeout(
                     "computer_screenshot",
-                    `Capture desktop screenshot (display=${display})`,
-                    context.sessionId,
+                    context,
+                    async (signal) => {
+                        const display = args.display ?? "main";
+                        await confirmComputerAction(
+                            "computer_screenshot",
+                            `Capture desktop screenshot (display=${display})`,
+                            context.sessionId,
+                        );
+                        const { image, caption } = await captureScreenshot({ display, signal });
+                        return {
+                            text: `${caption}\n\nInspect the attached image before clicking or typing.`,
+                            images: [image],
+                        };
+                    },
                 );
-                const { image, caption } = await captureScreenshot({ display });
-                return {
-                    text: `${caption}\n\nInspect the attached image before clicking or typing.`,
-                    images: [image],
-                };
             },
         },
         {
@@ -325,12 +366,14 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                 },
             ),
             async execute(args, context = {}) {
-                await confirmComputerAction(
-                    "computer_move",
-                    `Move cursor to (${args.x}, ${args.y})`,
-                    context.sessionId,
-                );
-                return moveTo({ ...args, signal: context.signal });
+                return runComputerActionWithTimeout("computer_move", context, async (signal) => {
+                    await confirmComputerAction(
+                        "computer_move",
+                        `Move cursor to (${args.x}, ${args.y})`,
+                        context.sessionId,
+                    );
+                    return moveTo({ ...args, signal });
+                });
             },
         },
         {
@@ -361,13 +404,15 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                 },
             ),
             async execute(args, context = {}) {
-                const button = args.button || "left";
-                await confirmComputerAction(
-                    "computer_click",
-                    `${button} click at (${args.x}, ${args.y})`,
-                    context.sessionId,
-                );
-                return clickAt({ ...args, button, signal: context.signal });
+                return runComputerActionWithTimeout("computer_click", context, async (signal) => {
+                    const button = args.button || "left";
+                    await confirmComputerAction(
+                        "computer_click",
+                        `${button} click at (${args.x}, ${args.y})`,
+                        context.sessionId,
+                    );
+                    return clickAt({ ...args, button, signal });
+                });
             },
         },
         {
@@ -390,16 +435,18 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                 },
             ),
             async execute(args, context = {}) {
-                const preview = String(args.text ?? "").slice(0, 120);
-                await confirmComputerAction(
-                    "computer_type",
-                    `Type text${args.clear_first ? " (clear first)" : ""}: ${preview}${String(args.text ?? "").length > 120 ? "…" : ""}`,
-                    context.sessionId,
-                );
-                return typeText({
-                    text: args.text,
-                    clear_first: args.clear_first,
-                    signal: context.signal,
+                return runComputerActionWithTimeout("computer_type", context, async (signal) => {
+                    const preview = String(args.text ?? "").slice(0, 120);
+                    await confirmComputerAction(
+                        "computer_type",
+                        `Type text${args.clear_first ? " (clear first)" : ""}: ${preview}${String(args.text ?? "").length > 120 ? "…" : ""}`,
+                        context.sessionId,
+                    );
+                    return typeText({
+                        text: args.text,
+                        clear_first: args.clear_first,
+                        signal,
+                    });
                 });
             },
         },
@@ -423,12 +470,14 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                 },
             ),
             async execute(args, context = {}) {
-                await confirmComputerAction(
-                    "computer_key",
-                    `Press key: ${args.key}`,
-                    context.sessionId,
-                );
-                return pressKey({ key: args.key, signal: context.signal });
+                return runComputerActionWithTimeout("computer_key", context, async (signal) => {
+                    await confirmComputerAction(
+                        "computer_key",
+                        `Press key: ${args.key}`,
+                        context.sessionId,
+                    );
+                    return pressKey({ key: args.key, signal });
+                });
             },
         },
         {
@@ -462,17 +511,19 @@ export function createComputerUseTools({ getAgentTools, confirmToolExecution, ge
                 },
             ),
             async execute(args, context = {}) {
-                const direction = args.direction || "down";
-                const amount = args.amount ?? 3;
-                const at =
-                    args.x != null && args.y != null ? { x: args.x, y: args.y } : undefined;
-                const atHint = at ? ` at (${at.x}, ${at.y})` : "";
-                await confirmComputerAction(
-                    "computer_scroll",
-                    `Scroll ${direction} (${amount})${atHint}`,
-                    context.sessionId,
-                );
-                return scroll({ direction, amount, at, signal: context.signal });
+                return runComputerActionWithTimeout("computer_scroll", context, async (signal) => {
+                    const direction = args.direction || "down";
+                    const amount = args.amount ?? 3;
+                    const at =
+                        args.x != null && args.y != null ? { x: args.x, y: args.y } : undefined;
+                    const atHint = at ? ` at (${at.x}, ${at.y})` : "";
+                    await confirmComputerAction(
+                        "computer_scroll",
+                        `Scroll ${direction} (${amount})${atHint}`,
+                        context.sessionId,
+                    );
+                    return scroll({ direction, amount, at, signal });
+                });
             },
         },
     ];

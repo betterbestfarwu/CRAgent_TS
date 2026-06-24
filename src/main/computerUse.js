@@ -104,30 +104,41 @@ async function runOsascript(script, signal) {
     await execFileAsync("/usr/bin/osascript", ["-e", script], signal ? { signal } : {});
 }
 
-async function runPowerShell(script) {
+async function runPowerShell(script, signal) {
     const systemRoot = process.env.SystemRoot || "C:\\Windows";
     const executable = fsSync.existsSync(
         `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
     )
         ? `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
         : "powershell.exe";
-    await execFileAsync(executable, [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        script,
-    ]);
+    await execFileAsync(
+        executable,
+        [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        signal ? { signal } : {},
+    );
 }
 
-async function runSwift(source) {
-    await execFileAsync("/usr/bin/swift", ["-"], { input: source });
+async function runSwift(source, signal) {
+    await execFileAsync("/usr/bin/swift", ["-"], {
+        input: source,
+        ...(signal ? { signal } : {}),
+    });
 }
 
-async function resizeScreenshotMac(filePath) {
+async function resizeScreenshotMac(filePath, signal) {
     try {
-        await execFileAsync("/usr/bin/sips", ["-Z", String(MAX_SCREENSHOT_DIMENSION), filePath]);
+        await execFileAsync(
+            "/usr/bin/sips",
+            ["-Z", String(MAX_SCREENSHOT_DIMENSION), filePath],
+            signal ? { signal } : {},
+        );
     } catch {
         // Best-effort resize; keep original if sips fails.
     }
@@ -149,13 +160,17 @@ async function readScreenshotDataUrl(filePath, meta = {}) {
     };
 }
 
-async function captureScreenshotMacRegion(bounds) {
+async function captureScreenshotMacRegion(bounds, signal) {
     const tmp = path.join(os.tmpdir(), `cragent-screenshot-${Date.now()}.png`);
     const rect = dipRectToPlatformRect(bounds);
     const region = formatMacScreencaptureRegion(rect);
     try {
-        await execFileAsync("/usr/sbin/screencapture", ["-x", "-t", "png", "-R", region, tmp]);
-        await resizeScreenshotMac(tmp);
+        await execFileAsync(
+            "/usr/sbin/screencapture",
+            ["-x", "-t", "png", "-R", region, tmp],
+            signal ? { signal } : {},
+        );
+        await resizeScreenshotMac(tmp, signal);
         return readScreenshotDataUrl(tmp, { width: bounds.width, height: bounds.height });
     } finally {
         await fs.unlink(tmp).catch(() => {});
@@ -167,8 +182,12 @@ async function captureScreenshotMac(options = {}) {
     if (target.mode === "all") {
         const tmp = path.join(os.tmpdir(), `cragent-screenshot-${Date.now()}.png`);
         try {
-            await execFileAsync("/usr/sbin/screencapture", ["-x", "-t", "png", tmp]);
-            await resizeScreenshotMac(tmp);
+            await execFileAsync(
+                "/usr/sbin/screencapture",
+                ["-x", "-t", "png", tmp],
+                options.signal ? { signal: options.signal } : {},
+            );
+            await resizeScreenshotMac(tmp, options.signal);
             return readScreenshotDataUrl(tmp, {
                 width: target.layout.virtualBounds.width,
                 height: target.layout.virtualBounds.height,
@@ -177,7 +196,7 @@ async function captureScreenshotMac(options = {}) {
             await fs.unlink(tmp).catch(() => {});
         }
     }
-    return captureScreenshotMacRegion(target.display.bounds);
+    return captureScreenshotMacRegion(target.display.bounds, options.signal);
 }
 
 async function captureScreenshotWin(options = {}) {
@@ -202,7 +221,7 @@ $graphics.Dispose()
 $bitmap.Dispose()
 `;
     try {
-        await runPowerShell(script);
+        await runPowerShell(script, options.signal);
         return readScreenshotDataUrl(tmp, {
             width: target.mode === "all" ? target.layout.virtualBounds.width : target.display.bounds.width,
             height: target.mode === "all" ? target.layout.virtualBounds.height : target.display.bounds.height,
@@ -246,7 +265,7 @@ function formatPointResult(prefix, resolved) {
     return `${prefix} at (${resolved.x}, ${resolved.y})${displayHint}`;
 }
 
-async function moveMac(resolved) {
+async function moveMac(resolved, signal) {
     const source = `
 import CoreGraphics
 let point = CGPoint(x: ${resolved.x}, y: ${resolved.y})
@@ -259,10 +278,10 @@ if let event = CGEvent(
     event.post(tap: .cghidEventTap)
 }
 `;
-    await runSwift(source);
+    await runSwift(source, signal);
 }
 
-async function moveWin(resolved) {
+async function moveWin(resolved, signal) {
     const platform = dipPointToPlatformPoint(resolved.x, resolved.y);
     const script = `
 Add-Type @"
@@ -275,7 +294,7 @@ public class NativeMouse {
 "@
 [NativeMouse]::SetCursorPos(${platform.x}, ${platform.y}) | Out-Null
 `;
-    await runPowerShell(script);
+    await runPowerShell(script, signal);
 }
 
 export async function moveTo(args) {
@@ -285,9 +304,9 @@ export async function moveTo(args) {
     const { x, y } = resolvePointerCoordinates(args);
     const resolved = resolveGlobalPoint(x, y);
     if (process.platform === "darwin") {
-        await moveMac(resolved);
+        await moveMac(resolved, args.signal);
     } else if (process.platform === "win32") {
-        await moveWin(resolved);
+        await moveWin(resolved, args.signal);
     } else {
         throw new Error("Computer use is supported only on macOS and Windows");
     }
@@ -295,7 +314,7 @@ export async function moveTo(args) {
 }
 
 async function clickMac(resolved, button = "left", signal) {
-    await moveMac(resolved);
+    await moveMac(resolved, signal);
     const { x, y } = resolved;
     if (button === "double") {
         const script = `
@@ -322,7 +341,7 @@ end tell`;
     await runOsascript(script, signal);
 }
 
-async function clickWin(resolved, button = "left") {
+async function clickWin(resolved, button = "left", signal) {
     const platform = dipPointToPlatformPoint(resolved.x, resolved.y);
     const downFlag = button === "right" ? "0x0008" : "0x0002";
     const upFlag = button === "right" ? "0x0010" : "0x0004";
@@ -346,7 +365,7 @@ Start-Sleep -Milliseconds 50
 [NativeMouse]::mouse_event(${upFlag}, 0, 0, 0, 0)
 ` : ""}
 `;
-    await runPowerShell(script);
+    await runPowerShell(script, signal);
 }
 
 export async function clickAt(args) {
@@ -357,7 +376,7 @@ export async function clickAt(args) {
     if (process.platform === "darwin") {
         await clickMac(resolved, button, signal);
     } else if (process.platform === "win32") {
-        await clickWin(resolved, button);
+        await clickWin(resolved, button, signal);
     } else {
         throw new Error("Computer use is supported only on macOS and Windows");
     }
@@ -405,7 +424,7 @@ export async function waitForComputer({ ms = 1000, signal } = {}) {
     return `Waited ${duration}ms`;
 }
 
-async function dragMac(start, end, durationMs) {
+async function dragMac(start, end, durationMs, signal) {
     const steps = Math.max(2, Math.min(60, Math.round(durationMs / 16)));
     const stepDelay = Math.max(0.005, durationMs / steps / 1000);
     const source = `
@@ -435,10 +454,10 @@ for index in 1...steps {
 }
 post(.leftMouseUp, end)
 `;
-    await runSwift(source);
+    await runSwift(source, signal);
 }
 
-async function dragWin(start, end, durationMs) {
+async function dragWin(start, end, durationMs, signal) {
     const startPoint = dipPointToPlatformPoint(start.x, start.y);
     const endPoint = dipPointToPlatformPoint(end.x, end.y);
     const steps = Math.max(2, Math.min(60, Math.round(durationMs / 16)));
@@ -469,7 +488,7 @@ for ($i = 1; $i -le $steps; $i++) {
 }
 [NativeMouse]::mouse_event(0x0004, 0, 0, 0, 0)
 `;
-    await runPowerShell(script);
+    await runPowerShell(script, signal);
 }
 
 export async function dragTo(args = {}) {
@@ -486,9 +505,9 @@ export async function dragTo(args = {}) {
         throw Object.assign(new Error("Aborted"), { name: "AbortError" });
     }
     if (process.platform === "darwin") {
-        await dragMac(start, end, durationMs);
+        await dragMac(start, end, durationMs, args.signal);
     } else if (process.platform === "win32") {
-        await dragWin(start, end, durationMs);
+        await dragWin(start, end, durationMs, args.signal);
     } else {
         throw new Error("Computer use is supported only on macOS and Windows");
     }
@@ -514,11 +533,12 @@ async function typeTextMac(text, clearFirst = false, signal) {
     }
 }
 
-async function typeTextWin(text, clearFirst = false) {
+async function typeTextWin(text, clearFirst = false, signal) {
     const value = String(text ?? "");
     if (clearFirst) {
         await runPowerShell(
             "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^a{BACKSPACE}')",
+            signal,
         );
     }
     if (!value) {
@@ -527,6 +547,7 @@ async function typeTextWin(text, clearFirst = false) {
     const escaped = value.replace(/[+^%~{}[\]()]/g, "{$&}");
     await runPowerShell(
         `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escapePowerShellSingleQuoted(escaped)}')`,
+        signal,
     );
 }
 
@@ -534,7 +555,7 @@ export async function typeText({ text, clear_first: clearFirst = false, signal }
     if (process.platform === "darwin") {
         await typeTextMac(text, clearFirst, signal);
     } else if (process.platform === "win32") {
-        await typeTextWin(text, clearFirst);
+        await typeTextWin(text, clearFirst, signal);
     } else {
         throw new Error("Computer use is supported only on macOS and Windows");
     }
@@ -614,7 +635,7 @@ async function pressKeyMac(rawKey, signal) {
     );
 }
 
-async function pressKeyWin(rawKey) {
+async function pressKeyWin(rawKey, signal) {
     const { modifiers, key } = parseKeyChord(rawKey);
     let prefix = "";
     for (const modifier of modifiers) {
@@ -652,6 +673,7 @@ async function pressKeyWin(rawKey) {
     const escaped = `${prefix}${token}`.replace(/[+^%~{}[\]()]/g, "{$&}");
     await runPowerShell(
         `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escapePowerShellSingleQuoted(escaped)}')`,
+        signal,
     );
 }
 
@@ -659,7 +681,7 @@ export async function pressKey({ key, signal } = {}) {
     if (process.platform === "darwin") {
         await pressKeyMac(key, signal);
     } else if (process.platform === "win32") {
-        await pressKeyWin(key);
+        await pressKeyWin(key, signal);
     } else {
         throw new Error("Computer use is supported only on macOS and Windows");
     }
@@ -675,7 +697,7 @@ function scrollWheelDeltas(direction, amount) {
     return { wheel1: sign * clicks, wheel2: 0, wheelCount: 1 };
 }
 
-async function scrollMac(direction, amount) {
+async function scrollMac(direction, amount, signal) {
     const { wheel1, wheel2, wheelCount } = scrollWheelDeltas(direction, amount);
     const source = `
 import CoreGraphics
@@ -690,10 +712,10 @@ if let event = CGEvent(
     event.post(tap: .cghidEventTap)
 }
 `;
-    await runSwift(source);
+    await runSwift(source, signal);
 }
 
-async function scrollWin(direction, amount) {
+async function scrollWin(direction, amount, signal) {
     const clicks = Math.max(1, Math.min(20, Math.round(Number(amount) || 3)));
     const vertical = direction === "up" || direction === "down";
     const delta = direction === "up" || direction === "left" ? 120 : -120;
@@ -711,7 +733,7 @@ for ($i = 0; $i -lt ${clicks}; $i++) {
   [NativeMouse]::mouse_event(${flag}, 0, 0, ${delta}, 0)
 }
 `;
-    await runPowerShell(script);
+    await runPowerShell(script, signal);
 }
 
 export async function openApp({ app, signal } = {}) {
@@ -745,9 +767,9 @@ export async function scroll({ direction = "down", amount = 3, at, signal } = {}
         await moveTo({ x: at.x, y: at.y, signal });
     }
     if (process.platform === "darwin") {
-        await scrollMac(normalized, amount);
+        await scrollMac(normalized, amount, signal);
     } else if (process.platform === "win32") {
-        await scrollWin(normalized, amount);
+        await scrollWin(normalized, amount, signal);
     } else {
         throw new Error("Computer use is supported only on macOS and Windows");
     }

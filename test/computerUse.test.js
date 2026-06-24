@@ -444,6 +444,35 @@ describe("computer use tools", () => {
         assert.equal(result, "Waited 1ms");
     });
 
+    it("times out long-running computer_action calls", async () => {
+        if (!isComputerUseSupported()) {
+            return;
+        }
+        const registry = new ToolRegistry(
+            () =>
+                createComputerUseTools({
+                    getAgentTools: () => ({ enable_tools: true, enable_computer_use: true }),
+                    confirmToolExecution: async () => true,
+                    getAuthMode: () => "fullAccess",
+                }),
+            async () => true,
+            () => "fullAccess",
+        );
+
+        const result = await registry.execute(
+            {
+                id: "call-computer-action-timeout",
+                function: {
+                    name: "computer_action",
+                    arguments: JSON.stringify({ action: "wait", ms: 50 }),
+                },
+            },
+            { sessionId: "session-full", computerUseTimeoutMs: 5 },
+        );
+
+        assert.match(result, /^Error: computer_action timed out after 5ms/);
+    });
+
     it("registers open_app in computer_action schema", () => {
         const enabled = createComputerUseTools({
             getAgentTools: () => ({ enable_tools: true, enable_computer_use: true }),
