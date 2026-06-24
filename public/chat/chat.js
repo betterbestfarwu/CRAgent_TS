@@ -655,7 +655,7 @@
   }
 
   function copyableHtmlFromBubble(bubbleEl) {
-    if (!bubbleEl) return Promise.resolve('');
+    if (!bubbleEl) return Promise.resolve({ html: '', imageDataUrls: [] });
     var clone = bubbleEl.cloneNode(true);
     clone.querySelectorAll('.thinking-block, .thinking').forEach(function (node) {
       node.remove();
@@ -664,7 +664,7 @@
     var sourceImages = Array.prototype.slice.call(bubbleEl.querySelectorAll('img'));
     var cloneImages = Array.prototype.slice.call(clone.querySelectorAll('img'));
     if (!cloneImages.length) {
-      return Promise.resolve('<div>' + clone.innerHTML + '</div>');
+      return Promise.resolve({ html: '<div>' + clone.innerHTML + '</div>', imageDataUrls: [] });
     }
 
     var messageHost = bubbleEl.closest && bubbleEl.closest('.msg[data-id]');
@@ -708,7 +708,10 @@
           img.remove();
         }
       });
-      return copiedImageCount > 0 ? '<div>' + clone.innerHTML + '</div>' : '';
+      return {
+        html: copiedImageCount > 0 ? '<div>' + clone.innerHTML + '</div>' : '',
+        imageDataUrls: dataUrls.filter(function (dataUrl) { return Boolean(dataUrl); }),
+      };
     });
   }
 
@@ -1921,9 +1924,21 @@
     }
 
     return copyableHtmlFromBubble(bubbleEl)
-      .then(function (html) {
+      .then(function (payload) {
+        var html = payload && payload.html ? payload.html : '';
         if (!html || html.indexOf('<img') < 0) {
           return navigator.clipboard.writeText(text);
+        }
+        if (chatUi.buildRichClipboardItemData) {
+          return chatUi.buildRichClipboardItemData({
+            text: text,
+            html: html,
+            imageDataUrls: payload.imageDataUrls || [],
+          }).then(function (itemData) {
+            return navigator.clipboard.write([
+              new window.ClipboardItem(itemData),
+            ]);
+          });
         }
         return navigator.clipboard.write([
           new window.ClipboardItem({

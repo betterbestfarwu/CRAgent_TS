@@ -22,6 +22,7 @@ var CRAgentChatUtils = (() => {
   __export(chatUiUtils_exports, {
     GROUPABLE_TOOLS: () => GROUPABLE_TOOLS,
     MAX_TODO_INLINE_DISPLAY: () => MAX_TODO_INLINE_DISPLAY,
+    buildRichClipboardItemData: () => buildRichClipboardItemData,
     buildThinkingSummary: () => buildThinkingSummary,
     collapseAdjacentThinkingItems: () => collapseAdjacentThinkingItems,
     formatThinkingSummaryLine: () => formatThinkingSummaryLine,
@@ -459,6 +460,33 @@ var CRAgentChatUtils = (() => {
       return options.fetchImageDataUrl(imageSrc);
     }
     return "";
+  }
+  function dataUrlToBlob(dataUrl) {
+    const match = /^data:([^;,]+);base64,([\s\S]+)$/i.exec(String(dataUrl || ""));
+    if (!match) {
+      return null;
+    }
+    const mimeType = match[1] || "image/png";
+    const binary = typeof atob === "function" ? atob(match[2]) : Buffer.from(match[2], "base64").toString("binary");
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mimeType });
+  }
+  async function buildRichClipboardItemData({ text = "", html = "", imageDataUrls = [] } = {}) {
+    const itemData = {
+      "text/plain": new Blob([String(text || "")], { type: "text/plain" }),
+      "text/html": new Blob([String(html || "")], { type: "text/html" })
+    };
+    const firstImage = (imageDataUrls || []).find(
+      (dataUrl) => /^data:image\/[A-Za-z0-9.+-]+;base64,/i.test(String(dataUrl || ""))
+    );
+    const imageBlob = firstImage ? dataUrlToBlob(firstImage) : null;
+    if (imageBlob?.type) {
+      itemData[imageBlob.type] = imageBlob;
+    }
+    return itemData;
   }
   return __toCommonJS(chatUiUtils_exports);
 })();

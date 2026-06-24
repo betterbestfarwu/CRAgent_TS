@@ -8,6 +8,7 @@ import {
     getCurrentInProgressTodo,
     sortTodosForDisplay,
     todoDisplayLabel,
+    buildRichClipboardItemData,
     resolveCopyableImageDataUrl,
 } from "@shared/chatUiUtils.js";
 
@@ -252,5 +253,21 @@ describe("resolveCopyableImageDataUrl", () => {
                 mimeType: "image/png",
             },
         ]);
+    });
+});
+
+describe("buildRichClipboardItemData", () => {
+    it("adds the first copied image as a native clipboard representation", async () => {
+        const itemData = await buildRichClipboardItemData({
+            text: "hello",
+            html: '<div>hello<img src="data:image/png;base64,QUJD"></div>',
+            imageDataUrls: ["data:image/png;base64,QUJD"],
+        });
+
+        assert.deepEqual(Object.keys(itemData).sort(), ["image/png", "text/html", "text/plain"]);
+        assert.equal(await itemData["text/plain"].text(), "hello");
+        assert.equal(await itemData["text/html"].text(), '<div>hello<img src="data:image/png;base64,QUJD"></div>');
+        assert.equal(itemData["image/png"].type, "image/png");
+        assert.equal(await itemData["image/png"].text(), "ABC");
     });
 });
