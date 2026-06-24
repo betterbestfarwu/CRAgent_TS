@@ -169,6 +169,7 @@ export function ChatView({
   onRetry,
   onOpenImage,
   onCopyImagesToComposer,
+  onCopyUserMessageToComposer,
   onOpenPlanFile,
 }) {
   const iframeRef = useRef(null);
@@ -330,6 +331,10 @@ export function ChatView({
         onCopyImagesToComposer?.(data.imageDataUrls);
       }
 
+      if (data.action === "copyUserMessageToComposer" && data.id) {
+        onCopyUserMessageToComposer?.(data.id);
+      }
+
       if (data.action === "openPlan" && data.sessionId) {
         void onOpenPlanFile?.(data.sessionId);
       }
@@ -337,7 +342,7 @@ export function ChatView({
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [busy, onDelete, onFork, onRetry, onOpenImage, onCopyImagesToComposer, onOpenPlanFile, postToChat, syncIframeImageResolver, syncIframeLayout, syncMessages]);
+  }, [busy, onDelete, onFork, onRetry, onOpenImage, onCopyImagesToComposer, onCopyUserMessageToComposer, onOpenPlanFile, postToChat, syncIframeImageResolver, syncIframeLayout, syncMessages]);
 
   useEffect(() => {
     if (!readyRef.current) return;

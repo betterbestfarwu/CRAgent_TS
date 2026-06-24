@@ -2050,8 +2050,13 @@
     var id = btn.dataset.id;
     var msgEl = container.querySelector('.msg[data-id="' + id + '"] .bubble');
     if (action === 'copy' && msgEl) {
+      var userMsg = btn.closest('.msg.user');
       copyBubbleToClipboard(msgEl).then(function (payload) {
-        notifyCopiedImagesToComposer(payload);
+        if (userMsg && id) {
+          notifyHost({ action: 'copyUserMessageToComposer', id: id });
+        } else {
+          notifyCopiedImagesToComposer(payload);
+        }
         flashCopied(btn, 3000);
       });
       return;

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
     buildComposerRetryState,
+    buildComposerRestoreStateAsync,
     parseAttachedFilesFromContent,
 } from "@shared/composerRetry.js";
 
@@ -52,5 +53,39 @@ describe("buildComposerRetryState", () => {
         });
         assert.equal(state.text, "hello world");
         assert.equal(state.files.length, 0);
+    });
+});
+
+describe("buildComposerRestoreStateAsync", () => {
+    it("loads stored session images when dataUrl was stripped", async () => {
+        const calls = [];
+        const state = await buildComposerRestoreStateAsync(
+            {
+                id: "message-1",
+                role: "user",
+                content: "图里字符是啥",
+                images: [{ mimeType: "image/png", hasData: true, imageFile: "message-1-0.png" }],
+            },
+            {
+                sessionId: "session-1",
+                getSessionImage: async (payload) => {
+                    calls.push(payload);
+                    return { mimeType: "image/png", dataUrl: "data:image/png;base64,abc" };
+                },
+            },
+        );
+
+        assert.equal(state.text, "图里字符是啥");
+        assert.equal(state.images.length, 1);
+        assert.equal(state.images[0].dataUrl, "data:image/png;base64,abc");
+        assert.deepEqual(calls, [
+            {
+                sessionId: "session-1",
+                messageId: "message-1",
+                imageIndex: 0,
+                imageFile: "message-1-0.png",
+                mimeType: "image/png",
+            },
+        ]);
     });
 });

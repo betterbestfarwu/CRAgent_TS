@@ -65,3 +65,61 @@ export function buildComposerRetryState(message) {
 
     return { text, images, mentions, files, nextAttachSeq: attachSeq };
 }
+
+/**
+ * Like buildComposerRetryState, but loads stored session images when dataUrl was stripped.
+ *
+ * @param {{ id?: string, role?: string, content?: string, userText?: string | null, atMentions?: Array<{ name?: string, relativePath?: string }>, images?: Array<{ mimeType?: string, dataUrl?: string, hasData?: boolean, imageFile?: string, index?: number }> }} message
+ * @param {{ sessionId?: string, getSessionImage?: (args: { sessionId?: string, messageId?: string, imageIndex?: number, imageFile?: string, mimeType?: string }) => Promise<{ mimeType?: string, dataUrl?: string } | null | undefined> }} [options]
+ */
+export async function buildComposerRestoreStateAsync(message, options = {}) {
+    const base = buildComposerRetryState(message);
+    const images = message?.images || [];
+    if (!images.length || base.images.length === images.length) {
+        return base;
+    }
+
+    const getSessionImage = options.getSessionImage;
+    if (typeof getSessionImage !== "function") {
+        return base;
+    }
+
+    const sessionId = String(options.sessionId || "").trim();
+    const loaded = [];
+    for (let index = 0; index < images.length; index += 1) {
+        const image = images[index];
+        if (image?.dataUrl && image?.mimeType) {
+            loaded.push({
+                id: crypto.randomUUID(),
+                mimeType: image.mimeType,
+                dataUrl: image.dataUrl,
+                name: `image-${index + 1}`,
+            });
+            continue;
+        }
+        if (!image?.hasData && !image?.imageFile) {
+            continue;
+        }
+        try {
+            const resolved = await getSessionImage({
+                sessionId,
+                messageId: message?.id,
+                imageIndex: image?.index ?? index,
+                imageFile: image?.imageFile,
+                mimeType: image?.mimeType,
+            });
+            if (resolved?.dataUrl) {
+                loaded.push({
+                    id: crypto.randomUUID(),
+                    mimeType: resolved.mimeType || image.mimeType || "image/png",
+                    dataUrl: resolved.dataUrl,
+                    name: `image-${index + 1}`,
+                });
+            }
+        } catch {
+            // Skip images that cannot be resolved.
+        }
+    }
+
+    return { ...base, images: loaded };
+}

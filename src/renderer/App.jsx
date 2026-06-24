@@ -60,7 +60,7 @@ import {
 } from "@shared/sessionTitle";
 import { parseActiveSlashCommand, isActiveManualSlashCommand, isSlashKey } from "@shared/chatCommands.js";
 import { collectMessageIdsForDeletion } from "@shared/chatMessages";
-import { buildComposerRetryState } from "@shared/composerRetry.js";
+import { buildComposerRestoreStateAsync } from "@shared/composerRetry.js";
 import {
   filesToImageAttachments,
   htmlImageDataUrlsToAttachments,
@@ -1854,12 +1854,14 @@ export function App() {
     }
   }
 
-  function handleRetryMessage(messageId) {
+  async function restoreUserMessageToComposer(message) {
     if (!currentSession || page !== "chat") return;
-    const message = currentSession.messages.find((item) => item.id === messageId);
     if (!message || message.role !== "user" || isPlanRejectionMessage(message)) return;
 
-    const state = buildComposerRetryState(message);
+    const state = await buildComposerRestoreStateAsync(message, {
+      sessionId: currentSession.meta.id,
+      getSessionImage: window.cragent?.getSessionImage?.bind(window.cragent),
+    });
     setInput(state.text);
     setComposerCaret(state.text.length);
     setPendingImages(state.images);
@@ -1877,6 +1879,18 @@ export function App() {
       }
       resizeComposer();
     });
+  }
+
+  function handleRetryMessage(messageId) {
+    if (!currentSession || page !== "chat") return;
+    const message = currentSession.messages.find((item) => item.id === messageId);
+    void restoreUserMessageToComposer(message);
+  }
+
+  function handleCopyUserMessageToComposer(messageId) {
+    if (!currentSession || page !== "chat") return;
+    const message = currentSession.messages.find((item) => item.id === messageId);
+    void restoreUserMessageToComposer(message);
   }
 
   const chatWelcomeLayout = !active && !hasComposerDraft;
@@ -2055,6 +2069,7 @@ export function App() {
                   onRetry={handleRetryMessage}
                   onOpenImage={(image) => setViewerImage(image)}
                   onCopyImagesToComposer={addImagesFromDataUrls}
+                  onCopyUserMessageToComposer={handleCopyUserMessageToComposer}
                   onOpenPlanFile={(sessionId) => window.cragent.openPlanFile?.(sessionId)}
                 />
               ) : null}
