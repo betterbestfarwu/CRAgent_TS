@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ToolRegistry } from "../src/main/toolRegistry.js";
+import { createBuiltinTools } from "../src/main/tools/builtinTools.js";
 import { createWebSearchTools } from "../src/main/tools/webSearchTools.js";
 import {
     formatWebSearchToolResult,
@@ -141,5 +142,40 @@ describe("webSearchTools", () => {
             }),
         ).activeTools("session-1");
         assert.equal(disabled.some((tool) => tool.name === WEB_SEARCH_TOOL_NAME), false);
+    });
+});
+
+describe("web_fetch", () => {
+    it("fails quickly when the fetch request exceeds the configured timeout", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (_url, init = {}) =>
+            new Promise((_resolve, reject) => {
+                init.signal?.addEventListener("abort", () => {
+                    reject(new Error("aborted by test signal"));
+                });
+            });
+
+        try {
+            const [webFetch] = createBuiltinTools({
+                getAgentWorkspace: () => process.cwd(),
+                getDefaultWorkspace: () => process.cwd(),
+                workspaceMemory: { resolveMemoryPath: () => "", listSearchableMemoryFiles: () => [] },
+                skillLoader: { loadFullText: () => "" },
+                getAgentTools: () => ({ enable_tools: true, enable_file_tools: false }),
+                confirmToolExecution: async () => true,
+                getAuthMode: () => "fullAccess",
+                getShellRuntime: () => null,
+            }).filter((tool) => tool.name === "web_fetch");
+
+            await assert.rejects(
+                webFetch.execute(
+                    { url: "https://example.com/hangs" },
+                    { webFetchTimeoutMs: 20 },
+                ),
+                /web_fetch timed out after 20ms|aborted by test signal/,
+            );
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
     });
 });

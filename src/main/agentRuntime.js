@@ -113,6 +113,62 @@ import {
 
 const HOOK_LOG_LIMIT = 80;
 const SUB_AGENT_OUTPUTS_DIR = "sub-agent-outputs";
+const RISKY_INTERACTIVE_TOOL_NAMES = new Set([
+    "web_fetch",
+    "computer_action",
+    "computer_displays",
+    "computer_screenshot",
+    "computer_move",
+    "computer_click",
+    "computer_type",
+    "computer_key",
+    "computer_scroll",
+]);
+
+function messageText(message) {
+    const content = message?.content;
+    if (typeof content === "string") {
+        return content;
+    }
+    if (Array.isArray(content)) {
+        return content
+            .map((part) => {
+                if (typeof part === "string") {
+                    return part;
+                }
+                return part?.text || "";
+            })
+            .join("\n");
+    }
+    return "";
+}
+
+function latestUserText(session) {
+    for (let index = (session?.messages?.length || 0) - 1; index >= 0; index -= 1) {
+        const message = session.messages[index];
+        if (message?.role === "user") {
+            return messageText(message);
+        }
+    }
+    return "";
+}
+
+export function shouldExposeRiskyInteractiveTools(input) {
+    const text = String(input || "").toLowerCase();
+    if (!text.trim()) {
+        return true;
+    }
+    return /(\b(open\s+(app|chrome|safari|browser|url|website|webpage)|browse|click|type|desktop|screen|screenshot|browser|chrome|safari|fetch|url|http|website|webpage|search|google)\b|打开|浏览|点击|输入|屏幕|截图|浏览器|网页|网址|搜索|谷歌|访问)/i.test(
+        text,
+    );
+}
+
+export function filterToolsForLatestUserIntent(tools, input) {
+    if (shouldExposeRiskyInteractiveTools(input)) {
+        return tools;
+    }
+    return tools.filter((tool) => !RISKY_INTERACTIVE_TOOL_NAMES.has(tool.name));
+}
 
 export class AgentRuntime {
     constructor(
@@ -2077,6 +2133,10 @@ export class AgentRuntime {
                         toolSchemas = this.toolRegistry.schemas({
                             unlockedToolNames,
                             sessionId,
+                            tools: filterToolsForLatestUserIntent(
+                                this.toolRegistry.activeTools(sessionId),
+                                latestUserText(session),
+                            ),
                         });
                     }
                 }

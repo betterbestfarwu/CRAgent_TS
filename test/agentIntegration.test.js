@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { AgentRuntime } from "../src/main/agentRuntime.js";
+import {
+    AgentRuntime,
+    filterToolsForLatestUserIntent,
+} from "../src/main/agentRuntime.js";
 import { ConfigStore } from "../src/main/configStore.js";
 import { LlmClient } from "../src/main/llmClient.js";
 import { SessionStore } from "../src/main/sessionStore.js";
@@ -111,6 +114,9 @@ function makeRuntimeHarness(options = {}) {
     };
 
     const toolRegistry = new ToolRegistry(() => {
+        if (options.toolFactory) {
+            return options.toolFactory({ configStore, runtime });
+        }
         const meta = createMetaTools({
             getAgentTools: () => configStore.get().agents.list[0].tools,
             updateTodos: (sessionId, todos, merge, runId) =>
@@ -176,6 +182,97 @@ test("ConfigStore.resolveModelChain includes session model and configured fallba
         { providerKey: "openai", modelId: "gpt-4o-mini" },
         { providerKey: "openai", modelId: "gpt-5" },
     ]);
+});
+
+test("filterToolsForLatestUserIntent hides risky browsing tools for direct questions", () => {
+    const tools = [
+        { name: "read_file" },
+        { name: "web_fetch" },
+        { name: "computer_action" },
+        { name: "computer_click" },
+        { name: "web_search" },
+    ];
+
+    const filtered = filterToolsForLatestUserIntent(tools, "open design 收费吗");
+
+    assert.deepEqual(
+        filtered.map((tool) => tool.name),
+        ["read_file", "web_search"],
+    );
+});
+
+test("filterToolsForLatestUserIntent keeps risky tools when explicitly requested", () => {
+    const tools = [
+        { name: "read_file" },
+        { name: "web_fetch" },
+        { name: "computer_action" },
+        { name: "computer_click" },
+        { name: "web_search" },
+    ];
+
+    const filtered = filterToolsForLatestUserIntent(tools, "打开 Chrome 搜索 OpenDesign pricing");
+
+    assert.deepEqual(filtered.map((tool) => tool.name), [
+        "read_file",
+        "web_fetch",
+        "computer_action",
+        "computer_click",
+        "web_search",
+    ]);
+});
+
+test("runLoop omits risky interactive tools for direct questions", async () => {
+    const { runtime, session, llmCalls } = makeRuntimeHarness({
+        toolFactory: () => [
+            {
+                name: "read_file",
+                enabled: () => true,
+                schema: {
+                    type: "function",
+                    function: { name: "read_file", description: "Read file", parameters: {} },
+                },
+                execute: async () => "ok",
+            },
+            {
+                name: "web_fetch",
+                enabled: () => true,
+                schema: {
+                    type: "function",
+                    function: { name: "web_fetch", description: "Fetch URL", parameters: {} },
+                },
+                execute: async () => "ok",
+            },
+            {
+                name: "computer_action",
+                enabled: () => true,
+                schema: {
+                    type: "function",
+                    function: {
+                        name: "computer_action",
+                        description: "Use desktop",
+                        parameters: {},
+                    },
+                },
+                execute: async () => "ok",
+            },
+            {
+                name: "web_search",
+                enabled: () => true,
+                schema: {
+                    type: "function",
+                    function: { name: "web_search", description: "Search web", parameters: {} },
+                },
+                execute: async () => "ok",
+            },
+        ],
+    });
+
+    await runtime.sendUserMessage(session.meta.id, "open design 收费吗");
+
+    assert.deepEqual(
+        llmCalls[0].tools.map((tool) => tool.function.name),
+        ["read_file", "web_search"],
+    );
 });
 
 test("LlmClient retries fallback models when primary request fails", async () => {

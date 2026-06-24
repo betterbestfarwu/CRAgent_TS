@@ -19,6 +19,34 @@ import { truncateShellOutput } from "../shellOutputLimits.js";
 import { DEFAULT_MAX_RESULT_SIZE_CHARS } from "@shared/toolLimits.js";
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_WEB_FETCH_TIMEOUT_MS = 10_000;
+
+async function fetchWithTimeout(url, context = {}) {
+    const timeoutMs = Number(context.webFetchTimeoutMs ?? DEFAULT_WEB_FETCH_TIMEOUT_MS);
+    const controller = new AbortController();
+    const abortFromParent = () => controller.abort(context.signal?.reason);
+    if (context.signal?.aborted) {
+        abortFromParent();
+    } else {
+        context.signal?.addEventListener?.("abort", abortFromParent, { once: true });
+    }
+
+    let timeoutId;
+    try {
+        timeoutId = setTimeout(() => {
+            controller.abort(new Error(`web_fetch timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+        return await fetch(url, { signal: controller.signal });
+    } catch (error) {
+        if (controller.signal.aborted && controller.signal.reason instanceof Error) {
+            throw controller.signal.reason;
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+        context.signal?.removeEventListener?.("abort", abortFromParent);
+    }
+}
 
 function resolveToolFilePath(workspace, rawPath, context) {
     const sessionId = context?.sessionId;
@@ -293,7 +321,7 @@ export function createBuiltinTools({
                         throw new Error("user declined: web_fetch");
                     }
                 }
-                const response = await fetch(url);
+                const response = await fetchWithTimeout(url, context);
                 const text = await response.text();
                 return text.slice(0, 8000);
             },
