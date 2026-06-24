@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
     htmlImageDataUrlsToAttachments,
+    imageDataUrlsToAttachments,
     extractHtmlImageDataUrls,
 } from "../src/shared/chatImages.js";
 
@@ -27,6 +28,24 @@ describe("htmlImageDataUrlsToAttachments", () => {
     it("converts copied chat HTML images into composer attachments", () => {
         const attachments = htmlImageDataUrlsToAttachments(
             '<img src="data:image/png;base64,QUJD">',
+            { idFactory: () => "img-1" },
+        );
+
+        assert.deepEqual(attachments, [
+            {
+                id: "img-1",
+                mimeType: "image/png",
+                dataUrl: "data:image/png;base64,QUJD",
+                name: "pasted-image.png",
+            },
+        ]);
+    });
+});
+
+describe("imageDataUrlsToAttachments", () => {
+    it("converts copied session images into composer attachments", () => {
+        const attachments = imageDataUrlsToAttachments(
+            ["data:image/png;base64,QUJD"],
             { idFactory: () => "img-1" },
         );
 

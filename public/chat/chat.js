@@ -1920,14 +1920,20 @@
     var text = getCopyableTextFromBubble(bubbleEl);
     if (!navigator.clipboard || !window.ClipboardItem) {
       copyToClipboard(text);
-      return Promise.resolve();
+      return copyableHtmlFromBubble(bubbleEl).catch(function () {
+        return { html: '', imageDataUrls: [] };
+      });
     }
 
+    var copyPayload = { html: '', imageDataUrls: [] };
     return copyableHtmlFromBubble(bubbleEl)
       .then(function (payload) {
+        copyPayload = payload || copyPayload;
         var html = payload && payload.html ? payload.html : '';
         if (!html || html.indexOf('<img') < 0) {
-          return navigator.clipboard.writeText(text);
+          return navigator.clipboard.writeText(text).then(function () {
+            return copyPayload;
+          });
         }
         if (chatUi.buildRichClipboardItemData) {
           return chatUi.buildRichClipboardItemData({
@@ -1937,7 +1943,9 @@
           }).then(function (itemData) {
             return navigator.clipboard.write([
               new window.ClipboardItem(itemData),
-            ]);
+            ]).then(function () {
+              return copyPayload;
+            });
           });
         }
         return navigator.clipboard.write([
@@ -1945,11 +1953,20 @@
             'text/plain': new Blob([text], { type: 'text/plain' }),
             'text/html': new Blob([html], { type: 'text/html' }),
           }),
-        ]);
+        ]).then(function () {
+          return copyPayload;
+        });
       })
       .catch(function () {
         copyToClipboard(text);
+        return copyPayload;
       });
+  }
+
+  function notifyCopiedImagesToComposer(payload) {
+    var imageDataUrls = (payload && payload.imageDataUrls) || [];
+    if (!imageDataUrls.length) return;
+    notifyHost({ action: 'copyImagesToComposer', imageDataUrls: imageDataUrls });
   }
 
   document.addEventListener('click', function (e) {
@@ -2022,7 +2039,8 @@
       var group = btn.closest('.assistant-turn, .thinking-group-msg');
       var bubbleEl = group && group.querySelector('.bubble');
       if (bubbleEl) {
-        copyBubbleToClipboard(bubbleEl).then(function () {
+        copyBubbleToClipboard(bubbleEl).then(function (payload) {
+          notifyCopiedImagesToComposer(payload);
           flashCopied(btn, 3000);
         });
       }
@@ -2032,7 +2050,8 @@
     var id = btn.dataset.id;
     var msgEl = container.querySelector('.msg[data-id="' + id + '"] .bubble');
     if (action === 'copy' && msgEl) {
-      copyBubbleToClipboard(msgEl).then(function () {
+      copyBubbleToClipboard(msgEl).then(function (payload) {
+        notifyCopiedImagesToComposer(payload);
         flashCopied(btn, 3000);
       });
       return;

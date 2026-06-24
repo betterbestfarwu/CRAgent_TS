@@ -71,9 +71,14 @@ function pastedImageName(mimeType) {
 }
 
 export function htmlImageDataUrlsToAttachments(html, options = {}) {
+    return imageDataUrlsToAttachments(extractHtmlImageDataUrls(html), options);
+}
+
+export function imageDataUrlsToAttachments(dataUrls, options = {}) {
     const idFactory = options.idFactory || (() => crypto.randomUUID());
     const available = Math.max(0, MAX_CHAT_IMAGES - (options.existingCount || 0));
-    return extractHtmlImageDataUrls(html)
+    return (dataUrls || [])
+        .filter((dataUrl) => /^data:image\/[A-Za-z0-9.+-]+;base64,/i.test(String(dataUrl || "")))
         .slice(0, available)
         .map((dataUrl) => {
             const mimeType = mimeTypeFromDataUrl(dataUrl);

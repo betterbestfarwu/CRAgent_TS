@@ -64,6 +64,7 @@ import { buildComposerRetryState } from "@shared/composerRetry.js";
 import {
   filesToImageAttachments,
   htmlImageDataUrlsToAttachments,
+  imageDataUrlsToAttachments,
   toStoredImages,
 } from "@shared/chatImages";
 import { isPlanRejectionMessage } from "@shared/planMessages.js";
@@ -1256,6 +1257,21 @@ export function App() {
     }
   }
 
+  function addImagesFromDataUrls(dataUrls) {
+    const accepted = imageDataUrlsToAttachments(dataUrls, {
+      existingCount: pendingImages.length,
+    });
+    if (!accepted.length) return;
+    setPendingImages((prev) => [...prev, ...accepted]);
+    requestAnimationFrame(() => {
+      const editor = textareaRef.current;
+      if (editor) {
+        editor.focus();
+      }
+      resizeComposer();
+    });
+  }
+
   async function addFilesFromPicker(fileList) {
     const files = Array.from(fileList || []).filter(Boolean);
     if (!files.length) return;
@@ -2038,6 +2054,7 @@ export function App() {
                   onFork={handleForkMessage}
                   onRetry={handleRetryMessage}
                   onOpenImage={(image) => setViewerImage(image)}
+                  onCopyImagesToComposer={addImagesFromDataUrls}
                   onOpenPlanFile={(sessionId) => window.cragent.openPlanFile?.(sessionId)}
                 />
               ) : null}
