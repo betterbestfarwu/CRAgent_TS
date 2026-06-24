@@ -8,6 +8,7 @@ import {
     getCurrentInProgressTodo,
     sortTodosForDisplay,
     todoDisplayLabel,
+    resolveCopyableImageDataUrl,
 } from "@shared/chatUiUtils.js";
 
 describe("buildThinkingSummary", () => {
@@ -216,5 +217,40 @@ describe("todo display helpers", () => {
             { id: "2", content: "B", activeForm: "Building", status: "in_progress" },
         ]);
         assert.equal(current?.id, "2");
+    });
+});
+
+describe("resolveCopyableImageDataUrl", () => {
+    it("uses the host resolver for stored session images before fetch", async () => {
+        const calls = [];
+        const dataUrl = await resolveCopyableImageDataUrl(
+            {
+                imageSrc: "cragent-session://local/session-1/message-1-0.png",
+                messageId: "message-1",
+                imageIndex: 0,
+                mimeType: "image/png",
+            },
+            {
+                sessionId: "session-1",
+                resolver: async (payload) => {
+                    calls.push(payload);
+                    return { dataUrl: "data:image/png;base64,QUJD" };
+                },
+                fetchImageDataUrl: async () => {
+                    throw new Error("should not fetch session image URLs");
+                },
+            },
+        );
+
+        assert.equal(dataUrl, "data:image/png;base64,QUJD");
+        assert.deepEqual(calls, [
+            {
+                sessionId: "session-1",
+                messageId: "message-1",
+                imageIndex: 0,
+                imageFile: "message-1-0.png",
+                mimeType: "image/png",
+            },
+        ]);
     });
 });

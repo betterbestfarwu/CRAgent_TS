@@ -437,3 +437,72 @@ export function todoDisplayLabel(item) {
 export function getCurrentInProgressTodo(todos) {
     return sortTodosForDisplay(todos).find((item) => item.status === "in_progress") || null;
 }
+
+function parseSessionImageUrl(url) {
+    try {
+        const parsed = new URL(String(url || ""));
+        if (parsed.protocol !== "cragent-session:" || parsed.hostname !== "local") {
+            return null;
+        }
+        const parts = parsed.pathname.split("/").filter(Boolean);
+        if (parts.length !== 2) {
+            return null;
+        }
+        return {
+            sessionId: decodeURIComponent(parts[0]),
+            imageFile: decodeURIComponent(parts[1]),
+        };
+    } catch {
+        return null;
+    }
+}
+
+function normalizeResolvedDataUrl(result) {
+    if (typeof result === "string") {
+        return result;
+    }
+    return result?.dataUrl || result?.data_url || "";
+}
+
+export async function resolveCopyableImageDataUrl(image, options = {}) {
+    const directDataUrl = String(image?.dataUrl || image?.data_url || "").trim();
+    if (directDataUrl.startsWith("data:")) {
+        return directDataUrl;
+    }
+
+    const imageSrc = String(image?.imageSrc || image?.image_src || image?.currentSrc || image?.src || "").trim();
+    const parsed = parseSessionImageUrl(imageSrc);
+    const imageFile = String(image?.imageFile || image?.image_file || parsed?.imageFile || "").trim();
+    const sessionId = String(image?.sessionId || image?.session_id || parsed?.sessionId || options.sessionId || "").trim();
+    const messageId = String(image?.messageId || image?.message_id || "").trim();
+    const mimeType = String(image?.mimeType || image?.mime_type || "").trim();
+    const rawIndex = image?.imageIndex ?? image?.image_index ?? image?.index;
+    const imageIndex = Math.max(0, Number(rawIndex) || 0);
+
+    if ((imageFile || parsed) && typeof options.resolver === "function") {
+        try {
+            const resolved = await options.resolver({
+                sessionId,
+                messageId,
+                imageIndex,
+                imageFile,
+                mimeType,
+            });
+            const dataUrl = normalizeResolvedDataUrl(resolved);
+            if (dataUrl) {
+                return dataUrl;
+            }
+        } catch {
+            // Fall through to fetch for non-session URLs; session URLs are not fetchable.
+        }
+    }
+
+    if (parsed) {
+        return "";
+    }
+
+    if (typeof options.fetchImageDataUrl === "function") {
+        return options.fetchImageDataUrl(imageSrc);
+    }
+    return "";
+}

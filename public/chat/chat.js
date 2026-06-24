@@ -667,7 +667,26 @@
       return Promise.resolve('<div>' + clone.innerHTML + '</div>');
     }
 
+    var messageHost = bubbleEl.closest && bubbleEl.closest('.msg[data-id]');
+    var messageId = messageHost ? messageHost.dataset.id || '' : '';
     return Promise.all(sourceImages.map(function (img) {
+      if (chatUi.resolveCopyableImageDataUrl) {
+        return chatUi.resolveCopyableImageDataUrl({
+          dataUrl: img.dataset.dataUrl || '',
+          imageSrc: img.dataset.imageSrc || '',
+          imageFile: img.dataset.imageFile || '',
+          currentSrc: img.currentSrc || '',
+          src: img.src || '',
+          sessionId: currentSessionId,
+          messageId: messageId,
+          imageIndex: img.dataset.index || 0,
+          mimeType: img.dataset.mimeType || '',
+        }, {
+          sessionId: currentSessionId,
+          resolver: window.cragentResolveSessionImage,
+          fetchImageDataUrl: fetchImageDataUrl,
+        });
+      }
       return fetchImageDataUrl(
         img.dataset.dataUrl ||
           img.dataset.imageSrc ||
@@ -1255,6 +1274,9 @@
         }
         if (image.image_src) {
           img.dataset.imageSrc = image.image_src;
+        }
+        if (image.image_file) {
+          img.dataset.imageFile = image.image_file;
         }
         if (resolved.blobUrl) {
           img.dataset.blobUrl = resolved.blobUrl;

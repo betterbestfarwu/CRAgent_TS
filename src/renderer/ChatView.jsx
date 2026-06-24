@@ -191,14 +191,26 @@ export function ChatView({
     applyChatFontScaleToDocument(iframeDoc, chatFontScale);
   }, [chatFontScale]);
 
+  const syncIframeImageResolver = useCallback(() => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    win.cragentResolveSessionImage = async (payload) => {
+      if (!window.cragent?.getSessionImage) {
+        throw new Error("图片解析器不可用");
+      }
+      return window.cragent.getSessionImage(payload);
+    };
+  }, []);
+
   const postToChat = useCallback((fn, arg) => {
     const win = iframeRef.current?.contentWindow;
     if (!win?.app) {
       pendingRef.current.push(() => postToChat(fn, arg));
       return;
     }
+    syncIframeImageResolver();
     win.app[fn](arg);
-  }, []);
+  }, [syncIframeImageResolver]);
 
   const syncMessages = useCallback(() => {
     const nextSessionId = sessionId || "";
@@ -276,6 +288,7 @@ export function ChatView({
         readyRef.current = true;
         syncedSessionIdRef.current = "";
         syncIframeLayout();
+        syncIframeImageResolver();
         postToChat("setSessionModel", sessionModelId || "");
         postToChat("setVerboseThinking", verboseThinkingRef.current);
         postToChat("setPlanContext", planContextRef.current || { active: false });
@@ -319,7 +332,7 @@ export function ChatView({
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [busy, onDelete, onFork, onRetry, onOpenImage, onOpenPlanFile, postToChat, syncIframeLayout, syncMessages]);
+  }, [busy, onDelete, onFork, onRetry, onOpenImage, onOpenPlanFile, postToChat, syncIframeImageResolver, syncIframeLayout, syncMessages]);
 
   useEffect(() => {
     if (!readyRef.current) return;
