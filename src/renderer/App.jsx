@@ -2572,6 +2572,7 @@ export function App() {
                     selectedProjectId={currentSession?.meta?.projectId ?? null}
                     displayLabel={composerProjectLabel}
                     onSelectProject={(projectId) => void handleNewChat(projectId ?? null)}
+                    onClose={() => focusPrimaryComposerEnd()}
                     onAddProject={async () => {
                       const directoryPath = await window.cragent.pickProjectDirectory?.();
                       if (!directoryPath) return;

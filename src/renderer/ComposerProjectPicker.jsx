@@ -53,12 +53,14 @@ export function ComposerProjectPicker({
   displayLabel,
   onSelectProject,
   onAddProject,
+  onClose,
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [highlightIndex, setHighlightIndex] = useState(0);
   const wrapRef = useRef(null);
   const searchRef = useRef(null);
+  const closeFocusFrameRef = useRef(null);
 
   const filteredProjects = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -93,23 +95,43 @@ export function ComposerProjectPicker({
     }
   }, [highlightIndex, menuItems.length]);
 
-  useOutsidePointerDown(open, [wrapRef], () => setOpen(false));
+  useEffect(() => {
+    return () => {
+      if (closeFocusFrameRef.current) {
+        cancelAnimationFrame(closeFocusFrameRef.current);
+      }
+    };
+  }, []);
+
+  function closeMenu({ restoreFocus = true } = {}) {
+    setOpen(false);
+    if (!restoreFocus) return;
+    if (closeFocusFrameRef.current) {
+      cancelAnimationFrame(closeFocusFrameRef.current);
+    }
+    closeFocusFrameRef.current = requestAnimationFrame(() => {
+      closeFocusFrameRef.current = null;
+      onClose?.();
+    });
+  }
+
+  useOutsidePointerDown(open, [wrapRef], () => closeMenu());
 
   function activateItem(item) {
     if (!item) return;
     if (item.kind === "project") {
       onSelectProject?.(item.project.id);
-      setOpen(false);
+      closeMenu();
       return;
     }
     if (item.kind === "add") {
-      setOpen(false);
+      closeMenu();
       void onAddProject?.();
       return;
     }
     if (item.kind === "none") {
       onSelectProject?.(null);
-      setOpen(false);
+      closeMenu();
     }
   }
 
@@ -123,7 +145,7 @@ export function ComposerProjectPicker({
   function handleSearchKeyDown(event) {
     if (event.key === "Escape") {
       event.preventDefault();
-      setOpen(false);
+      closeMenu();
       return;
     }
     if (event.key === "ArrowDown") {
@@ -233,7 +255,13 @@ export function ComposerProjectPicker({
         className="composer-project-bar"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => {
+          if (open) {
+            closeMenu();
+            return;
+          }
+          setOpen(true);
+        }}
         onKeyDown={handleTriggerKeyDown}
       >
         <span className="composer-project-bar-icon" aria-hidden="true">
