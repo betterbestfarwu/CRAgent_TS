@@ -919,6 +919,55 @@ test("messagesForLLM injects session memory when present", () => {
     );
 });
 
+test("messagesForLLM skips duplicate session memory when it matches context summary", () => {
+    const { session, runtime, sessionStore } = makeRuntimeHarness();
+    session.meta.contextSummary = '<section name="current_work">same summary</section>';
+    session.meta.sessionMemory = session.meta.contextSummary;
+    sessionStore.save(session);
+
+    const messages = runtime.messagesForLLM(sessionStore.get(session.meta.id));
+
+    assert.equal(
+        messages.filter((message) => message.content?.includes("<conversation_summary>")).length,
+        1,
+    );
+    assert.equal(
+        messages.filter((message) => message.content?.includes("<session_memory>")).length,
+        0,
+    );
+});
+
+test("refreshSessionMemory clears busy flag when model returns empty memory", async () => {
+    const { session, runtime, sessionStore } = makeRuntimeHarness({
+        completeImpl: () => ({
+            message: {
+                id: "empty-memory",
+                role: "assistant",
+                content: "<memory></memory>",
+                createdAt: new Date().toISOString(),
+            },
+        }),
+    });
+    sessionStore.appendMessage(session.meta.id, {
+        id: "memory-user",
+        role: "user",
+        content: "remember this request",
+        createdAt: new Date().toISOString(),
+    });
+    sessionStore.appendMessage(session.meta.id, {
+        id: "memory-assistant",
+        role: "assistant",
+        content: "large answer ".repeat(400),
+        createdAt: new Date().toISOString(),
+    });
+
+    await runtime.refreshSessionMemory(session.meta.id);
+
+    const updated = sessionStore.get(session.meta.id);
+    assert.equal(updated.meta.sessionMemoryRefreshBusy, undefined);
+    assert.equal(updated.meta.sessionMemory, undefined);
+});
+
 test("runLoop compacts and retries after context overflow error", async () => {
     let chatCount = 0;
     const { session, runtime, events, sessionStore } = makeRuntimeHarness({

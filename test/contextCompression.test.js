@@ -464,6 +464,31 @@ test("estimateSessionContextUsage counts summary and active messages", () => {
     assert.equal(usage.contextWindow, 128_000);
 });
 
+test("estimateSessionContextUsage does not double count identical summary and session memory", () => {
+    const session = {
+        meta: {
+            llmContextFromIndex: 0,
+            contextSummary: "same compacted memory",
+            sessionMemory: "same compacted memory",
+        },
+        messages: [{ role: "user", content: "active message" }],
+    };
+
+    const usage = estimateSessionContextUsage(session, { contextWindow: 128_000, maxTokens: 8192 });
+    const baseline = estimateSessionContextUsage(
+        {
+            meta: {
+                llmContextFromIndex: 0,
+                contextSummary: "same compacted memory",
+            },
+            messages: session.messages,
+        },
+        { contextWindow: 128_000, maxTokens: 8192 },
+    );
+
+    assert.equal(usage.tokens, baseline.tokens);
+});
+
 test("estimateSessionContextBreakdown keeps non-negative categories aligned to total", () => {
     const session = {
         meta: { llmContextFromIndex: 0, todos: [{ id: "1", status: "pending", content: "task" }] },

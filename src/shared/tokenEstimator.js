@@ -43,6 +43,10 @@ export function estimateMessagesTokens(messages) {
     return messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 }
 
+function shouldCountSessionMemory(meta = {}) {
+    return Boolean(meta.sessionMemory && meta.sessionMemory !== meta.contextSummary);
+}
+
 export function calculateAutoCompactThreshold(model, options = {}) {
     const contextWindow = Math.max(0, finiteNumber(model?.contextWindow, 0));
     if (!contextWindow) {
@@ -89,7 +93,7 @@ export function estimateSessionContextUsage(session, model, options = {}) {
     if (session.meta.postCompactContext) {
         tokens += estimateTextTokens(session.meta.postCompactContext);
     }
-    if (session.meta.sessionMemory) {
+    if (shouldCountSessionMemory(session.meta)) {
         tokens += estimateTextTokens(session.meta.sessionMemory);
     }
     tokens += bootstrapOverhead;
@@ -243,7 +247,7 @@ export function estimateSessionContextBreakdown(session, model, options = {}) {
     if (session.meta.postCompactContext) {
         conversationTokens += estimateTextTokens(session.meta.postCompactContext);
     }
-    if (session.meta.sessionMemory) {
+    if (shouldCountSessionMemory(session.meta)) {
         conversationTokens += estimateTextTokens(session.meta.sessionMemory);
     }
 

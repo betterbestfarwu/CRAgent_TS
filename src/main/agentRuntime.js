@@ -507,7 +507,10 @@ export class AgentRuntime {
                 createdAt: new Date().toISOString(),
             });
         }
-        if (session.meta.sessionMemory) {
+        if (
+            session.meta.sessionMemory &&
+            session.meta.sessionMemory !== session.meta.contextSummary
+        ) {
             messages.push({
                 id: randomUUID(),
                 role: "user",
@@ -1796,6 +1799,7 @@ export class AgentRuntime {
 
         session.meta.sessionMemoryRefreshBusy = true;
         this.sessionStore.save(session);
+        let memoryUpdated = false;
 
         try {
             const pendingMessages = getPendingMemoryMessages(session);
@@ -1812,32 +1816,32 @@ export class AgentRuntime {
                 ],
             });
             const memory = formatSessionMemory(choice.message.content || "");
-            if (!memory) {
-                return;
+            if (memory) {
+                session = this.sessionStore.get(sessionId);
+                let lastIndex = session.messages.length - 1;
+                while (lastIndex >= 0 && isContextDividerMessage(session.messages[lastIndex])) {
+                    lastIndex -= 1;
+                }
+                session.meta.sessionMemory = memory;
+                session.meta.sessionMemoryUpToIndex = Math.max(
+                    getActiveLlmContextStartIndex(session),
+                    lastIndex,
+                );
+                session.meta.sessionMemoryUpdatedAt = new Date().toISOString();
+                memoryUpdated = true;
             }
-
-            session = this.sessionStore.get(sessionId);
-            let lastIndex = session.messages.length - 1;
-            while (lastIndex >= 0 && isContextDividerMessage(session.messages[lastIndex])) {
-                lastIndex -= 1;
-            }
-            session.meta.sessionMemory = memory;
-            session.meta.sessionMemoryUpToIndex = Math.max(
-                getActiveLlmContextStartIndex(session),
-                lastIndex,
-            );
-            session.meta.sessionMemoryUpdatedAt = new Date().toISOString();
-            delete session.meta.sessionMemoryRefreshBusy;
-            this.sessionStore.save(session);
-            this.emit(IPC_CHANNELS.onSessionChanged, session);
-            this.emitContextWarning(session);
         } catch (error) {
             console.warn(
                 `[CRAgent] session memory refresh failed: ${error instanceof Error ? error.message : String(error)}`,
             );
+        } finally {
             session = this.sessionStore.get(sessionId);
             delete session.meta.sessionMemoryRefreshBusy;
             this.sessionStore.save(session);
+            this.emit(IPC_CHANNELS.onSessionChanged, session);
+            if (memoryUpdated) {
+                this.emitContextWarning(session);
+            }
         }
     }
 
