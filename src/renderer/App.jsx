@@ -89,6 +89,13 @@ import {
   readStoredColorScheme,
   toggleColorScheme,
 } from "@shared/colorScheme.js";
+import {
+  applyChatFontScale,
+  chatFontScaleKeyAction,
+  nextChatFontScaleFromAction,
+  readStoredChatFontScale,
+  storeChatFontScale,
+} from "@shared/chatFontScale.js";
 
 const COMPOSER_LINE_HEIGHT = 24;
 const COMPOSER_MIN_HEIGHT = COMPOSER_LINE_HEIGHT;
@@ -126,6 +133,7 @@ function sessionMessagesEqual(left, right) {
 
 export function App() {
   const [colorScheme, setColorScheme] = useState(() => getEffectiveColorScheme());
+  const [chatFontScale, setChatFontScale] = useState(() => readStoredChatFontScale());
   const [projects, setProjects] = useState([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState([]);
   const [focusedProjectId, setFocusedProjectId] = useState(null);
@@ -189,6 +197,29 @@ export function App() {
       setConfirmRequest({ ...options, resolve });
     });
   }, []);
+
+  const handleFontScaleAction = useCallback((action) => {
+    setChatFontScale((previous) => {
+      const next = nextChatFontScaleFromAction(previous, action);
+      storeChatFontScale(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    applyChatFontScale(chatFontScale);
+  }, [chatFontScale]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      const action = chatFontScaleKeyAction(event);
+      if (!action) return;
+      event.preventDefault();
+      handleFontScaleAction(action);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleFontScaleAction]);
 
   useEffect(() => {
     sidebarWidthRef.current = sidebarWidth;
@@ -2064,6 +2095,8 @@ export function App() {
                   busy={busy}
                   verboseThinking={verboseThinking}
                   planContext={planContext}
+                  chatFontScale={chatFontScale}
+                  onFontScaleAction={handleFontScaleAction}
                   onDelete={handleDeleteMessage}
                   onFork={handleForkMessage}
                   onRetry={handleRetryMessage}

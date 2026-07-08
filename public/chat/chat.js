@@ -2089,6 +2089,18 @@
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeMermaidModal();
+    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault();
+        notifyHost({ action: 'fontScale', direction: 'in' });
+      } else if (e.key === '-') {
+        e.preventDefault();
+        notifyHost({ action: 'fontScale', direction: 'out' });
+      } else if (e.key === '0') {
+        e.preventDefault();
+        notifyHost({ action: 'fontScale', direction: 'reset' });
+      }
+    }
   });
 
   container.addEventListener('toggle', function (e) {

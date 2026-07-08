@@ -43,6 +43,35 @@ export function applyChatFontScaleToDocument(doc, scale) {
   root.style.zoom = String(clampChatFontScale(scale));
 }
 
+export function syncChatFontScaleToChatFrames(scale = readStoredChatFontScale()) {
+  document.querySelectorAll("iframe.chat-frame").forEach((frame) => {
+    applyChatFontScaleToDocument(frame.contentDocument, scale);
+  });
+}
+
+export function applyChatFontScale(scale = readStoredChatFontScale()) {
+  const clamped = clampChatFontScale(scale);
+  applyChatFontScaleToDocument(document, clamped);
+  syncChatFontScaleToChatFrames(clamped);
+}
+
+export function initChatFontScale() {
+  const scale = readStoredChatFontScale();
+  applyChatFontScale(scale);
+  return scale;
+}
+
+/**
+ * @param {number} current
+ * @param {"in" | "out" | "reset"} action
+ */
+export function nextChatFontScaleFromAction(current, action) {
+  if (action === "reset") {
+    return CHAT_FONT_SCALE_DEFAULT;
+  }
+  return adjustChatFontScale(current, action === "in" ? 1 : -1);
+}
+
 /**
  * @param {{ key?: string, ctrlKey?: boolean, metaKey?: boolean, altKey?: boolean } | null | undefined} event
  * @returns {"in" | "out" | "reset" | null}

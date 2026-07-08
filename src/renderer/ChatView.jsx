@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { formatAtMentionsForDisplay } from "@shared/atMention.js";
 import {
   appendedMessagesNeedFullRender,
@@ -13,12 +13,8 @@ import {
 } from "@shared/planMessages.js";
 import { resolveSessionImageWireFields } from "@shared/sessionImageUrl.js";
 import {
-  adjustChatFontScale,
   applyChatFontScaleToDocument,
-  chatFontScaleKeyAction,
-  CHAT_FONT_SCALE_DEFAULT,
   readStoredChatFontScale,
-  storeChatFontScale,
 } from "@shared/chatFontScale.js";
 import { injectChatLayout } from "./chatLayoutSync.js";
 import { FRAME_POINTER_DOWN_EVENT } from "./useOutsidePointerDown.js";
@@ -171,6 +167,8 @@ export function ChatView({
   onCopyImagesToComposer,
   onCopyUserMessageToComposer,
   onOpenPlanFile,
+  chatFontScale = readStoredChatFontScale(),
+  onFontScaleAction,
 }) {
   const iframeRef = useRef(null);
   const readyRef = useRef(false);
@@ -181,7 +179,6 @@ export function ChatView({
   const syncedSessionIdRef = useRef("");
   const verboseThinkingRef = useRef(verboseThinking);
   const planContextRef = useRef(planContext);
-  const [chatFontScale, setChatFontScale] = useState(readStoredChatFontScale);
   messagesRef.current = messages;
   todoRunsRef.current = todoRuns;
   verboseThinkingRef.current = verboseThinking;
@@ -338,11 +335,18 @@ export function ChatView({
       if (data.action === "openPlan" && data.sessionId) {
         void onOpenPlanFile?.(data.sessionId);
       }
+
+      if (
+        data.action === "fontScale" &&
+        (data.direction === "in" || data.direction === "out" || data.direction === "reset")
+      ) {
+        onFontScaleAction?.(data.direction);
+      }
     };
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [busy, onDelete, onFork, onRetry, onOpenImage, onCopyImagesToComposer, onCopyUserMessageToComposer, onOpenPlanFile, postToChat, syncIframeImageResolver, syncIframeLayout, syncMessages]);
+  }, [busy, onDelete, onFork, onRetry, onOpenImage, onCopyImagesToComposer, onCopyUserMessageToComposer, onOpenPlanFile, onFontScaleAction, postToChat, syncIframeImageResolver, syncIframeLayout, syncMessages]);
 
   useEffect(() => {
     if (!readyRef.current) return;
@@ -375,24 +379,6 @@ export function ChatView({
       postToChat("setFontScale", chatFontScale);
     }
   }, [chatFontScale, postToChat]);
-
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      const action = chatFontScaleKeyAction(event);
-      if (!action) return;
-      event.preventDefault();
-      setChatFontScale((previous) => {
-        const next =
-          action === "reset"
-            ? CHAT_FONT_SCALE_DEFAULT
-            : adjustChatFontScale(previous, action === "in" ? 1 : -1);
-        storeChatFontScale(next);
-        return next;
-      });
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   return (
     <iframe

@@ -1,11 +1,13 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { initChatFontScale } from "@shared/chatFontScale.js";
 import { initColorScheme } from "@shared/colorScheme.js";
 import { App } from "./App.jsx";
 import "./styles.css";
 
 async function bootstrap() {
   initColorScheme();
+  initChatFontScale();
   const rootEl = document.getElementById("root");
   if (!rootEl) {
     throw new Error("root element not found");
